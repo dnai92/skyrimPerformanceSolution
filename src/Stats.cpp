@@ -9,9 +9,11 @@ namespace Stats
 		constexpr auto        kReportInterval = 10s;
 		constexpr double      kMaxFrameMs = 1000.0;  // laengere Luecken = Ladebildschirm/Pause -> verwerfen
 		constexpr std::size_t kZoneCount = static_cast<std::size_t>(Zone::kTotal);
+		constexpr std::size_t kCounterCount = static_cast<std::size_t>(Counter::kTotal);
 
 		// Laufende Summen des aktuellen Frames (Actor-Updates koennen auf Worker-Threads laufen)
 		std::array<std::atomic<std::int64_t>, kZoneCount> g_frameNs{};
+		std::array<std::atomic<std::uint32_t>, kCounterCount> g_frameCounters{};
 		std::atomic<std::uint32_t>                        g_frameNpcCount{ 0 };
 		std::atomic<std::uint32_t>                        g_overstressed{ 0 };
 		std::atomic<std::uint32_t>                        g_cellLoads{ 0 };
@@ -21,6 +23,7 @@ namespace Stats
 		clock::time_point                        g_windowStart{};
 		std::vector<double>                      g_frameMs;
 		std::array<std::vector<double>, kZoneCount> g_zoneMs;
+		std::array<std::vector<double>, kCounterCount> g_counterValues;
 		std::uint64_t                            g_npcUpdatesInWindow{ 0 };
 		std::filesystem::path                    g_csvPath;
 
@@ -54,6 +57,9 @@ namespace Stats
 			for (auto& ns : g_frameNs) {
 				ns.store(0, std::memory_order_relaxed);
 			}
+			for (auto& c : g_frameCounters) {
+				c.store(0, std::memory_order_relaxed);
+			}
 			g_frameNpcCount.store(0, std::memory_order_relaxed);
 		}
 
@@ -84,6 +90,12 @@ namespace Stats
 				csv << std::format(",{:.3f},{:.3f},{:.3f}", z.avg, z.p99, z.max);
 				g_zoneMs[i].clear();
 			}
+			for (std::size_t i = 0; i < kCounterCount; ++i) {
+				const auto c = Summarize(g_counterValues[i]);
+				logger::info("     {:<20} avg {:7.0f} /Frame  p99 {:7.0f}  max {:7.0f}", kCounterNames[i], c.avg, c.p99, c.max);
+				csv << std::format(",{:.0f},{:.0f},{:.0f}", c.avg, c.p99, c.max);
+				g_counterValues[i].clear();
+			}
 			csv << '\n';
 
 			g_frameMs.clear();
@@ -106,8 +118,17 @@ namespace Stats
 			std::erase(col, ':');
 			csv << std::format(",{0}_avg_ms,{0}_p99_ms,{0}_max_ms", col);
 		}
+		for (const auto name : kCounterNames) {
+			std::string col{ name };
+			std::ranges::replace(col, ' ', '_');
+			std::ranges::replace(col, '-', '_');
+			csv << std::format(",{0}_avg,{0}_p99,{0}_max", col);
+		}
 		csv << '\n';
 
+		for (auto& v : g_counterValues) {
+			v.reserve(2048);
+		}
 		for (auto& v : g_zoneMs) {
 			v.reserve(2048);
 		}
@@ -117,6 +138,11 @@ namespace Stats
 	void Add(Zone a_zone, std::int64_t a_ns) noexcept
 	{
 		g_frameNs[static_cast<std::size_t>(a_zone)].fetch_add(a_ns, std::memory_order_relaxed);
+	}
+
+	void Count(Counter a_counter) noexcept
+	{
+		g_frameCounters[static_cast<std::size_t>(a_counter)].fetch_add(1, std::memory_order_relaxed);
 	}
 
 	void CountNpcUpdate() noexcept { g_frameNpcCount.fetch_add(1, std::memory_order_relaxed); }
@@ -141,6 +167,11 @@ namespace Stats
 				g_frameMs.push_back(frameMs);
 				for (std::size_t i = 0; i < kZoneCount; ++i) {
 					g_zoneMs[i].push_back(static_cast<double>(g_frameNs[i].load(std::memory_order_relaxed)) / 1'000'000.0);
+				}
+				for (std::size_t i = 0; i < kCounterCount; ++i) {
+					const auto v = g_frameCounters[i].load(std::memory_order_relaxed);
+					g_counterValues[i].push_back(static_cast<double>(v));
+					TracyPlot(kCounterNames[i], static_cast<std::int64_t>(v));
 				}
 				g_npcUpdatesInWindow += g_frameNpcCount.load(std::memory_order_relaxed);
 			} catch (...) {

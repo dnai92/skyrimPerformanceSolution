@@ -1,4 +1,5 @@
 #include "Hooks.h"
+#include "RenderHooks.h"
 #include "Stats.h"
 
 namespace
@@ -7,6 +8,7 @@ namespace
 	{
 		if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
+			RenderHooks::Install();
 		}
 	}
 }

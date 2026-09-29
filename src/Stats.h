@@ -21,9 +21,26 @@ namespace Stats
 		"Player Update",
 	};
 
+	// Zaehler pro Frame (Render-Aufrufe)
+	enum class Counter : std::size_t
+	{
+		ColorDraws,      // Draws mit Render-Target (Hauptszene, UI, Post-Processing)
+		DepthOnlyDraws,  // Draws nur mit Depth-Buffer (Shadow-Maps, Prepass, Occlusion)
+		Dispatches,      // Compute-Shader (v. a. Community Shaders)
+
+		kTotal
+	};
+
+	inline constexpr std::array<const char*, static_cast<std::size_t>(Counter::kTotal)> kCounterNames{
+		"Draws Farbe",
+		"Draws Depth-only",
+		"Dispatches",
+	};
+
 	void Init();
 
 	void Add(Zone a_zone, std::int64_t a_ns) noexcept;
+	void Count(Counter a_counter) noexcept;
 	void CountNpcUpdate() noexcept;
 	void OnOverstressed() noexcept;
 	void OnCellLoaded() noexcept;

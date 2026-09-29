@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SkyrimPerf
-	VERSION 0.1.0
+	VERSION 0.2.0
 	LANGUAGES CXX
 )
 
@@ -23,6 +23,7 @@ add_commonlibsse_plugin(
 	SOURCES
 		src/main.cpp
 		src/Hooks.cpp
+		src/RenderHooks.cpp
 		src/Stats.cpp
 		extern/tracy/public/TracyClient.cpp
 )
