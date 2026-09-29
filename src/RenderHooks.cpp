@@ -154,12 +154,84 @@ namespace RenderHooks
 		};
 	}
 
+	namespace
+	{
+		// Literale statt REX::W32-Konstanten: MEM_COMMIT/PAGE_NOACCESS sind ggf. als Windows-Makros definiert
+		constexpr std::uint32_t kMemImage = 0x1000000;  // MEM_IMAGE
+		constexpr std::uint32_t kMemCommit = 0x1000;    // MEM_COMMIT
+		constexpr std::uint32_t kPageNoAccess = 0x01;   // PAGE_NOACCESS
+
+		bool IsReadable(const void* a_ptr, std::size_t a_size) noexcept
+		{
+			REX::W32::MEMORY_BASIC_INFORMATION mbi{};
+			if (!a_ptr || REX::W32::VirtualQuery(a_ptr, &mbi, sizeof(mbi)) == 0) {
+				return false;
+			}
+			const auto end = static_cast<const std::byte*>(mbi.baseAddress) + mbi.regionSize;
+			return mbi.state == kMemCommit && !(mbi.protect & kPageNoAccess) && static_cast<const std::byte*>(a_ptr) + a_size <= end;
+		}
+
+		bool IsInModuleImage(const void* a_ptr) noexcept
+		{
+			REX::W32::MEMORY_BASIC_INFORMATION mbi{};
+			return a_ptr && REX::W32::VirtualQuery(a_ptr, &mbi, sizeof(mbi)) != 0 && mbi.type == kMemImage;
+		}
+
+		// Prueft, ob a_obj ein COM-Objekt mit dem Interface a_iid ist, BEVOR irgendeine virtuelle Methode
+		// aufgerufen wird: Objekt lesbar, vtable und QueryInterface liegen in einem geladenen Modul.
+		bool IsComObject(void* a_obj, const REX::W32::IID& a_iid, const char* a_what)
+		{
+			if (!IsReadable(a_obj, sizeof(void*))) {
+				logger::warn("{} {:p}: nicht lesbar", a_what, a_obj);
+				return false;
+			}
+			const auto vtbl = *static_cast<std::uintptr_t**>(a_obj);
+			if (!IsInModuleImage(vtbl) || !IsReadable(vtbl, sizeof(std::uintptr_t) * (kDispatch + 1)) || !IsInModuleImage(reinterpret_cast<void*>(vtbl[0]))) {
+				logger::warn("{} {:p}: vtable {:p} liegt in keinem Modul -> kein COM-Objekt", a_what, a_obj, static_cast<void*>(vtbl));
+				return false;
+			}
+			void* out = nullptr;
+			const auto unk = static_cast<REX::W32::IUnknown*>(a_obj);
+			if (unk->QueryInterface(a_iid, &out) < 0 || !out) {
+				logger::warn("{} {:p}: QueryInterface abgelehnt", a_what, a_obj);
+				return false;
+			}
+			static_cast<REX::W32::IUnknown*>(out)->Release();
+			return true;
+		}
+
+		REX::W32::ID3D11DeviceContext* FindGameContext()
+		{
+			// 1) Kontext aus dem Renderer-Singleton (RendererData ab Renderer+0x10)
+			if (const auto renderer = RE::BSGraphics::Renderer::GetSingleton()) {
+				const auto ctx = renderer->GetRuntimeData().context;
+				if (IsComObject(ctx, REX::W32::IID_ID3D11DeviceContext, "Renderer.context")) {
+					logger::info("D3D11-Context aus Renderer-Singleton");
+					return ctx;
+				}
+			}
+			// 2) Immediate-Context ueber das Device
+			const auto device = RE::BSGraphics::Renderer::GetDevice();
+			if (IsComObject(device, REX::W32::IID_ID3D11Device, "Device")) {
+				REX::W32::ID3D11DeviceContext* ctx = nullptr;
+				device->GetImmediateContext(&ctx);
+				if (ctx) {
+					ctx->Release();  // GetImmediateContext zaehlt hoch; das Device haelt den Context am Leben
+					if (IsComObject(ctx, REX::W32::IID_ID3D11DeviceContext, "Device.ImmediateContext")) {
+						logger::info("D3D11-Context ueber Device::GetImmediateContext");
+						return ctx;
+					}
+				}
+			}
+			return nullptr;
+		}
+	}
+
 	void Install()
 	{
-		const auto data = RE::BSGraphics::Renderer::GetRendererDataSingleton();
-		const auto ctx = data ? data->context : nullptr;
+		const auto ctx = FindGameContext();
 		if (!ctx) {
-			logger::warn("D3D11-Context nicht verfuegbar - Draw-Call-Zaehlung deaktiviert");
+			logger::warn("Kein gueltiger D3D11-Context gefunden - Draw-Call-Zaehlung deaktiviert, nichts gepatcht");
 			return;
 		}
 
