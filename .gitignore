@@ -1,3 +1,7 @@
 build/
 dist/
 build.log
+traces/
+*.tracy
+tools/sampling-export/build/
+tools/sampling-export/build.log
