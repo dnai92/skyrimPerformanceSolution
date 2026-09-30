@@ -46,6 +46,12 @@ namespace ShadowCulling
 			REX::W32::XMFLOAT4X4           lightTransform{};
 			RE::RENDER_TARGET_DEPTHSTENCIL renderTarget{};
 			std::uint32_t                  shadowmapIndex = 0;
+			// Kamera der Kaskade: die Engine setzt daraus die Shader-Konstanten fuer das Abtasten der Schattenkarte.
+			// Im Cache-Frame (leere Kaskade) passt sie Tiefenbereich/Ausschnitt an -> Sonne scheint durch Objekte.
+			RE::NiTransform                camWorld{};
+			float                          camWorldToCam[4][4]{};
+			RE::NiCamera::RUNTIME_DATA2    camData2{};
+			RE::NiFrustumPlanes            clipPlanes{};
 			bool                           clearSaved = false;    // clearRenderTarget vor unserer Aenderung (nur Cache-Frame)
 			bool                           clearTouched = false;  // wir haben clearRenderTarget in diesem Frame geaendert
 		};
@@ -479,6 +485,12 @@ namespace ShadowCulling
 				}
 				if (cfg.freezeMatrix) {
 					d.lightTransform = c.lightTransform;  // alte Matrix passend zum alten Inhalt der Schattenkarte
+					d.clipPlanes = c.clipPlanes;
+					if (const auto cam = d.camera.get()) {
+						cam->world = c.camWorld;
+						std::memcpy(cam->GetRuntimeData().worldToCam, c.camWorldToCam, sizeof(c.camWorldToCam));
+						cam->GetRuntimeData2() = c.camData2;
+					}
 				}
 				if (cfg.noClear) {
 					// Nur fuer diesen Frame; nach Render wird der Engine-Wert wiederhergestellt (AfterSunRender)
@@ -491,6 +503,12 @@ namespace ShadowCulling
 				// Normal-Frame: Engine-Werte unangetastet lassen, nur Stand merken
 				++g_clearFlagSeen[d.clearRenderTarget ? 1 : 0];
 				c.lightTransform = d.lightTransform;
+				c.clipPlanes = d.clipPlanes;
+				if (const auto cam = d.camera.get()) {
+					c.camWorld = cam->world;
+					std::memcpy(c.camWorldToCam, cam->GetRuntimeData().worldToCam, sizeof(c.camWorldToCam));
+					c.camData2 = cam->GetRuntimeData2();
+				}
 				c.renderTarget = d.renderTarget;
 				c.shadowmapIndex = d.shadowmapIndex;
 				c.valid = true;
