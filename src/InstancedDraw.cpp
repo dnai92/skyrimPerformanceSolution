@@ -236,6 +236,42 @@ float4 main(VS_INPUT input) : SV_POSITION
 		return ok;
 	}
 
+	void DebugDescribeState(void* a_context, char* a_out, std::size_t a_size) noexcept
+	{
+		const auto ctx = static_cast<ID3D11DeviceContext*>(a_context);
+		if (!ctx) {
+			std::snprintf(a_out, a_size, "kein Kontext");
+			return;
+		}
+		ID3D11Buffer* vb = nullptr;
+		UINT          stride = 0, offset = 0;
+		ctx->IAGetVertexBuffers(0, 1, &vb, &stride, &offset);
+		ID3D11Buffer* ib = nullptr;
+		DXGI_FORMAT   ibFormat = DXGI_FORMAT_UNKNOWN;
+		UINT          ibOffset = 0;
+		ctx->IAGetIndexBuffer(&ib, &ibFormat, &ibOffset);
+		D3D11_PRIMITIVE_TOPOLOGY topo{};
+		ctx->IAGetPrimitiveTopology(&topo);
+		ID3D11DepthStencilView* dsv = nullptr;
+		ctx->OMGetRenderTargets(0, nullptr, &dsv);
+		D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+		if (dsv) {
+			dsv->GetDesc(&dsvDesc);
+		}
+		D3D11_VIEWPORT vp{};
+		UINT           nvp = 1;
+		ctx->RSGetViewports(&nvp, &vp);
+		ID3D11VertexShader* vs = nullptr;
+		ctx->VSGetShader(&vs, nullptr, nullptr);
+		std::snprintf(a_out, a_size, "VB %p Stride %u Offset %u | IB %p Format %d Offset %u | Topologie %d | DSV %p Ebene %u | Viewport %.0fx%.0f @%.0f,%.0f | VS %p",
+			static_cast<void*>(vb), stride, offset, static_cast<void*>(ib), static_cast<int>(ibFormat), ibOffset, static_cast<int>(topo), static_cast<void*>(dsv),
+			dsv ? dsvDesc.Texture2DArray.FirstArraySlice : 0u, vp.Width, vp.Height, vp.TopLeftX, vp.TopLeftY, static_cast<void*>(vs));
+		SafeRelease(vb);
+		SafeRelease(ib);
+		SafeRelease(dsv);
+		SafeRelease(vs);
+	}
+
 	bool Flush(void* a_context, const Instance* a_instances, std::uint32_t a_instanceCount, const Group* a_groups, std::uint32_t a_groupCount, bool a_clampZ) noexcept
 	{
 		const auto ctx = static_cast<ID3D11DeviceContext*>(a_context);

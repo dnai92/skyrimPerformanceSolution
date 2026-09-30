@@ -245,6 +245,15 @@ namespace InstancingAnalysis
 			const bool ok2 = InstancedDraw::DebugReadVSConstants(D3DContext(), 2, cb2, 20);
 			const bool ok12 = InstancedDraw::DebugReadVSConstants(D3DContext(), 12, cb12, 48);
 			const auto ours = MakeInstance(*a_pass.geometry);
+			char       state[512]{};
+			InstancedDraw::DebugDescribeState(D3DContext(), state, sizeof(state));
+			if (const auto rd = a_pass.geometry->GetGeometryRuntimeData().rendererData) {
+				auto desc = rd->vertexDesc;
+				const auto tri = a_pass.geometry->AsTriShape();
+				logger::info("[Instancing-Debug]   Engine-Zustand nach Draw: {} || unsere Werte: VB {} Stride {} IB {} Dreiecke {} FullPrec {} Desc {:016X}", state,
+					static_cast<const void*>(rd->vertexBuffer), desc.GetSize(), static_cast<const void*>(rd->indexBuffer), tri ? tri->GetTrishapeRuntimeData().triangleCount : 0,
+					desc.HasFlag(RE::BSGraphics::Vertex::VF_FULLPREC), std::bit_cast<std::uint64_t>(rd->vertexDesc));
+			}
 			const auto& w = a_pass.geometry->world;
 			logger::info("[Instancing-Debug] '{}' Welt-Pos ({:.1f} {:.1f} {:.1f}) Skalierung {:.3f} | CB2 gelesen {} | CB12 gelesen {}", a_pass.geometry->name.c_str(),
 				w.translate.x, w.translate.y, w.translate.z, w.scale, ok2, ok12);

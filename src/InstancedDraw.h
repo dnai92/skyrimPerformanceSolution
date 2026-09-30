@@ -39,6 +39,9 @@ namespace InstancedDraw
 	// Beruecksichtigt D3D11.1-Offsets. a_out erhaelt bis zu a_floats Floats ab dem Bindungs-Offset.
 	bool DebugReadVSConstants(void* a_context, std::uint32_t a_slot, float* a_out, std::uint32_t a_floats) noexcept;
 
+	// Diagnose: aktueller Input-Assembler- und Output-Merger-Zustand als Text
+	void DebugDescribeState(void* a_context, char* a_out, std::size_t a_size) noexcept;
+
 	// Zeichnet alle Gruppen; stellt den vorherigen D3D-Zustand danach wieder her.
 	// a_clampZ: Variante RENDER_SHADOWMAP_CLAMPED (z = max(0, z))
 	bool Flush(void* a_context, const Instance* a_instances, std::uint32_t a_instanceCount, const Group* a_groups, std::uint32_t a_groupCount, bool a_clampZ) noexcept;
