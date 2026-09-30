@@ -135,6 +135,7 @@ namespace InstancingAnalysis
 		} g_window2;
 
 		Cat Classify(RE::BSGeometry& a_geom, const void*& a_texture) noexcept;
+		bool PositionIsFloat32(std::uint64_t a_desc) noexcept;
 
 		// ---- Shadow-Instancing (Schritt 2) ----
 		// Innerhalb eines RenderBatches-Aufrufs der Sonnenschatten: das erste Mesh einer Gruppe zeichnet die Engine,
@@ -252,7 +253,7 @@ namespace InstancingAnalysis
 				const auto tri = a_pass.geometry->AsTriShape();
 				logger::info("[Instancing-Debug]   Engine-Zustand nach Draw: {} || unsere Werte: VB {} Stride {} IB {} Dreiecke {} FullPrec {} Desc {:016X}", state,
 					static_cast<const void*>(rd->vertexBuffer), desc.GetSize(), static_cast<const void*>(rd->indexBuffer), tri ? tri->GetTrishapeRuntimeData().triangleCount : 0,
-					desc.HasFlag(RE::BSGraphics::Vertex::VF_FULLPREC), std::bit_cast<std::uint64_t>(rd->vertexDesc));
+					PositionIsFloat32(std::bit_cast<std::uint64_t>(rd->vertexDesc)), std::bit_cast<std::uint64_t>(rd->vertexDesc));
 			}
 			const auto& w = a_pass.geometry->world;
 			logger::info("[Instancing-Debug] '{}' Welt-Pos ({:.1f} {:.1f} {:.1f}) Skalierung {:.3f} | CB2 gelesen {} | CB12 gelesen {}", a_pass.geometry->name.c_str(),
@@ -264,6 +265,24 @@ namespace InstancingAnalysis
 			for (int r = 0; r < 4; ++r) {
 				logger::info("[Instancing-Debug]   CB12 CameraViewProj Zeile {}: {:10.5f} {:10.5f} {:10.5f} {:10.5f}", r, cb12[32 + r * 4], cb12[33 + r * 4], cb12[34 + r * 4], cb12[35 + r * 4]);
 			}
+		}
+
+		// Positionsformat aus den Attribut-Offsets der Vertex-Beschreibung ableiten: Nibble 0 = Vertexgroesse/4,
+		// Nibble 1..9 = Offset/4 der Attribute (Position, UV, UV2, Normal, Binormal, Farbe, Skin, Land, Augen).
+		// Liegt das naechste Attribut 16 Byte hinter der Position, ist sie float32x4, bei 8 Byte float16x4.
+		// (Das Flag VF_FULLPREC ist dafuer nicht verlaesslich: im Test 0.11.x war es aus, obwohl float32 vorlag.)
+		bool PositionIsFloat32(std::uint64_t a_desc) noexcept
+		{
+			const std::uint32_t size = static_cast<std::uint32_t>(a_desc & 0xF) * 4;
+			const std::uint32_t posOffset = static_cast<std::uint32_t>((a_desc >> 4) & 0xF) * 4;
+			std::uint32_t       next = size;
+			for (int i = 2; i <= 9; ++i) {
+				const std::uint32_t off = static_cast<std::uint32_t>((a_desc >> (4 * i)) & 0xF) * 4;
+				if (off > posOffset && off < next) {
+					next = off;
+				}
+			}
+			return next - posOffset >= 16;
 		}
 
 		// true = Pass wurde uebernommen (Engine soll ihn NICHT zeichnen)
@@ -282,7 +301,7 @@ namespace InstancingAnalysis
 					auto& g = g_instGroups[g_instUsed++];
 					auto  desc = rd->vertexDesc;
 					g.group = InstancedDraw::Group{ rd->vertexBuffer, rd->indexBuffer, desc.GetSize(), static_cast<std::uint32_t>(tri->GetTrishapeRuntimeData().triangleCount) * 3u,
-						desc.HasFlag(RE::BSGraphics::Vertex::VF_FULLPREC), 0, 0 };
+						PositionIsFloat32(std::bit_cast<std::uint64_t>(rd->vertexDesc)), 0, 0 };
 					g.instances.clear();
 					return false;  // erstes Mesh zeichnet die Engine
 				}
