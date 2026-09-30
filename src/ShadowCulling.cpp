@@ -132,6 +132,23 @@ namespace ShadowCulling
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		// Eigene vtable von BSParabolicCullingProcess (Punktlicht-Schatten): der Eintrag 0x18 zeigt direkt auf die
+		// Basis-Implementierung und laeuft daher NICHT ueber den Hook auf BSCullingProcess. Alles hier ist Punktlicht.
+		struct AppendVirtualParabolic
+		{
+			static void thunk(RE::BSCullingProcess* a_this, RE::BSGeometry& a_visible, std::int32_t a_alphaGroupIndex)
+			{
+				DiagRecord(a_this->camera);
+				if (ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX)) {
+					Stats::Count(Stats::Counter::PointCulled);
+					return;
+				}
+				Stats::Count(Stats::Counter::PointKept);
+				func(a_this, a_visible, a_alphaGroupIndex);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		// BSLightingShaderProperty::GetRenderPasses_Occlusion (vfunc 0x2D): liefert die Draws fuer die
 		// Niederschlags-/Skylighting-Verdeckungskarte. Community Shaders ersetzt die Funktion (Objekte ab
 		// Radius 32); wir haengen uns DAHINTER und werfen zusaetzlich kleinere Objekte hinaus.
@@ -160,6 +177,10 @@ namespace ShadowCulling
 		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSCullingProcess[0] };
 		AppendVirtual::func = vtbl.write_vfunc(0x18, AppendVirtual::thunk);
 		logger::info("Hook installiert: BSCullingProcess::AppendVirtual (vfunc 0x18)");
+
+		REL::Relocation<std::uintptr_t> parabolicVtbl{ RE::VTABLE_BSParabolicCullingProcess[0] };
+		AppendVirtualParabolic::func = parabolicVtbl.write_vfunc(0x18, AppendVirtualParabolic::thunk);
+		logger::info("Hook installiert: BSParabolicCullingProcess::AppendVirtual (vfunc 0x18)");
 	}
 
 	void InstallLate()
