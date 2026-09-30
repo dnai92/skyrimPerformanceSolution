@@ -1,5 +1,6 @@
 #include "InstancingAnalysis.h"
 
+#include "DetourHelper.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
 
@@ -14,6 +15,7 @@ namespace InstancingAnalysis
 
 		// Wird waehrend BSShadowDirectionalLight::Render gesetzt (Render-Thread = Main-Thread)
 		std::atomic<bool> g_inSunShadows{ false };
+		std::int64_t      g_sunRenderNs = 0;  // Summe im Report-Fenster (Main-Thread)
 
 		// Ueber welche Aufrufstelle von RenderPassImmediately laeuft der aktuelle Draw? (0 = keine gehookte)
 		thread_local std::uint32_t t_callSite = 0;
@@ -71,6 +73,189 @@ namespace InstancingAnalysis
 
 		std::vector<std::pair<std::uint32_t, std::string>> g_topGroups;
 
+		// ---- Instancing-Analyse v2 (Schritt 1): realistische Gruppen fuer Instancing ----
+		// Instanzen muessen im selben RenderBatches-Aufruf liegen (gleiche Kaskade/Renderziel, gleiche Shader-Technik)
+		// und dieselbe Geometrie, dasselbe Vertex-Format und - bei Alpha-Test - dieselbe Textur haben.
+		enum class Cat : std::uint32_t
+		{
+			kSimple,     // undurchsichtig, statisch -> Prototyp (Schritt 2)
+			kAlphaTest,  // Alpha-Test (Blaetter, Zaeune mit Luecken) -> Schritt 3
+			kTreeAnim,   // Baeume mit Windanimation (Sonderfall im Shader)
+			kLod,        // LOD-Landschaft/-Objekte
+			kSkinned,    // Charaktere/Kreaturen
+			kOther,      // kein TriShape / ohne Buffer
+			kTotal
+		};
+		constexpr std::array<const char*, static_cast<std::size_t>(Cat::kTotal)> kCatNames{ "einfach", "Alpha-Test", "Baum-Animation", "LOD", "geskinnt", "sonstige" };
+
+		struct Key2
+		{
+			std::uint32_t batch;  // laufende Nummer des RenderBatches-Aufrufs im Frame
+			const void*   vertexBuffer;
+			const void*   indexBuffer;
+			std::uint64_t vertexDesc;
+			std::uint32_t technique;
+			const void*   texture;  // nur bei Alpha-Test
+			std::uint32_t cat;
+
+			bool operator==(const Key2&) const = default;
+		};
+
+		struct Key2Hash
+		{
+			std::size_t operator()(const Key2& k) const noexcept
+			{
+				std::size_t h = k.batch;
+				const auto  mix = [&](std::size_t v) { h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2); };
+				mix(std::hash<const void*>{}(k.vertexBuffer));
+				mix(std::hash<const void*>{}(k.indexBuffer));
+				mix(std::hash<std::uint64_t>{}(k.vertexDesc));
+				mix(k.technique);
+				mix(std::hash<const void*>{}(k.texture));
+				mix(k.cat);
+				return h;
+			}
+		};
+
+		std::unordered_map<Key2, std::uint32_t, Key2Hash> g_frameGroups2;
+		std::uint32_t                                     g_batchCounter = 0;  // nur waehrend Sonnenschatten gezaehlt
+		std::array<std::uint32_t, static_cast<std::size_t>(Cat::kTotal)> g_frameCat{};
+
+		struct Window2
+		{
+			std::uint64_t frames = 0;
+			std::uint64_t batches = 0;
+			std::array<std::uint64_t, static_cast<std::size_t>(Cat::kTotal)> draws{};
+			std::array<std::uint64_t, static_cast<std::size_t>(Cat::kTotal)> saved{};      // eingesparte Draws bei Instancing ab 2
+			std::array<std::uint64_t, static_cast<std::size_t>(Cat::kTotal)> savedMin4{};  // nur Gruppen ab 4 Instanzen
+			std::array<std::uint64_t, static_cast<std::size_t>(Cat::kTotal)> groups{};
+			double        renderMs = 0.0;
+		} g_window2;
+
+		// BSBatchRenderer::RenderBatches (dieselbe Funktion wie in Community Shaders FrameAnnotations): Batch-Grenzen zaehlen
+		struct RenderBatches
+		{
+			static bool thunk(void* a_renderer, std::uint32_t* a_currentPass, std::uint32_t* a_bucketIndex, void* a_passIndexList, std::uint32_t a_renderFlags)
+			{
+				if (g_inSunShadows.load(std::memory_order_relaxed)) {
+					++g_batchCounter;
+				}
+				return func(a_renderer, a_currentPass, a_bucketIndex, a_passIndexList, a_renderFlags);
+			}
+			static inline bool (*func)(void*, std::uint32_t*, std::uint32_t*, void*, std::uint32_t) = nullptr;
+		};
+
+		Cat Classify(RE::BSGeometry& a_geom, const void*& a_texture) noexcept
+		{
+			a_texture = nullptr;
+			auto& data = a_geom.GetGeometryRuntimeData();
+			if (data.skinInstance) {
+				return Cat::kSkinned;
+			}
+			if (a_geom.GetType().get() != RE::BSGeometry::Type::kTriShape || !data.rendererData || !data.rendererData->vertexBuffer || !data.rendererData->indexBuffer) {
+				return Cat::kOther;
+			}
+			const auto prop = data.shaderProperty.get();
+			if (prop) {
+				using F = RE::BSShaderProperty::EShaderPropertyFlag;
+				if (prop->flags.any(F::kLODLandscape, F::kLODObjects, F::kHDLODObjects)) {
+					return Cat::kLod;
+				}
+				if (prop->flags.any(F::kTreeAnim)) {
+					return Cat::kTreeAnim;
+				}
+			}
+			const auto alpha = data.alphaProperty.get();
+			if (alpha && alpha->GetAlphaTesting()) {
+				if (prop) {
+					if (const auto lighting = netimmerse_cast<RE::BSLightingShaderProperty*>(prop)) {
+						if (const auto mat = static_cast<RE::BSLightingShaderMaterialBase*>(lighting->material)) {
+							a_texture = mat->diffuseTexture.get();
+						}
+					}
+				}
+				return Cat::kAlphaTest;
+			}
+			return Cat::kSimple;
+		}
+
+		void Record2(RE::BSRenderPass& a_pass) noexcept
+		{
+			auto&       geom = *a_pass.geometry;
+			const void* texture = nullptr;
+			const auto  cat = Classify(geom, texture);
+			const auto  ci = static_cast<std::size_t>(cat);
+			std::scoped_lock lock{ g_lock };
+			++g_frameCat[ci];
+			if (cat == Cat::kSkinned || cat == Cat::kOther) {
+				return;
+			}
+			const auto rd = geom.GetGeometryRuntimeData().rendererData;
+			try {
+				++g_frameGroups2[Key2{ g_batchCounter, rd->vertexBuffer, rd->indexBuffer, std::bit_cast<std::uint64_t>(rd->vertexDesc), a_pass.passEnum, texture, static_cast<std::uint32_t>(cat) }];
+			} catch (...) {
+			}
+		}
+
+		void EndFrame2()
+		{
+			std::scoped_lock lock{ g_lock };
+			std::uint32_t    total = 0;
+			for (auto c : g_frameCat) {
+				total += c;
+			}
+			if (total == 0) {
+				g_frameGroups2.clear();
+				g_batchCounter = 0;
+				return;
+			}
+			auto& w = g_window2;
+			++w.frames;
+			w.batches += g_batchCounter;
+			for (std::size_t i = 0; i < g_frameCat.size(); ++i) {
+				w.draws[i] += g_frameCat[i];
+			}
+			for (const auto& [key, count] : g_frameGroups2) {
+				if (count >= 2) {
+					w.saved[key.cat] += count - 1;
+					++w.groups[key.cat];
+				}
+				if (count >= 4) {
+					w.savedMin4[key.cat] += count - 1;
+				}
+			}
+			g_frameGroups2.clear();
+			g_frameCat = {};
+			g_batchCounter = 0;
+		}
+
+		void Report2(double a_sunRenderMs)
+		{
+			std::scoped_lock lock{ g_lock };
+			auto&            w = g_window2;
+			if (w.frames == 0) {
+				return;
+			}
+			const double f = static_cast<double>(w.frames);
+			std::uint64_t drawsAll = 0, savedAll = 0;
+			for (std::size_t i = 0; i < w.draws.size(); ++i) {
+				drawsAll += w.draws[i];
+				savedAll += w.saved[i];
+			}
+			logger::info("[Instancing-v2] {} Frames | Sonnenschatten-Draws/Frame {:.0f} | RenderBatches-Aufrufe/Frame {:.1f} | Sonne Render {:.2f} ms/Frame (~{:.2f} us/Draw)",
+				w.frames, drawsAll / f, w.batches / f, a_sunRenderMs, drawsAll ? a_sunRenderMs * 1000.0 / (drawsAll / f) : 0.0);
+			for (std::size_t i = 0; i < w.draws.size(); ++i) {
+				logger::info("[Instancing-v2]   {:<15} {:6.0f} Draws/Frame | mit Instancing ab 2: -{:5.0f} (Gruppen {:4.0f}) | ab 4: -{:5.0f}",
+					kCatNames[i], w.draws[i] / f, w.saved[i] / f, w.groups[i] / f, w.savedMin4[i] / f);
+			}
+			const double simple = w.saved[0] / f;
+			const double simpleAlpha = (w.saved[0] + w.saved[1]) / f;
+			const double usPerDraw = drawsAll ? a_sunRenderMs * 1000.0 / (drawsAll / f) : 0.0;
+			logger::info("[Instancing-v2]   => Schritt 2 (einfach): -{:.0f} Draws/Frame (~{:.2f} ms) | Schritt 3 (+Alpha-Test): -{:.0f} (~{:.2f} ms) | alles Moegliche: -{:.0f}",
+				simple, simple * usPerDraw / 1000.0, simpleAlpha, simpleAlpha * usPerDraw / 1000.0, savedAll / f);
+			w = {};
+		}
+
 		struct SunShadowRender
 		{
 			static void thunk(RE::BSShadowDirectionalLight* a_this, std::uint32_t& a_index)
@@ -79,7 +264,9 @@ namespace InstancingAnalysis
 				Stats::Count(Stats::Counter::SunRenderCalls);
 				Stats::ScopedTimer timer{ Stats::Zone::SunShadowRender };
 				g_inSunShadows.store(true, std::memory_order_relaxed);
+				const auto start = std::chrono::steady_clock::now();
 				func(a_this, a_index);
+				g_sunRenderNs += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
 				g_inSunShadows.store(false, std::memory_order_relaxed);
 				ShadowCulling::AfterSunRender();
 			}
@@ -174,6 +361,7 @@ namespace InstancingAnalysis
 				if (g_inSunShadows.load(std::memory_order_relaxed) && a_pass && a_pass->geometry) {
 					Stats::Count(Stats::Counter::SunDraws);
 					Record(*a_pass);
+					Record2(*a_pass);
 				}
 				func(a_this, a_pass, a_flags);
 			}
@@ -261,6 +449,13 @@ namespace InstancingAnalysis
 		SunUpdateCamera::func = sunVtbl.write_vfunc(0x10, SunUpdateCamera::thunk);
 		logger::info("Hooks installiert: BSShadowDirectionalLight::Accumulate (0x9) / Render (0xA)");
 
+		RenderBatches::func = reinterpret_cast<decltype(RenderBatches::func)>(REL::RelocationID(100852, 107642).address());
+		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&RenderBatches::func), reinterpret_cast<void*>(&RenderBatches::thunk)); err != 0) {
+			logger::error("Detour BSBatchRenderer::RenderBatches fehlgeschlagen ({})", err);
+		} else {
+			logger::info("Detour installiert: BSBatchRenderer::RenderBatches (Instancing-Analyse, Batch-Grenzen)");
+		}
+
 		REL::Relocation<std::uintptr_t> utilVtbl{ RE::VTABLE_BSUtilityShader[0] };
 		UtilitySetupGeometry::func = utilVtbl.write_vfunc(0x6, UtilitySetupGeometry::thunk);
 		logger::info("Hook installiert: BSUtilityShader::SetupGeometry (vfunc 0x6)");
@@ -277,8 +472,11 @@ namespace InstancingAnalysis
 	void OnFrame()
 	{
 		EndFrame();
+		EndFrame2();
 		if (++g_frameCounter % kReportFrames == 0) {
 			Report();
+			Report2(g_sunRenderNs / 1e6 / kReportFrames);
+			g_sunRenderNs = 0;
 		}
 	}
 }
