@@ -44,7 +44,7 @@ namespace Config
 	// Ferne Sonnenkaskade nur jeden n-ten Frame neu zeichnen, dazwischen alte Schattenkarte weiterverwenden
 	struct CascadeCache
 	{
-		bool          enabled = true;
+		bool          enabled = false;  // Standard AUS: Flackern bei tiefer Sonne (siehe INI)
 		std::uint32_t cascade = 1;   // ab dieser Kaskade (0 = nah)
 		std::uint32_t interval = 2;  // 2 = jeden 2. Frame neu zeichnen
 		// Diagnose-Schalter (einzeln abschaltbar, um Flackern einzugrenzen)
