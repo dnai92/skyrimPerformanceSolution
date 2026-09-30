@@ -40,6 +40,10 @@ namespace Stats
 		DepthKept,        // Draws im Tiefenvorpass (ueber gehookte Aufrufstelle)
 		DepthCulled,      // davon uebersprungen
 		DepthDrawsAll,    // alle Utility-Draws waehrend Main::RenderDepth (Kontrolle der Abdeckung)
+		MainKept,         // Meshes im Culler der Hauptkamera
+		MainCulled,       // davon per Mikro-Culling verworfen
+		DecalKept,        // Decals in der Hauptszene
+		DecalCulled,      // davon per Decal-Culling verworfen
 		SunRenderCalls,   // Aufrufe von BSShadowDirectionalLight::Render
 		SunDraws,         // Utility-SetupGeometry waehrend Sonnen-Render (= Draws)
 		UtilityDraws,     // Utility-SetupGeometry insgesamt
@@ -60,6 +64,10 @@ namespace Stats
 		"Tiefenvorpass behalten",
 		"Tiefenvorpass gecullt",
 		"Tiefenvorpass Draws gesamt",
+		"Hauptszene behalten",
+		"Hauptszene gecullt",
+		"Decals behalten",
+		"Decals gecullt",
 		"Sonne Render-Aufrufe",
 		"Sonne Draws",
 		"Utility Draws gesamt",

@@ -55,6 +55,12 @@ namespace Config
 		readRule("ShadowCulling", shadowCulling);
 		readRule("PointLightShadowCulling", pointLightCulling);
 		readRule("DepthPrepassCulling", depthPrepassCulling);
+		readRule("MainViewCulling", mainViewCulling);
+
+		auto& dec = decalCulling;
+		dec.enabled = ini.GetBoolValue("DecalCulling", "bEnabled", dec.enabled);
+		dec.maxDistance = static_cast<float>(ini.GetDoubleValue("DecalCulling", "fMaxDistance", dec.maxDistance));
+		dec.maxRadius = static_cast<float>(ini.GetDoubleValue("DecalCulling", "fMaxRadius", dec.maxRadius));
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
@@ -67,6 +73,10 @@ namespace Config
 		logger::info("PointLightShadowCulling: {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {}",
 			pc.enabled ? "AN" : "AUS", pc.minDistance, pc.maxRadius, pc.minAngularSize, pc.skipSkinned);
 		logger::info("SkylightingCulling: {} | Mindestradius {:.0f}", sky.enabled ? "AN" : "AUS", sky.minRadius);
+		logger::info("DecalCulling: {} | ab Distanz {:.0f} | Radius < {:.0f}", dec.enabled ? "AN" : "AUS", dec.maxDistance, dec.maxRadius);
+		const auto& mc = mainViewCulling;
+		logger::info("MainViewCulling: {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.4f} | Skinned ausgenommen: {}",
+			mc.enabled ? "AN" : "AUS", mc.minDistance, mc.maxRadius, mc.minAngularSize, mc.skipSkinned);
 		const auto& dc = depthPrepassCulling;
 		logger::info("DepthPrepassCulling: {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {}",
 			dc.enabled ? "AN" : "AUS", dc.minDistance, dc.maxRadius, dc.minAngularSize, dc.skipSkinned);

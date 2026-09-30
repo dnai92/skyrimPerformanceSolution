@@ -25,6 +25,17 @@ namespace Config
 	};
 	inline SkylightingCulling skylightingCulling;
 
+	// Hauptszene: winzige, weit entfernte Objekte gar nicht zeichnen (standardmaessig AUS - Aufploppen moeglich)
+	inline CullRule mainViewCulling{ false, 0, 3000.0f, 100.0f, 0.002f, true };  // [MainViewCulling]
+
+	struct DecalCulling
+	{
+		bool  enabled = true;
+		float maxDistance = 2000.0f;  // Decals (Fussabdruecke, Blut, Schmutz) weiter weg werden nicht gezeichnet
+		float maxRadius = 100.0f;     // nur kleine Decals
+	};
+	inline DecalCulling decalCulling;
+
 	void Load();
 
 	// Prueft (alle ~2 s, Main-Thread) ob die INI geaendert wurde und laedt sie dann neu

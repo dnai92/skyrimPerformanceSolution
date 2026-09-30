@@ -17,6 +17,7 @@ namespace ShadowCulling
 		std::array<std::atomic<const RE::NiCamera*>, kMaxCascades>     g_sunCameras{};
 		std::array<std::atomic<const RE::NiCamera*>, kMaxPointCameras> g_pointCameras{};
 		std::atomic<std::uint32_t>                                     g_pointCameraCount{ 0 };
+		std::atomic<const RE::NiCamera*>                               g_mainCamera{ nullptr };
 		std::array<RE::BSCullingProcess*, kMaxCascades>                g_descCullers{};  // nur Diagnose (Main-Thread)
 		std::uint32_t                                                  g_descCount = 0;  // nur Diagnose (Main-Thread)
 
@@ -53,7 +54,8 @@ namespace ShadowCulling
 		{
 			kOther,
 			kSun,
-			kPoint
+			kPoint,
+			kMain
 		};
 
 		// Liefert die Art des Cullers; bei der Sonne zusaetzlich den Kaskaden-Index
@@ -68,6 +70,9 @@ namespace ShadowCulling
 					a_cascade = i;
 					return Kind::kSun;
 				}
+			}
+			if (camera == g_mainCamera.load(std::memory_order_relaxed)) {
+				return Kind::kMain;
 			}
 			const auto count = g_pointCameraCount.load(std::memory_order_relaxed);
 			for (std::uint32_t i = 0; i < count && i < kMaxPointCameras; ++i) {
@@ -102,6 +107,35 @@ namespace ShadowCulling
 			return bound.radius / distance < a_rule.minAngularSize;
 		}
 
+		float DistanceToCamera(const RE::NiBound& a_bound) noexcept
+		{
+			const float dx = a_bound.center.x - g_camX.load(std::memory_order_relaxed);
+			const float dy = a_bound.center.y - g_camY.load(std::memory_order_relaxed);
+			const float dz = a_bound.center.z - g_camZ.load(std::memory_order_relaxed);
+			return std::sqrt(dx * dx + dy * dy + dz * dz) - a_bound.radius;
+		}
+
+		// Hauptszene: Decal-Culling (Fussabdruecke & Co.) und optionales Mikro-Culling winziger Objekte
+		bool ShouldCullMain(RE::BSGeometry& a_geom) noexcept
+		{
+			const auto  property = a_geom.GetGeometryRuntimeData().shaderProperty.get();
+			const bool  isDecal = property && property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kDecal, RE::BSShaderProperty::EShaderPropertyFlag::kDynamicDecal);
+			const auto& dec = Config::decalCulling;
+			if (isDecal) {
+				if (dec.enabled && a_geom.worldBound.radius < dec.maxRadius && DistanceToCamera(a_geom.worldBound) > dec.maxDistance) {
+					Stats::Count(Stats::Counter::DecalCulled);
+					return true;
+				}
+				Stats::Count(Stats::Counter::DecalKept);
+			}
+			if (ShouldCull(Config::mainViewCulling, a_geom, UINT32_MAX)) {
+				Stats::Count(Stats::Counter::MainCulled);
+				return true;
+			}
+			Stats::Count(Stats::Counter::MainKept);
+			return false;
+		}
+
 		struct AppendVirtual
 		{
 			static void thunk(RE::BSCullingProcess* a_this, RE::BSGeometry& a_visible, std::int32_t a_alphaGroupIndex)
@@ -123,6 +157,11 @@ namespace ShadowCulling
 						return;
 					}
 					Stats::Count(Stats::Counter::PointKept);
+					break;
+				case Kind::kMain:
+					if (ShouldCullMain(a_visible)) {
+						return;
+					}
 					break;
 				default:
 					Stats::Count(Stats::Counter::OtherCullers);
@@ -239,6 +278,8 @@ namespace ShadowCulling
 			g_camY.store(pos.y, std::memory_order_relaxed);
 			g_camZ.store(pos.z, std::memory_order_relaxed);
 		}
+
+		g_mainCamera.store(RE::Main::WorldRootCamera(), std::memory_order_relaxed);
 
 		std::array<const RE::NiCamera*, kMaxCascades> cameras{};
 		std::uint32_t                                 pointCount = 0;
