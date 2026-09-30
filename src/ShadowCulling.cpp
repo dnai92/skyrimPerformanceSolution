@@ -82,6 +82,19 @@ namespace ShadowCulling
 		};
 		FrameDiff g_diffCache{};   // Cache-Frame vs. letzter gezeichneter Frame
 		FrameDiff g_diffNormal{};  // gezeichneter Frame vs. vorheriger gezeichneter Frame (Vergleichswert)
+		// Projektions-Vergleich: Stand nach UpdateCamera im aktuellen Frame vs. im letzten gezeichneten Frame
+		struct Projection
+		{
+			float          worldToCam[4][4]{};
+			RE::NiFrustum  frustum{};
+		};
+		std::array<Projection, kMaxCascades> g_projCurrent{};
+		std::array<Projection, kMaxCascades> g_projReference{};
+		bool                                 g_projReferenceValid = false;
+		bool                                 g_projSameThisFrame = false;
+		bool                                 g_projSeenThisFrame = false;
+		bool                                 g_inSunAccumulate = false;
+		std::uint32_t                        g_projSame = 0, g_projChecked = 0;
 		std::uint32_t g_renderChangedMatrix = 0, g_renderChecked = 0;  // Diagnose: aendert Render die lightTransform?
 		float         g_renderChangedMax = 0.0f;
 
@@ -474,6 +487,47 @@ namespace ShadowCulling
 		return false;
 	}
 
+	void SetInSunAccumulate(bool a_in) noexcept
+	{
+		g_inSunAccumulate = a_in;
+	}
+
+	void AfterSunUpdateCamera(RE::BSShadowDirectionalLight* a_light) noexcept
+	{
+		if (!a_light) {
+			return;
+		}
+		const auto& cfg = Config::cascadeCache;
+		auto&       descs = a_light->GetRuntimeData().shadowmapDescriptors;
+		bool        same = g_projReferenceValid;
+		for (std::uint32_t i = cfg.cascade; i < descs.size() && i < kMaxCascades; ++i) {
+			const auto cam = descs[i].camera.get();
+			if (!cam) {
+				same = false;
+				continue;
+			}
+			auto& p = g_projCurrent[i];
+			std::memcpy(p.worldToCam, cam->GetRuntimeData().worldToCam, sizeof(p.worldToCam));
+			p.frustum = cam->GetRuntimeData2().viewFrustum;
+			if (same) {
+				const auto& r = g_projReference[i];
+				const float d1 = MaxAbsDiff(&p.worldToCam[0][0], &r.worldToCam[0][0], 16);
+				const float d2 = MaxAbsDiff(&p.frustum.fLeft, &r.frustum.fLeft, 6);
+				same = d1 <= cfg.projectionEpsilon && d2 <= cfg.projectionEpsilon;
+			}
+		}
+		g_projSameThisFrame = same;
+		g_projSeenThisFrame = true;
+		++g_projChecked;
+		if (same) {
+			++g_projSame;
+		}
+		// Laeuft UpdateCamera innerhalb von Accumulate (vor dem Culling), gilt die Entscheidung sofort
+		if (g_inSunAccumulate && cfg.requireSameProjection && !same) {
+			g_cacheSkip.store(false, std::memory_order_relaxed);
+		}
+	}
+
 	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept
 	{
 		const auto& cfg = Config::cascadeCache;
@@ -500,6 +554,10 @@ namespace ShadowCulling
 			skip = (++g_cacheCounter % cfg.interval) != 0 && cfg.cascade < descs.size();
 			// Nur ueberspringen, wenn eine Sicherung und fuer alle betroffenen Kaskaden ein gueltiger Stand vorliegt
 			skip = skip && g_backupValid && !g_backupFailed;
+			// UpdateCamera lief bereits vor Accumulate -> Ergebnis hier beruecksichtigen
+			if (cfg.requireSameProjection && g_projSeenThisFrame && !g_projSameThisFrame) {
+				skip = false;
+			}
 			for (std::uint32_t i = cfg.cascade; skip && i < descs.size() && i < kMaxCascades; ++i) {
 				skip = g_cached[i].valid;
 			}
@@ -542,6 +600,12 @@ namespace ShadowCulling
 					c.finalValid = true;
 				}
 			}
+			// Gezeichneter Frame: seine Projektion ist die Referenz fuer die naechsten Cache-Frames
+			if (!skipNow && g_projSeenThisFrame) {
+				g_projReference = g_projCurrent;
+				g_projReferenceValid = true;
+			}
+			g_projSeenThisFrame = false;
 		}
 		if (!cfg.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || cfg.interval <= 1 || g_backupFailed) {
 			return;
@@ -748,6 +812,8 @@ namespace ShadowCulling
 				g_cacheInvalidations, g_clearFlagSeen[0], g_clearFlagSeen[1]);
 			g_clearFlagSeen = {};
 			logger::info("[Cascade-Diag]   Render veraendert lightTransform nach Accumulate: {}/{} (max {:.4f})", g_renderChangedMatrix, g_renderChecked, g_renderChangedMax);
+			logger::info("[Cascade-Diag]   Projektion gleich wie im letzten gezeichneten Frame: {}/{} Frames", g_projSame, g_projChecked);
+			g_projSame = g_projChecked = 0;
 			g_renderChangedMatrix = g_renderChecked = 0;
 			g_renderChangedMax = 0.0f;
 			LogDiff("Cache-Frame vs. letzter gezeichneter", g_diffCache);

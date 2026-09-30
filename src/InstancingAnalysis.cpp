@@ -93,8 +93,21 @@ namespace InstancingAnalysis
 				ZoneScopedN("Sonne Accumulate");
 				Stats::ScopedTimer timer{ Stats::Zone::SunShadowAccumulate };
 				ShadowCulling::BeforeSunAccumulate(a_this);
+				ShadowCulling::SetInSunAccumulate(true);
 				func(a_this, a_globalShadowLightCount, a_shadowMaskChannel, a_cullingScene, a_vrUpdateFlag);
+				ShadowCulling::SetInSunAccumulate(false);
 				ShadowCulling::AfterSunAccumulate(a_this);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct SunUpdateCamera
+		{
+			static bool thunk(RE::BSShadowDirectionalLight* a_this, const RE::NiCamera* a_viewCamera)
+			{
+				const bool r = func(a_this, a_viewCamera);
+				ShadowCulling::AfterSunUpdateCamera(a_this);
+				return r;
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -245,6 +258,7 @@ namespace InstancingAnalysis
 		REL::Relocation<std::uintptr_t> sunVtbl{ RE::VTABLE_BSShadowDirectionalLight[0] };
 		SunShadowRender::func = sunVtbl.write_vfunc(0xA, SunShadowRender::thunk);
 		SunShadowAccumulate::func = sunVtbl.write_vfunc(0x9, SunShadowAccumulate::thunk);
+		SunUpdateCamera::func = sunVtbl.write_vfunc(0x10, SunUpdateCamera::thunk);
 		logger::info("Hooks installiert: BSShadowDirectionalLight::Accumulate (0x9) / Render (0xA)");
 
 		REL::Relocation<std::uintptr_t> utilVtbl{ RE::VTABLE_BSUtilityShader[0] };

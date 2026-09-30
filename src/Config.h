@@ -52,6 +52,8 @@ namespace Config
 		bool freezeCamera = true;       // im Cache-Frame Kamera + clipPlanes einfrieren; Engine-Stand vor naechstem Accumulate zurueck
 		bool freezeSplits = true;       // im Cache-Frame Kaskaden-Grenzen, isEnabled und Port einfrieren
 		bool skipDraws = true;          // Diagnose: false = ferne Kaskade im Cache-Frame trotzdem zeichnen (keine Ersparnis)
+		bool requireSameProjection = true;  // nur cachen, wenn die Engine exakt dieselbe Kaskaden-Projektion berechnet
+		float projectionEpsilon = 0.0001f;  // erlaubte Abweichung (worldToCam/Frustum)
 		bool noClear = true;            // im Cache-Frame clearRenderTarget = false
 		bool restoreShadowmap = true;   // Sonnen-Schattenkarte per GPU-Kopie sichern/zuruecklegen
 		bool restoreVolumetric = true;  // Volumetric-Schattenkarte (CS) per GPU-Kopie sichern/zuruecklegen

@@ -74,10 +74,12 @@ namespace Config
 		cc.freezeCamera = ini.GetBoolValue("ShadowCascadeCache", "bFreezeCamera", cc.freezeCamera);
 		cc.freezeSplits = ini.GetBoolValue("ShadowCascadeCache", "bFreezeSplits", cc.freezeSplits);
 		cc.skipDraws = ini.GetBoolValue("ShadowCascadeCache", "bSkipDraws", cc.skipDraws);
+		cc.requireSameProjection = ini.GetBoolValue("ShadowCascadeCache", "bRequireSameProjection", cc.requireSameProjection);
+		cc.projectionEpsilon = static_cast<float>(ini.GetDoubleValue("ShadowCascadeCache", "fProjectionEpsilon", cc.projectionEpsilon));
 		cc.restoreShadowmap = ini.GetBoolValue("ShadowCascadeCache", "bRestoreShadowmap", cc.restoreShadowmap);
 		cc.restoreVolumetric = ini.GetBoolValue("ShadowCascadeCache", "bRestoreVolumetric", cc.restoreVolumetric);
-		logger::info("ShadowCascadeCache: {} | ab Kaskade {} | neu zeichnen jeden {}. Frame | Matrix {} | Kamera {} | Grenzen {} | Clear aus {} | Kopie Schatten {} | Kopie Volumetric {} | Draws weglassen {}",
-			cc.enabled ? "AN" : "AUS", cc.cascade, cc.interval, cc.freezeMatrix, cc.freezeCamera, cc.freezeSplits, cc.noClear, cc.restoreShadowmap, cc.restoreVolumetric, cc.skipDraws);
+		logger::info("ShadowCascadeCache: {} | ab Kaskade {} | neu zeichnen jeden {}. Frame | Matrix {} | Kamera {} | Grenzen {} | Clear aus {} | Kopie Schatten {} | Kopie Volumetric {} | Draws weglassen {} | nur bei gleicher Projektion {} (eps {})",
+			cc.enabled ? "AN" : "AUS", cc.cascade, cc.interval, cc.freezeMatrix, cc.freezeCamera, cc.freezeSplits, cc.noClear, cc.restoreShadowmap, cc.restoreVolumetric, cc.skipDraws, cc.requireSameProjection, cc.projectionEpsilon);
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
