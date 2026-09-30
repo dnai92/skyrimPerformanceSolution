@@ -8,6 +8,9 @@ namespace ShadowCulling
 {
 	void Install();
 
+	// Hooks, die NACH Community Shaders installiert werden muessen (kDataLoaded)
+	void InstallLate();
+
 	// Einmal pro Frame auf dem Main-Thread: Kamera-Position und Kaskaden-Culler der Sonne cachen
 	void OnFrame();
 }

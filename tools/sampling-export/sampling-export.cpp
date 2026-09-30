@@ -98,12 +98,16 @@ namespace
 int main(int argc, char** argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "Usage: %s <trace.tracy> [topN] [minFrameMs maxFrameMs]\n", argv[0]);
+		std::fprintf(stderr, "Usage: %s <trace.tracy> [topN] [minFrameMs maxFrameMs] [Symbol-Teilstring fuer Aufrufer-Analyse]\n", argv[0]);
 		return 1;
 	}
 	const std::size_t topN = argc > 2 ? std::strtoul(argv[2], nullptr, 10) : 40;
 	const double      minFrameMs = argc > 3 ? std::atof(argv[3]) : 0.0;
 	const double      maxFrameMs = argc > 4 ? std::atof(argv[4]) : 0.0;
+	const std::string callerOf = argc > 5 ? argv[5] : "";
+	// Aufrufer-Analyse (nur Main thread): Kette der 4 Frames oberhalb des gesuchten Symbols
+	std::unordered_map<std::string, uint64_t> callerChains;
+	uint64_t                                  callerHits = 0, mainSamples = 0;
 
 	std::unique_ptr<tracy::FileRead> file(tracy::FileRead::Open(argv[1]));
 	if (!file) {
@@ -152,6 +156,26 @@ int main(int argc, char** argv)
 			std::string                     leafModule;
 			bool                            exeCallerFound = false;
 			bool                            sleeping = false;
+			const bool                      isMain = r.name.rfind("Main thread", 0) == 0;
+			if (isMain) {
+				++mainSamples;
+			}
+			if (isMain && !callerOf.empty()) {
+				for (uint16_t i = 0; i < stack.size(); ++i) {
+					const auto* fr = worker.GetCallstackFrame(stack[i]);
+					if (!fr || fr->size == 0 || FrameLabel(worker, *fr, stack[i]).find(callerOf) == std::string::npos) {
+						continue;
+					}
+					std::string chain;
+					for (uint16_t j = i + 1; j < stack.size() && j <= i + 4; ++j) {
+						const auto* up = worker.GetCallstackFrame(stack[j]);
+						chain += (chain.empty() ? "" : "  <-  ") + (up && up->size ? FrameLabel(worker, *up, stack[j]) : std::string("?"));
+					}
+					++callerChains[chain];
+					++callerHits;
+					break;
+				}
+			}
 
 			for (uint16_t i = 0; i < stack.size(); ++i) {
 				const auto* frame = worker.GetCallstackFrame(stack[i]);
@@ -204,6 +228,16 @@ int main(int argc, char** argv)
 	uint64_t totalSamples = 0;
 	for (const auto& r : results) {
 		totalSamples += r.samples;
+	}
+
+	if (!callerOf.empty()) {
+		std::printf("== Aufrufer von \"%s\" im Main thread: %" PRIu64 " von %" PRIu64 " Samples (%.1f%%)\n", callerOf.c_str(), callerHits, mainSamples, mainSamples ? callerHits * 100.0 / mainSamples : 0.0);
+		std::size_t k = 0;
+		for (const auto& [chain, cnt] : SortedBy(callerChains, [](uint64_t v) { return v; })) {
+			if (k++ >= 15) break;
+			std::printf("  %5.1f%%  %s\n", cnt * 100.0 / mainSamples, chain.c_str());
+		}
+		std::printf("\n");
 	}
 
 	std::printf("== Threads nach Samples (Owner = haeufigstes Mod-/Spielmodul im Callstack) ==\n");

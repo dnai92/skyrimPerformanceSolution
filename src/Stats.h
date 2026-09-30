@@ -33,6 +33,10 @@ namespace Stats
 		SunCascade2Plus,  // Meshes in Sonnen-Kaskade 2+
 		SunCulled,        // von ShadowCulling verworfene Meshes
 		OtherCullers,     // AppendVirtual anderer Culler (Hauptszene, Punktlichter, ...)
+		PointKept,        // Meshes in Punktlicht-Schattenkarten
+		PointCulled,      // davon verworfen
+		SkylightKept,     // Objekte in der Skylighting-/Niederschlags-Verdeckungskarte
+		SkylightCulled,   // davon verworfen
 		SunRenderCalls,   // Aufrufe von BSShadowDirectionalLight::Render
 		SunDraws,         // Utility-SetupGeometry waehrend Sonnen-Render (= Draws)
 		UtilityDraws,     // Utility-SetupGeometry insgesamt
@@ -46,6 +50,10 @@ namespace Stats
 		"Sonne Kaskade 2+",
 		"Sonne gecullt",
 		"Andere Culler",
+		"Punktlicht behalten",
+		"Punktlicht gecullt",
+		"Skylight behalten",
+		"Skylight gecullt",
 		"Sonne Render-Aufrufe",
 		"Sonne Draws",
 		"Utility Draws gesamt",

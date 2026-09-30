@@ -43,16 +43,28 @@ namespace Config
 			logger::warn("SkyrimPerf.ini nicht gefunden - Defaults aktiv");
 		}
 
-		// Werte einzeln lesen und dann setzen; die Culling-Jobs lesen parallel (einzelne Felder, kein Absturz-Risiko)
-		auto& sc = shadowCulling;
-		sc.enabled = ini.GetBoolValue("ShadowCulling", "bEnabled", sc.enabled);
-		sc.minCascade = static_cast<std::uint32_t>(ini.GetLongValue("ShadowCulling", "iMinCascade", sc.minCascade));
-		sc.minDistance = static_cast<float>(ini.GetDoubleValue("ShadowCulling", "fMinDistance", sc.minDistance));
-		sc.maxRadius = static_cast<float>(ini.GetDoubleValue("ShadowCulling", "fMaxRadius", sc.maxRadius));
-		sc.minAngularSize = static_cast<float>(ini.GetDoubleValue("ShadowCulling", "fMinAngularSize", sc.minAngularSize));
-		sc.skipSkinned = ini.GetBoolValue("ShadowCulling", "bSkipSkinned", sc.skipSkinned);
+		// Werte einzeln setzen; die Culling-Jobs lesen parallel (einzelne Felder, kein Absturz-Risiko)
+		const auto readRule = [&](const char* a_section, CullRule& a_rule) {
+			a_rule.enabled = ini.GetBoolValue(a_section, "bEnabled", a_rule.enabled);
+			a_rule.minCascade = static_cast<std::uint32_t>(ini.GetLongValue(a_section, "iMinCascade", a_rule.minCascade));
+			a_rule.minDistance = static_cast<float>(ini.GetDoubleValue(a_section, "fMinDistance", a_rule.minDistance));
+			a_rule.maxRadius = static_cast<float>(ini.GetDoubleValue(a_section, "fMaxRadius", a_rule.maxRadius));
+			a_rule.minAngularSize = static_cast<float>(ini.GetDoubleValue(a_section, "fMinAngularSize", a_rule.minAngularSize));
+			a_rule.skipSkinned = ini.GetBoolValue(a_section, "bSkipSkinned", a_rule.skipSkinned);
+		};
+		readRule("ShadowCulling", shadowCulling);
+		readRule("PointLightShadowCulling", pointLightCulling);
 
+		auto& sky = skylightingCulling;
+		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
+		sky.minRadius = static_cast<float>(ini.GetDoubleValue("SkylightingCulling", "fMinRadius", sky.minRadius));
+
+		const auto& sc = shadowCulling;
 		logger::info("ShadowCulling: {} | ab Kaskade {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {}",
 			sc.enabled ? "AN" : "AUS", sc.minCascade, sc.minDistance, sc.maxRadius, sc.minAngularSize, sc.skipSkinned);
+		const auto& pc = pointLightCulling;
+		logger::info("PointLightShadowCulling: {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {}",
+			pc.enabled ? "AN" : "AUS", pc.minDistance, pc.maxRadius, pc.minAngularSize, pc.skipSkinned);
+		logger::info("SkylightingCulling: {} | Mindestradius {:.0f}", sky.enabled ? "AN" : "AUS", sky.minRadius);
 	}
 }

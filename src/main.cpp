@@ -10,6 +10,7 @@ namespace
 	{
 		if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
+			ShadowCulling::InstallLate();
 		}
 	}
 }

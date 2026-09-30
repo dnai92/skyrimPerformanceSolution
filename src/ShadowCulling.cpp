@@ -8,19 +8,26 @@ namespace ShadowCulling
 	namespace
 	{
 		constexpr std::size_t kMaxCascades = 4;
+		constexpr std::size_t kMaxPointCameras = 48;  // Schattenkarten-Kameras aller aktiven Punkt-/Spotlichter
 
-		// Vom Main-Thread pro Frame gesetzt, von den Culling-Jobs (Worker-Threads) gelesen
+		// Vom Main-Thread pro Frame gesetzt, von den Culling-Jobs (Worker-Threads) gelesen.
 		// Zuordnung ueber die Kamera: parallele Culling-Jobs nutzen eigene Culler-Instanzen,
-		// aber dieselbe Kaskaden-Kamera wie der Deskriptor.
-		std::array<std::atomic<const RE::NiCamera*>, kMaxCascades> g_sunCameras{};
-		std::array<RE::BSCullingProcess*, kMaxCascades>            g_descCullers{};  // nur Diagnose (Main-Thread)
-		std::uint32_t                                              g_descCount = 0;  // nur Diagnose (Main-Thread)
+		// aber dieselbe Kamera wie der Schattenkarten-Deskriptor.
+		std::array<std::atomic<const RE::NiCamera*>, kMaxCascades>     g_sunCameras{};
+		std::array<std::atomic<const RE::NiCamera*>, kMaxPointCameras> g_pointCameras{};
+		std::atomic<std::uint32_t>                                     g_pointCameraCount{ 0 };
+		std::array<RE::BSCullingProcess*, kMaxCascades>                g_descCullers{};  // nur Diagnose (Main-Thread)
+		std::uint32_t                                                  g_descCount = 0;  // nur Diagnose (Main-Thread)
 
 		// Diagnose: welche Kameras tragen wie viele Meshes ein (lock-freie Tabelle)
-		constexpr std::size_t                                      kDiagSlots = 32;
-		std::array<std::atomic<const RE::NiCamera*>, kDiagSlots>   g_diagCameras{};
-		std::array<std::atomic<std::uint32_t>, kDiagSlots>         g_diagCounts{};
-		std::uint32_t                                              g_frameCounter = 0;
+		constexpr std::size_t                                    kDiagSlots = 32;
+		std::array<std::atomic<const RE::NiCamera*>, kDiagSlots> g_diagCameras{};
+		std::array<std::atomic<std::uint32_t>, kDiagSlots>       g_diagCounts{};
+		std::uint32_t                                            g_frameCounter = 0;
+
+		std::atomic<float> g_camX{ 0.0f };
+		std::atomic<float> g_camY{ 0.0f };
+		std::atomic<float> g_camZ{ 0.0f };
 
 		void DiagRecord(const RE::NiCamera* a_camera) noexcept
 		{
@@ -40,36 +47,47 @@ namespace ShadowCulling
 				}
 			}
 		}
-		std::atomic<float>                                           g_camX{ 0.0f };
-		std::atomic<float>                                           g_camY{ 0.0f };
-		std::atomic<float>                                           g_camZ{ 0.0f };
 
-		int CascadeIndexOf(const RE::BSCullingProcess* a_culler) noexcept
+		enum class Kind
+		{
+			kOther,
+			kSun,
+			kPoint
+		};
+
+		// Liefert die Art des Cullers; bei der Sonne zusaetzlich den Kaskaden-Index
+		Kind Classify(const RE::BSCullingProcess* a_culler, std::uint32_t& a_cascade) noexcept
 		{
 			const auto camera = a_culler->camera;
 			if (!camera) {
-				return -1;
+				return Kind::kOther;
 			}
-			for (std::size_t i = 0; i < kMaxCascades; ++i) {
+			for (std::uint32_t i = 0; i < kMaxCascades; ++i) {
 				if (g_sunCameras[i].load(std::memory_order_relaxed) == camera) {
-					return static_cast<int>(i);
+					a_cascade = i;
+					return Kind::kSun;
 				}
 			}
-			return -1;
+			const auto count = g_pointCameraCount.load(std::memory_order_relaxed);
+			for (std::uint32_t i = 0; i < count && i < kMaxPointCameras; ++i) {
+				if (g_pointCameras[i].load(std::memory_order_relaxed) == camera) {
+					return Kind::kPoint;
+				}
+			}
+			return Kind::kOther;
 		}
 
-		bool ShouldCull(RE::BSGeometry& a_geom, std::uint32_t a_cascade) noexcept
+		bool ShouldCull(const Config::CullRule& a_rule, RE::BSGeometry& a_geom, std::uint32_t a_cascade) noexcept
 		{
-			const auto& cfg = Config::shadowCulling;
-			if (!cfg.enabled || a_cascade < cfg.minCascade) {
+			if (!a_rule.enabled || a_cascade < a_rule.minCascade) {
 				return false;
 			}
 
 			const auto& bound = a_geom.worldBound;
-			if (bound.radius <= 0.0f || bound.radius >= cfg.maxRadius) {
+			if (bound.radius <= 0.0f || bound.radius >= a_rule.maxRadius) {
 				return false;
 			}
-			if (cfg.skipSkinned && a_geom.GetGeometryRuntimeData().skinInstance) {
+			if (a_rule.skipSkinned && a_geom.GetGeometryRuntimeData().skinInstance) {
 				return false;
 			}
 
@@ -77,10 +95,10 @@ namespace ShadowCulling
 			const float dy = bound.center.y - g_camY.load(std::memory_order_relaxed);
 			const float dz = bound.center.z - g_camZ.load(std::memory_order_relaxed);
 			const float distance = std::sqrt(dx * dx + dy * dy + dz * dz) - bound.radius;
-			if (distance <= cfg.minDistance) {
+			if (distance <= a_rule.minDistance) {
 				return false;
 			}
-			return bound.radius / distance < cfg.minAngularSize;
+			return bound.radius / distance < a_rule.minAngularSize;
 		}
 
 		struct AppendVirtual
@@ -88,17 +106,50 @@ namespace ShadowCulling
 			static void thunk(RE::BSCullingProcess* a_this, RE::BSGeometry& a_visible, std::int32_t a_alphaGroupIndex)
 			{
 				DiagRecord(a_this->camera);
-				const int cascade = CascadeIndexOf(a_this);
-				if (cascade >= 0) {
-					if (ShouldCull(a_visible, static_cast<std::uint32_t>(cascade))) {
+				std::uint32_t cascade = 0;
+				switch (Classify(a_this, cascade)) {
+				case Kind::kSun:
+					if (ShouldCull(Config::shadowCulling, a_visible, cascade)) {
 						Stats::Count(Stats::Counter::SunCulled);
 						return;
 					}
 					Stats::Count(cascade == 0 ? Stats::Counter::SunCascade0 : cascade == 1 ? Stats::Counter::SunCascade1 : Stats::Counter::SunCascade2Plus);
-				} else {
+					break;
+				case Kind::kPoint:
+					// minCascade gilt nur fuer die Sonne -> hier Kaskade als "hinreichend gross" uebergeben
+					if (ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX)) {
+						Stats::Count(Stats::Counter::PointCulled);
+						return;
+					}
+					Stats::Count(Stats::Counter::PointKept);
+					break;
+				default:
 					Stats::Count(Stats::Counter::OtherCullers);
+					break;
 				}
 				func(a_this, a_visible, a_alphaGroupIndex);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// BSLightingShaderProperty::GetRenderPasses_Occlusion (vfunc 0x2D): liefert die Draws fuer die
+		// Niederschlags-/Skylighting-Verdeckungskarte. Community Shaders ersetzt die Funktion (Objekte ab
+		// Radius 32); wir haengen uns DAHINTER und werfen zusaetzlich kleinere Objekte hinaus.
+		struct OcclusionRenderPasses
+		{
+			static RE::BSShaderProperty::RenderPassArray* thunk(RE::BSLightingShaderProperty* a_this, RE::BSGeometry* a_geometry, std::uint32_t a_renderMode, RE::BSShaderAccumulator* a_accumulator)
+			{
+				const auto passes = func(a_this, a_geometry, a_renderMode, a_accumulator);
+				const auto& cfg = Config::skylightingCulling;
+				if (passes && a_geometry && passes->head) {
+					if (cfg.enabled && a_geometry->worldBound.radius < cfg.minRadius) {
+						passes->Clear();
+						Stats::Count(Stats::Counter::SkylightCulled);
+					} else {
+						Stats::Count(Stats::Counter::SkylightKept);
+					}
+				}
+				return passes;
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -109,6 +160,13 @@ namespace ShadowCulling
 		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSCullingProcess[0] };
 		AppendVirtual::func = vtbl.write_vfunc(0x18, AppendVirtual::thunk);
 		logger::info("Hook installiert: BSCullingProcess::AppendVirtual (vfunc 0x18)");
+	}
+
+	void InstallLate()
+	{
+		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSLightingShaderProperty[0] };
+		OcclusionRenderPasses::func = vtbl.write_vfunc(0x2D, OcclusionRenderPasses::thunk);
+		logger::info("Hook installiert: BSLightingShaderProperty::GetRenderPasses_Occlusion (vfunc 0x2D, nach Community Shaders)");
 	}
 
 	void OnFrame()
@@ -123,10 +181,13 @@ namespace ShadowCulling
 		}
 
 		std::array<const RE::NiCamera*, kMaxCascades> cameras{};
+		std::uint32_t                                 pointCount = 0;
 		g_descCullers = {};
 		g_descCount = 0;
 		if (const auto ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]) {
-			if (const auto sun = ssn->GetRuntimeData().sunShadowDirLight) {
+			auto&      ssnData = ssn->GetRuntimeData();
+			const auto sun = ssnData.sunShadowDirLight;
+			if (sun) {
 				const auto& descriptors = sun->GetRuntimeData().shadowmapDescriptors;
 				g_descCount = descriptors.size();
 				for (std::uint32_t i = 0; i < descriptors.size() && i < kMaxCascades; ++i) {
@@ -134,14 +195,25 @@ namespace ShadowCulling
 					g_descCullers[i] = descriptors[i].cullingProcess;
 				}
 			}
+			for (const auto& light : ssnData.activeShadowLights) {
+				if (!light || light.get() == sun) {
+					continue;
+				}
+				for (const auto& desc : light->GetRuntimeData().shadowmapDescriptors) {
+					if (pointCount < kMaxPointCameras && desc.camera) {
+						g_pointCameras[pointCount++].store(desc.camera.get(), std::memory_order_relaxed);
+					}
+				}
+			}
 		}
 		for (std::size_t i = 0; i < kMaxCascades; ++i) {
 			g_sunCameras[i].store(cameras[i], std::memory_order_relaxed);
 		}
+		g_pointCameraCount.store(pointCount, std::memory_order_relaxed);
 
 		// Diagnose alle ~600 Frames ins Log
 		if (++g_frameCounter % 600 == 0) {
-			logger::info("[ShadowCulling-Diag] Sonnen-Deskriptoren: {}", g_descCount);
+			logger::info("[ShadowCulling-Diag] Sonnen-Deskriptoren: {} | Punktlicht-Kameras: {}", g_descCount, pointCount);
 			for (std::size_t i = 0; i < kMaxCascades && i < g_descCount; ++i) {
 				logger::info("[ShadowCulling-Diag]   Kaskade {}: Kamera {:p}, Culler {:p}", i, static_cast<const void*>(cameras[i]), static_cast<const void*>(g_descCullers[i]));
 			}
