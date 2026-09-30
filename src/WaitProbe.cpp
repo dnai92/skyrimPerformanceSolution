@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <intrin.h>
 
 #include "Stats.h"
 
@@ -29,9 +30,28 @@ namespace WaitProbe
 
 		inline std::int64_t ToNs(std::int64_t a_ticks) noexcept { return a_ticks * 1'000'000'000 / g_qpcToNs100; }
 
-		// Slot 0 = FSMP, 1 = CBPC
-		constexpr std::array<Stats::Zone, 2>    kZones{ Stats::Zone::FsmpWaitMain, Stats::Zone::CbpcWaitMain };
-		constexpr std::array<Stats::Counter, 2> kCounters{ Stats::Counter::FsmpWaitCalls, Stats::Counter::CbpcWaitCalls };
+		// Slot 0 = FSMP, 1 = CBPC, 2 = SkyrimSE.exe
+		constexpr std::array<Stats::Zone, 3>    kZones{ Stats::Zone::FsmpWaitMain, Stats::Zone::CbpcWaitMain, Stats::Zone::GameWaitMain };
+		constexpr std::array<Stats::Counter, 3> kCounters{ Stats::Counter::FsmpWaitCalls, Stats::Counter::CbpcWaitCalls, Stats::Counter::GameWaitCalls };
+
+		// Aufrufer-Tabelle fuer SkyrimSE.exe (nur Main-Thread schreibt und liest)
+		std::uintptr_t                   g_gameBase = 0;
+		std::array<CallerStat, kMaxCallers> g_callers{};
+		std::uint64_t                    g_callersOther = 0;
+
+		void RecordCaller(void* a_ret, std::int64_t a_ns) noexcept
+		{
+			const auto rva = reinterpret_cast<std::uintptr_t>(a_ret) - g_gameBase;
+			for (auto& c : g_callers) {
+				if (c.rva == rva || c.rva == 0) {
+					c.rva = rva;
+					c.ns += static_cast<std::uint64_t>(a_ns);
+					++c.calls;
+					return;
+				}
+			}
+			g_callersOther += static_cast<std::uint64_t>(a_ns);
+		}
 
 		template <int Slot>
 		struct Probes
@@ -43,10 +63,14 @@ namespace WaitProbe
 			static inline decltype(&AcquireSRWLockExclusive)   origSrw = nullptr;
 			static inline decltype(&EnterCriticalSection)      origCs = nullptr;
 
-			static void Record(std::int64_t a_start) noexcept
+			static void Record(std::int64_t a_start, void* a_ret) noexcept
 			{
-				Stats::Add(kZones[Slot], ToNs(Now() - a_start));
+				const auto ns = ToNs(Now() - a_start);
+				Stats::Add(kZones[Slot], ns);
 				Stats::Count(kCounters[Slot]);
+				if constexpr (Slot == 2) {
+					RecordCaller(a_ret, ns);
+				}
 			}
 
 			static BOOL WINAPI Switch() noexcept
@@ -56,7 +80,7 @@ namespace WaitProbe
 				}
 				const auto s = Now();
 				const auto r = origSwitch();
-				Record(s);
+				Record(s, _ReturnAddress());
 				return r;
 			}
 			static void WINAPI SleepProbe(DWORD a_ms) noexcept
@@ -66,7 +90,7 @@ namespace WaitProbe
 				}
 				const auto s = Now();
 				origSleep(a_ms);
-				Record(s);
+				Record(s, _ReturnAddress());
 			}
 			static DWORD WINAPI Wait(HANDLE a_h, DWORD a_ms, BOOL a_alertable) noexcept
 			{
@@ -75,7 +99,7 @@ namespace WaitProbe
 				}
 				const auto s = Now();
 				const auto r = origWait(a_h, a_ms, a_alertable);
-				Record(s);
+				Record(s, _ReturnAddress());
 				return r;
 			}
 			static BOOL WINAPI Cond(PCONDITION_VARIABLE a_cv, PSRWLOCK a_lock, DWORD a_ms, ULONG a_flags) noexcept
@@ -85,7 +109,7 @@ namespace WaitProbe
 				}
 				const auto s = Now();
 				const auto r = origCond(a_cv, a_lock, a_ms, a_flags);
-				Record(s);
+				Record(s, _ReturnAddress());
 				return r;
 			}
 			static void WINAPI Srw(PSRWLOCK a_lock) noexcept
@@ -95,7 +119,7 @@ namespace WaitProbe
 				}
 				const auto s = Now();
 				origSrw(a_lock);
-				Record(s);
+				Record(s, _ReturnAddress());
 			}
 			static void WINAPI Cs(LPCRITICAL_SECTION a_cs) noexcept
 			{
@@ -104,7 +128,7 @@ namespace WaitProbe
 				}
 				const auto s = Now();
 				origCs(a_cs);
-				Record(s);
+				Record(s, _ReturnAddress());
 			}
 		};
 
@@ -124,7 +148,7 @@ namespace WaitProbe
 		ModuleResult PatchModule(const wchar_t* a_name) noexcept
 		{
 			ModuleResult result{};
-			const auto   base = reinterpret_cast<std::uint8_t*>(GetModuleHandleW(a_name));
+			const auto   base = reinterpret_cast<std::uint8_t*>(GetModuleHandleW(a_name));  // nullptr = SkyrimSE.exe
 			if (!base) {
 				return result;
 			}
@@ -165,6 +189,10 @@ namespace WaitProbe
 					}
 					const auto byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
 					for (const auto& t : targets) {
+						// Engine: Locks nicht messen (sehr haeufig, Messaufwand > Nutzen) - nur echte Warte-Funktionen
+						if (Slot == 2 && (t.orig == reinterpret_cast<void**>(&P::origSrw) || t.orig == reinterpret_cast<void**>(&P::origCs))) {
+							continue;
+						}
 						if (*t.orig == nullptr && std::strcmp(byName->Name, t.name) == 0) {
 							if (PatchEntry(reinterpret_cast<ULONG_PTR*>(&iat->u1.Function), t.probe, t.orig)) {
 								++result.patched;
@@ -177,7 +205,23 @@ namespace WaitProbe
 		}
 	}
 
-	void Install(ModuleResult& a_fsmp, ModuleResult& a_cbpc) noexcept
+	std::size_t TakeCallers(CallerStat* a_out, std::size_t a_max) noexcept
+	{
+		std::size_t n = 0;
+		for (auto& c : g_callers) {
+			if (c.rva == 0) {
+				break;
+			}
+			if (n < a_max) {
+				a_out[n++] = c;
+			}
+			c = {};
+		}
+		g_callersOther = 0;
+		return n;
+	}
+
+	void Install(ModuleResult& a_fsmp, ModuleResult& a_cbpc, ModuleResult& a_game) noexcept
 	{
 		g_mainThread = GetCurrentThreadId();
 		LARGE_INTEGER f;
@@ -186,5 +230,7 @@ namespace WaitProbe
 
 		a_fsmp = PatchModule<0>(L"hdtsmp64.dll");
 		a_cbpc = PatchModule<1>(L"cbp.dll");
+		g_gameBase = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+		a_game = PatchModule<2>(nullptr);
 	}
 }

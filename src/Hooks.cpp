@@ -3,12 +3,40 @@
 #include "InstancingAnalysis.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
+#include "WaitProbe.h"
 
 namespace Hooks
 {
 	namespace
 	{
 		using VM = RE::BSScript::Internal::VirtualMachine;
+
+		// Alle ~600 Frames: wo wartet der Main-Thread in SkyrimSE.exe? (RVA -> naechstgelegene Address-Library-ID)
+		void ReportEngineWaits()
+		{
+			static std::uint32_t frames = 0;
+			if (++frames % 600 != 0) {
+				return;
+			}
+			std::array<WaitProbe::CallerStat, WaitProbe::kMaxCallers> callers{};
+			const auto n = WaitProbe::TakeCallers(callers.data(), callers.size());
+			std::sort(callers.begin(), callers.begin() + n, [](const auto& a, const auto& b) { return a.ns > b.ns; });
+
+			static const REL::Offset2ID offset2id;
+			logger::info("[Engine-Wait] Top-Wartestellen (Main-Thread, ueber 600 Frames):");
+			for (std::size_t i = 0; i < n && i < 10; ++i) {
+				const auto& c = callers[i];
+				auto it = std::upper_bound(offset2id.begin(), offset2id.end(), c.rva, [](std::uintptr_t a_off, const auto& a_map) { return a_off < a_map.offset; });
+				std::uint64_t id = 0, delta = 0;
+				if (it != offset2id.begin()) {
+					--it;
+					id = it->id;
+					delta = c.rva - it->offset;
+				}
+				logger::info("[Engine-Wait]   RVA 0x{:X} (ID {} +0x{:X}): {:.2f} ms/Frame, {:.1f} Aufrufe/Frame",
+					c.rva, id, delta, c.ns / 1e6 / 600.0, c.calls / 600.0);
+			}
+		}
 
 		template <class T>
 		void WriteVfunc(REL::VariantID a_vtable, std::size_t a_index, const char* a_name)
@@ -65,6 +93,7 @@ namespace Hooks
 				Stats::OnFrame();
 				ShadowCulling::OnFrame();
 				InstancingAnalysis::OnFrame();
+				ReportEngineWaits();
 				ZoneScopedN("Player Update");
 				Stats::ScopedTimer timer{ Stats::Zone::PlayerUpdate };
 				func(a_this, a_delta);

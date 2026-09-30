@@ -14,6 +14,7 @@ namespace Stats
 		SunShadowRender,      // BSShadowDirectionalLight::Render (Draw Calls)
 		FsmpWaitMain,         // Main-Thread wartet in hdtsmp64.dll (SwitchToThread/Sleep/Wait/Locks)
 		CbpcWaitMain,         // Main-Thread wartet in cbp.dll
+		GameWaitMain,         // Main-Thread wartet in SkyrimSE.exe selbst (Engine-Spin-Waits)
 
 		kTotal
 	};
@@ -27,6 +28,7 @@ namespace Stats
 		"Sonne Render",
 		"FSMP Warten (Main)",
 		"CBPC Warten (Main)",
+		"Engine Warten (Main)",
 	};
 
 	// Zaehler pro Frame (Meshes, die in Culling-Listen aufgenommen bzw. verworfen werden)
@@ -53,6 +55,7 @@ namespace Stats
 		UtilityDraws,     // Utility-SetupGeometry insgesamt
 		FsmpWaitCalls,    // Warte-Aufrufe von FSMP auf dem Main-Thread
 		CbpcWaitCalls,    // Warte-Aufrufe von CBPC auf dem Main-Thread
+		GameWaitCalls,    // Warte-Aufrufe der Engine auf dem Main-Thread
 
 		kTotal
 	};
@@ -79,6 +82,7 @@ namespace Stats
 		"Utility Draws gesamt",
 		"FSMP Warte-Aufrufe",
 		"CBPC Warte-Aufrufe",
+		"Engine Warte-Aufrufe",
 	};
 
 	void Init();
