@@ -56,6 +56,8 @@ namespace Stats
 		FsmpWaitCalls,    // Warte-Aufrufe von FSMP auf dem Main-Thread
 		CbpcWaitCalls,    // Warte-Aufrufe von CBPC auf dem Main-Thread
 		GameWaitCalls,    // Warte-Aufrufe der Engine auf dem Main-Thread
+		CascadeSkipped,   // Meshes, die wegen Kaskaden-Cache nicht neu gezeichnet werden
+		CascadeSkipFrames,// Frames, in denen die ferne Kaskade aus dem Cache kam (0/1)
 
 		kTotal
 	};
@@ -83,6 +85,8 @@ namespace Stats
 		"FSMP Warte-Aufrufe",
 		"CBPC Warte-Aufrufe",
 		"Engine Warte-Aufrufe",
+		"Kaskaden-Cache Meshes gespart",
+		"Kaskaden-Cache Frames",
 	};
 
 	void Init();

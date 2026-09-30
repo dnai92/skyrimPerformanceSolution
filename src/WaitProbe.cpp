@@ -162,6 +162,7 @@ namespace WaitProbe
 			}
 
 			using P = Probes<Slot>;
+			constexpr bool kIsGame = Slot == 2;
 			struct Target
 			{
 				const char* name;
@@ -190,7 +191,7 @@ namespace WaitProbe
 					const auto byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
 					for (const auto& t : targets) {
 						// Engine: Locks nicht messen (sehr haeufig, Messaufwand > Nutzen) - nur echte Warte-Funktionen
-						if (Slot == 2 && (t.orig == reinterpret_cast<void**>(&P::origSrw) || t.orig == reinterpret_cast<void**>(&P::origCs))) {
+						if (kIsGame && (t.orig == reinterpret_cast<void**>(&P::origSrw) || t.orig == reinterpret_cast<void**>(&P::origCs))) {
 							continue;
 						}
 						if (*t.orig == nullptr && std::strcmp(byName->Name, t.name) == 0) {

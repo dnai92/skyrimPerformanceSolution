@@ -37,6 +37,20 @@ namespace ShadowCulling
 		constexpr float    kMinSunSin = 0.05f;
 		std::atomic<bool>  g_sunCullAllowed{ true };  // false, solange die Sonne unter fMinSunElevation steht
 
+		// Kaskaden-Cache (nur Main-Thread schreibt; Culling-Jobs lesen g_cacheSkip)
+		std::atomic<bool> g_cacheSkip{ false };  // dieser Frame: ferne Kaskade(n) nicht neu zeichnen
+		std::uint32_t     g_cacheCounter = 0;
+		struct CachedCascade
+		{
+			bool                           valid = false;
+			REX::W32::XMFLOAT4X4           lightTransform{};
+			RE::RENDER_TARGET_DEPTHSTENCIL renderTarget{};
+			std::uint32_t                  shadowmapIndex = 0;
+			bool                           clearOriginal = true;
+		};
+		std::array<CachedCascade, kMaxCascades> g_cached{};
+		std::uint32_t                           g_cacheInvalidations = 0;  // Diagnose: Ziel/Slice hat sich geaendert
+
 		void DiagRecord(const RE::NiCamera* a_camera) noexcept
 		{
 			for (std::size_t i = 0; i < kDiagSlots; ++i) {
@@ -168,6 +182,10 @@ namespace ShadowCulling
 				std::uint32_t cascade = 0;
 				switch (Classify(a_this, cascade)) {
 				case Kind::kSun:
+					if (g_cacheSkip.load(std::memory_order_relaxed) && cascade >= Config::cascadeCache.cascade) {
+						Stats::Count(Stats::Counter::CascadeSkipped);
+						return;  // Kaskade kommt diesen Frame aus dem Cache
+					}
 					if (g_sunCullAllowed.load(std::memory_order_relaxed) && ShouldCull(Config::shadowCulling, a_visible, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
 						Stats::Count(Stats::Counter::SunCulled);
 						return;
@@ -305,6 +323,59 @@ namespace ShadowCulling
 		return false;
 	}
 
+	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept
+	{
+		const auto& cfg = Config::cascadeCache;
+		bool        skip = false;
+		if (cfg.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && cfg.interval > 1 && a_light) {
+			const auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
+			skip = (++g_cacheCounter % cfg.interval) != 0 && cfg.cascade < descs.size();
+			// Nur ueberspringen, wenn fuer alle betroffenen Kaskaden ein gueltiger Stand vorliegt
+			for (std::uint32_t i = cfg.cascade; skip && i < descs.size() && i < kMaxCascades; ++i) {
+				skip = g_cached[i].valid;
+			}
+		} else {
+			for (auto& c : g_cached) {
+				c.valid = false;
+			}
+		}
+		g_cacheSkip.store(skip, std::memory_order_relaxed);
+	}
+
+	void AfterSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept
+	{
+		if (!a_light) {
+			return;
+		}
+		const auto& cfg = Config::cascadeCache;
+		const bool  skip = g_cacheSkip.load(std::memory_order_relaxed);
+		auto&       descs = a_light->GetRuntimeData().shadowmapDescriptors;
+		for (std::uint32_t i = cfg.cascade; i < descs.size() && i < kMaxCascades; ++i) {
+			auto& d = descs[i];
+			auto& c = g_cached[i];
+			if (skip) {
+				if (d.renderTarget != c.renderTarget || d.shadowmapIndex != c.shadowmapIndex) {
+					// Ziel hat sich geaendert -> alter Inhalt unbrauchbar
+					++g_cacheInvalidations;
+					c.valid = false;
+					continue;
+				}
+				d.lightTransform = c.lightTransform;  // alte Matrix passend zum alten Inhalt der Schattenkarte
+				d.clearRenderTarget = false;          // alten Inhalt NICHT loeschen
+				Stats::Count(Stats::Counter::CascadeSkipFrames);
+			} else {
+				if (!c.valid) {
+					c.clearOriginal = d.clearRenderTarget;
+				}
+				d.clearRenderTarget = c.clearOriginal;
+				c.lightTransform = d.lightTransform;
+				c.renderTarget = d.renderTarget;
+				c.shadowmapIndex = d.shadowmapIndex;
+				c.valid = true;
+			}
+		}
+	}
+
 	void OnFrame()
 	{
 		Config::ReloadIfChanged();
@@ -358,6 +429,29 @@ namespace ShadowCulling
 		if (++g_frameCounter % 600 == 0) {
 			logger::info("[ShadowCulling-Diag] Sonnen-Deskriptoren: {} | Punktlicht-Kameras: {} | Sonnenhoehe sin={:.2f} (~{:.0f} Grad, Schattenfaktor {:.1f})",
 				g_descCount, pointCount, g_sunSin.load(), std::asin(g_sunSin.load()) * 57.2958f, 1.0f / g_sunSin.load());
+			// Kaskaden-Cache: Ziel-Textur und Slice aller Schattenkarten (Sonne + Punktlichter) - teilen sie sich etwas?
+			if (const auto ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]) {
+				auto& ssnData = ssn->GetRuntimeData();
+				if (const auto sun = ssnData.sunShadowDirLight) {
+					const auto& descs = sun->GetRuntimeData().shadowmapDescriptors;
+					for (std::uint32_t i = 0; i < descs.size(); ++i) {
+						const auto& d = descs[i];
+						logger::info("[Cascade-Diag]   Sonne K{}: Ziel {} Slice {} Clear {} Aktiv {} Port {}x{}", i, static_cast<std::uint32_t>(d.renderTarget), d.shadowmapIndex,
+							d.clearRenderTarget, d.isEnabled, d.port.GetWidth(), d.port.GetHeight());
+					}
+				}
+				std::uint32_t n = 0;
+				for (const auto& light : ssnData.activeShadowLights) {
+					if (!light || light.get() == ssnData.sunShadowDirLight || n >= 6) {
+						continue;
+					}
+					for (const auto& d : light->GetRuntimeData().shadowmapDescriptors) {
+						logger::info("[Cascade-Diag]   Licht {}: Ziel {} Slice {}", n, static_cast<std::uint32_t>(d.renderTarget), d.shadowmapIndex);
+					}
+					++n;
+				}
+			}
+			logger::info("[Cascade-Diag]   Cache-Invalidierungen (Ziel/Slice gewechselt): {}", g_cacheInvalidations);
 			if (const auto mainCam = RE::Main::WorldRootCamera()) {
 				logger::info("[ShadowCulling-Diag]   Hauptkamera (WorldRootCamera): {:p} '{}'", static_cast<const void*>(mainCam), mainCam->name.c_str());
 			}

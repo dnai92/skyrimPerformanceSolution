@@ -41,6 +41,15 @@ namespace Config
 	};
 	inline DecalCulling decalCulling;
 
+	// Ferne Sonnenkaskade nur jeden n-ten Frame neu zeichnen, dazwischen alte Schattenkarte weiterverwenden
+	struct CascadeCache
+	{
+		bool          enabled = true;
+		std::uint32_t cascade = 1;   // ab dieser Kaskade (0 = nah)
+		std::uint32_t interval = 2;  // 2 = jeden 2. Frame neu zeichnen
+	};
+	inline CascadeCache cascadeCache;  // [ShadowCascadeCache]
+
 	void Load();
 
 	// Prueft (alle ~2 s, Main-Thread) ob die INI geaendert wurde und laedt sie dann neu

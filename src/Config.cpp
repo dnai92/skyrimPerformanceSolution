@@ -65,6 +65,12 @@ namespace Config
 		dec.maxDistance = static_cast<float>(ini.GetDoubleValue("DecalCulling", "fMaxDistance", dec.maxDistance));
 		dec.maxRadius = static_cast<float>(ini.GetDoubleValue("DecalCulling", "fMaxRadius", dec.maxRadius));
 
+		auto& cc = cascadeCache;
+		cc.enabled = ini.GetBoolValue("ShadowCascadeCache", "bEnabled", cc.enabled);
+		cc.cascade = static_cast<std::uint32_t>(ini.GetLongValue("ShadowCascadeCache", "iCascade", cc.cascade));
+		cc.interval = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(ini.GetLongValue("ShadowCascadeCache", "iInterval", cc.interval)));
+		logger::info("ShadowCascadeCache: {} | ab Kaskade {} | neu zeichnen jeden {}. Frame", cc.enabled ? "AN" : "AUS", cc.cascade, cc.interval);
+
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
 		sky.minRadius = static_cast<float>(ini.GetDoubleValue("SkylightingCulling", "fMinRadius", sky.minRadius));

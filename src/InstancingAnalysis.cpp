@@ -91,7 +91,9 @@ namespace InstancingAnalysis
 			{
 				ZoneScopedN("Sonne Accumulate");
 				Stats::ScopedTimer timer{ Stats::Zone::SunShadowAccumulate };
+				ShadowCulling::BeforeSunAccumulate(a_this);
 				func(a_this, a_globalShadowLightCount, a_shadowMaskChannel, a_cullingScene, a_vrUpdateFlag);
+				ShadowCulling::AfterSunAccumulate(a_this);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};

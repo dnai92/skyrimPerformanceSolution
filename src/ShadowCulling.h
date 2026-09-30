@@ -15,6 +15,10 @@ namespace ShadowCulling
 	bool ShouldSkipDepthPrepassDraw(const RE::BSRenderPass& a_pass) noexcept;
 	bool InDepthPrepass() noexcept;
 
+	// Kaskaden-Cache: vor bzw. nach BSShadowDirectionalLight::Accumulate (Main-Thread)
+	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept;
+	void AfterSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept;
+
 	// Einmal pro Frame auf dem Main-Thread: Kamera-Position und Kaskaden-Culler der Sonne cachen
 	void OnFrame();
 }
