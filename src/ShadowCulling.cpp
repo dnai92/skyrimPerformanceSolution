@@ -31,6 +31,11 @@ namespace ShadowCulling
 		std::atomic<float> g_camY{ 0.0f };
 		std::atomic<float> g_camZ{ 0.0f };
 
+		// Sonnenhoehe als Sinus (1 = Zenit, 0 = Horizont). Bei tiefer Sonne werfen auch kleine Objekte lange
+		// Schatten -> Sonnen-Culling bewertet dann die Schattenlaenge (Radius / sin) statt des Radius.
+		std::atomic<float> g_sunSin{ 1.0f };
+		constexpr float    kMinSunSin = 0.05f;
+
 		void DiagRecord(const RE::NiCamera* a_camera) noexcept
 		{
 			for (std::size_t i = 0; i < kDiagSlots; ++i) {
@@ -80,14 +85,15 @@ namespace ShadowCulling
 			return Kind::kOther;
 		}
 
-		bool ShouldCull(const Config::CullRule& a_rule, const RE::BSGeometry& a_geom, std::uint32_t a_cascade) noexcept
+		bool ShouldCull(const Config::CullRule& a_rule, const RE::BSGeometry& a_geom, std::uint32_t a_cascade, float a_radiusScale = 1.0f) noexcept
 		{
 			if (!a_rule.enabled || a_cascade < a_rule.minCascade || !Config::masterEnabled.load(std::memory_order_relaxed)) {
 				return false;
 			}
 
 			const auto& bound = a_geom.worldBound;
-			if (bound.radius <= 0.0f || bound.radius >= a_rule.maxRadius) {
+			const float radius = bound.radius * a_radiusScale;  // Sonne: ungefaehre Schattenlaenge
+			if (bound.radius <= 0.0f || radius >= a_rule.maxRadius) {
 				return false;
 			}
 			if (a_rule.skipSkinned && a_geom.GetGeometryRuntimeData().skinInstance) {
@@ -101,7 +107,7 @@ namespace ShadowCulling
 			if (distance <= a_rule.minDistance) {
 				return false;
 			}
-			return bound.radius / distance < a_rule.minAngularSize;
+			return radius / distance < a_rule.minAngularSize;
 		}
 
 		float DistanceToCamera(const RE::NiBound& a_bound) noexcept
@@ -161,7 +167,7 @@ namespace ShadowCulling
 				std::uint32_t cascade = 0;
 				switch (Classify(a_this, cascade)) {
 				case Kind::kSun:
-					if (ShouldCull(Config::shadowCulling, a_visible, cascade)) {
+					if (ShouldCull(Config::shadowCulling, a_visible, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
 						Stats::Count(Stats::Counter::SunCulled);
 						return;
 					}
@@ -319,6 +325,9 @@ namespace ShadowCulling
 			auto&      ssnData = ssn->GetRuntimeData();
 			const auto sun = ssnData.sunShadowDirLight;
 			if (sun) {
+				const auto& v = sun->GetShadowDirectionalLightRuntimeData().sunVector;
+				const float len = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+				g_sunSin.store(len > 0.0f ? std::clamp(std::abs(v.z) / len, kMinSunSin, 1.0f) : 1.0f, std::memory_order_relaxed);
 				const auto& descriptors = sun->GetRuntimeData().shadowmapDescriptors;
 				g_descCount = descriptors.size();
 				for (std::uint32_t i = 0; i < descriptors.size() && i < kMaxCascades; ++i) {
@@ -344,7 +353,8 @@ namespace ShadowCulling
 
 		// Diagnose alle ~600 Frames ins Log
 		if (++g_frameCounter % 600 == 0) {
-			logger::info("[ShadowCulling-Diag] Sonnen-Deskriptoren: {} | Punktlicht-Kameras: {}", g_descCount, pointCount);
+			logger::info("[ShadowCulling-Diag] Sonnen-Deskriptoren: {} | Punktlicht-Kameras: {} | Sonnenhoehe sin={:.2f} (~{:.0f} Grad, Schattenfaktor {:.1f})",
+				g_descCount, pointCount, g_sunSin.load(), std::asin(g_sunSin.load()) * 57.2958f, 1.0f / g_sunSin.load());
 			if (const auto mainCam = RE::Main::WorldRootCamera()) {
 				logger::info("[ShadowCulling-Diag]   Hauptkamera (WorldRootCamera): {:p} '{}'", static_cast<const void*>(mainCam), mainCam->name.c_str());
 			}
