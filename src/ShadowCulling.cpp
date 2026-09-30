@@ -62,8 +62,11 @@ namespace ShadowCulling
 			REX::W32::ID3D11Texture2D*                                  copy = nullptr;    // eigene Kopie
 			std::uint32_t                                               mipLevels = 1;
 			std::uint32_t                                               arraySize = 0;
+			bool                                                        allSlices = false;  // true: alle Ebenen sichern (nicht nur ab iCascade)
 		};
-		std::array<CascadeBackup, 2> g_backups{ { { RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS_ESRAM }, { RE::RENDER_TARGETS_DEPTHSTENCIL::kVOLUMETRIC_LIGHTING_SHADOWMAPS_ESRAM } } };
+		// Volumetric Lighting: beide Ebenen komplett aus dem Cache-Frame - im Test 0.9.1 flackerte sonst die
+		// Helligkeit der ganzen Szene (Lichtstrahlen/Nebel werden offenbar aus der fernen Kaskade gespeist)
+		std::array<CascadeBackup, 2> g_backups{ { { RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS_ESRAM }, { RE::RENDER_TARGETS_DEPTHSTENCIL::kVOLUMETRIC_LIGHTING_SHADOWMAPS_ESRAM, nullptr, nullptr, 1, 0, true } } };
 		bool                         g_backupValid = false;  // Kopie passt zum letzten gezeichneten Frame
 		bool                         g_backupFailed = false;
 
@@ -417,7 +420,7 @@ namespace ShadowCulling
 				ok = false;
 				continue;
 			}
-			for (std::uint32_t slice = cfg.cascade; slice < b.arraySize; ++slice) {
+			for (std::uint32_t slice = b.allSlices ? 0 : cfg.cascade; slice < b.arraySize; ++slice) {
 				const auto sub = slice * b.mipLevels;  // Mip 0 der Ebene
 				if (skip) {
 					context->CopySubresourceRegion(src, sub, 0, 0, 0, b.copy, sub, nullptr);  // alten Stand zuruecklegen
