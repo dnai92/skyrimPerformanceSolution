@@ -46,8 +46,11 @@ namespace ShadowCulling
 			REX::W32::XMFLOAT4X4           lightTransform{};
 			RE::RENDER_TARGET_DEPTHSTENCIL renderTarget{};
 			std::uint32_t                  shadowmapIndex = 0;
-			bool                           clearOriginal = true;
+			bool                           clearSaved = false;    // clearRenderTarget vor unserer Aenderung (nur Cache-Frame)
+			bool                           clearTouched = false;  // wir haben clearRenderTarget in diesem Frame geaendert
 		};
+		RE::BSShadowDirectionalLight* g_cacheLight = nullptr;      // Licht des laufenden Frames (Main-Thread)
+		std::array<std::uint32_t, 2>  g_clearFlagSeen{};           // Diagnose: Normal-Frames mit clearRenderTarget false/true (ferne Kaskade)
 		std::array<CachedCascade, kMaxCascades> g_cached{};
 		std::uint32_t                           g_cacheInvalidations = 0;  // Diagnose: Ziel/Slice hat sich geaendert
 
@@ -67,6 +70,10 @@ namespace ShadowCulling
 		// Volumetric Lighting: beide Ebenen komplett aus dem Cache-Frame - im Test 0.9.1 flackerte sonst die
 		// Helligkeit der ganzen Szene (Lichtstrahlen/Nebel werden offenbar aus der fernen Kaskade gespeist)
 		std::array<CascadeBackup, 2> g_backups{ { { RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS_ESRAM }, { RE::RENDER_TARGETS_DEPTHSTENCIL::kVOLUMETRIC_LIGHTING_SHADOWMAPS_ESRAM, nullptr, nullptr, 1, 0, true } } };
+		bool BackupWanted(const CascadeBackup& a_b) noexcept
+		{
+			return a_b.allSlices ? Config::cascadeCache.restoreVolumetric : Config::cascadeCache.restoreShadowmap;
+		}
 		bool                         g_backupValid = false;  // Kopie passt zum letzten gezeichneten Frame
 		bool                         g_backupFailed = false;
 
@@ -397,6 +404,16 @@ namespace ShadowCulling
 	void AfterSunRender() noexcept
 	{
 		const auto& cfg = Config::cascadeCache;
+		// clearRenderTarget der Engine zuruecksetzen (auch wenn der Cache inzwischen abgeschaltet wurde)
+		if (g_cacheLight) {
+			auto& descs = g_cacheLight->GetRuntimeData().shadowmapDescriptors;
+			for (std::uint32_t i = 0; i < descs.size() && i < kMaxCascades; ++i) {
+				if (g_cached[i].clearTouched) {
+					descs[i].clearRenderTarget = g_cached[i].clearSaved;
+					g_cached[i].clearTouched = false;
+				}
+			}
+		}
 		if (!cfg.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || cfg.interval <= 1 || g_backupFailed) {
 			return;
 		}
@@ -413,7 +430,7 @@ namespace ShadowCulling
 		bool       ok = true;
 		for (auto& b : g_backups) {
 			const auto src = depth[b.target].texture;
-			if (!src) {
+			if (!src || !BackupWanted(b)) {
 				continue;  // Volumetric-Schatten ggf. nicht vorhanden
 			}
 			if (!EnsureBackup(b, src)) {
@@ -448,9 +465,11 @@ namespace ShadowCulling
 		const auto& cfg = Config::cascadeCache;
 		const bool  skip = g_cacheSkip.load(std::memory_order_relaxed);
 		auto&       descs = a_light->GetRuntimeData().shadowmapDescriptors;
+		g_cacheLight = a_light;
 		for (std::uint32_t i = cfg.cascade; i < descs.size() && i < kMaxCascades; ++i) {
 			auto& d = descs[i];
 			auto& c = g_cached[i];
+			c.clearTouched = false;
 			if (skip) {
 				if (d.renderTarget != c.renderTarget || d.shadowmapIndex != c.shadowmapIndex) {
 					// Ziel hat sich geaendert -> alter Inhalt unbrauchbar
@@ -458,14 +477,19 @@ namespace ShadowCulling
 					c.valid = false;
 					continue;
 				}
-				d.lightTransform = c.lightTransform;  // alte Matrix passend zum alten Inhalt der Schattenkarte
-				d.clearRenderTarget = false;          // alten Inhalt NICHT loeschen
+				if (cfg.freezeMatrix) {
+					d.lightTransform = c.lightTransform;  // alte Matrix passend zum alten Inhalt der Schattenkarte
+				}
+				if (cfg.noClear) {
+					// Nur fuer diesen Frame; nach Render wird der Engine-Wert wiederhergestellt (AfterSunRender)
+					c.clearSaved = d.clearRenderTarget;
+					c.clearTouched = true;
+					d.clearRenderTarget = false;
+				}
 				Stats::Count(Stats::Counter::CascadeSkipFrames);
 			} else {
-				if (!c.valid) {
-					c.clearOriginal = d.clearRenderTarget;
-				}
-				d.clearRenderTarget = c.clearOriginal;
+				// Normal-Frame: Engine-Werte unangetastet lassen, nur Stand merken
+				++g_clearFlagSeen[d.clearRenderTarget ? 1 : 0];
 				c.lightTransform = d.lightTransform;
 				c.renderTarget = d.renderTarget;
 				c.shadowmapIndex = d.shadowmapIndex;
@@ -549,7 +573,9 @@ namespace ShadowCulling
 					++n;
 				}
 			}
-			logger::info("[Cascade-Diag]   Cache-Invalidierungen (Ziel/Slice gewechselt): {}", g_cacheInvalidations);
+			logger::info("[Cascade-Diag]   Cache-Invalidierungen (Ziel/Slice gewechselt): {} | Normal-Frames ferne Kaskade clearRenderTarget false/true: {}/{}",
+				g_cacheInvalidations, g_clearFlagSeen[0], g_clearFlagSeen[1]);
+			g_clearFlagSeen = {};
 			if (const auto mainCam = RE::Main::WorldRootCamera()) {
 				logger::info("[ShadowCulling-Diag]   Hauptkamera (WorldRootCamera): {:p} '{}'", static_cast<const void*>(mainCam), mainCam->name.c_str());
 			}

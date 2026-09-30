@@ -47,6 +47,11 @@ namespace Config
 		bool          enabled = true;
 		std::uint32_t cascade = 1;   // ab dieser Kaskade (0 = nah)
 		std::uint32_t interval = 2;  // 2 = jeden 2. Frame neu zeichnen
+		// Diagnose-Schalter (einzeln abschaltbar, um Flackern einzugrenzen)
+		bool freezeMatrix = true;       // im Cache-Frame alte lightTransform einsetzen
+		bool noClear = true;            // im Cache-Frame clearRenderTarget = false
+		bool restoreShadowmap = true;   // Sonnen-Schattenkarte per GPU-Kopie sichern/zuruecklegen
+		bool restoreVolumetric = true;  // Volumetric-Schattenkarte (CS) per GPU-Kopie sichern/zuruecklegen
 	};
 	inline CascadeCache cascadeCache;  // [ShadowCascadeCache]
 

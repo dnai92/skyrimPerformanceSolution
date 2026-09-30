@@ -69,7 +69,12 @@ namespace Config
 		cc.enabled = ini.GetBoolValue("ShadowCascadeCache", "bEnabled", cc.enabled);
 		cc.cascade = static_cast<std::uint32_t>(ini.GetLongValue("ShadowCascadeCache", "iCascade", cc.cascade));
 		cc.interval = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(ini.GetLongValue("ShadowCascadeCache", "iInterval", cc.interval)));
-		logger::info("ShadowCascadeCache: {} | ab Kaskade {} | neu zeichnen jeden {}. Frame", cc.enabled ? "AN" : "AUS", cc.cascade, cc.interval);
+		cc.freezeMatrix = ini.GetBoolValue("ShadowCascadeCache", "bFreezeMatrix", cc.freezeMatrix);
+		cc.noClear = ini.GetBoolValue("ShadowCascadeCache", "bNoClear", cc.noClear);
+		cc.restoreShadowmap = ini.GetBoolValue("ShadowCascadeCache", "bRestoreShadowmap", cc.restoreShadowmap);
+		cc.restoreVolumetric = ini.GetBoolValue("ShadowCascadeCache", "bRestoreVolumetric", cc.restoreVolumetric);
+		logger::info("ShadowCascadeCache: {} | ab Kaskade {} | neu zeichnen jeden {}. Frame | Matrix einfrieren {} | Clear aus {} | Kopie Schatten {} | Kopie Volumetric {}",
+			cc.enabled ? "AN" : "AUS", cc.cascade, cc.interval, cc.freezeMatrix, cc.noClear, cc.restoreShadowmap, cc.restoreVolumetric);
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
