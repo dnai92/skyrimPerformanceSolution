@@ -5,7 +5,7 @@ $version = (Get-Content "$root\vcpkg.json" -Raw | ConvertFrom-Json).'version-sem
 $stage = Join-Path $root 'dist\stage'
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$stage\SKSE\Plugins" | Out-Null
-Copy-Item "$root\build\release\SkyrimPerf.dll", "$root\build\release\SkyrimPerf.pdb" "$stage\SKSE\Plugins"
+Copy-Item "$root\build\release\SkyrimPerf.dll", "$root\build\release\SkyrimPerf.pdb", "$root\package\SkyrimPerf.ini" "$stage\SKSE\Plugins"
 $zip = Join-Path $root "dist\SkyrimPerf-$version.zip"
 Remove-Item $zip -ErrorAction SilentlyContinue
 Compress-Archive -Path "$stage\*" -DestinationPath $zip

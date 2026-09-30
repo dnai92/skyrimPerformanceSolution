@@ -1,5 +1,6 @@
 #include "Hooks.h"
-#include "RenderHooks.h"
+#include "Config.h"
+#include "ShadowCulling.h"
 #include "Stats.h"
 
 namespace
@@ -8,7 +9,6 @@ namespace
 	{
 		if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
-			RenderHooks::Install();
 		}
 	}
 }
@@ -22,7 +22,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	logger::info("SkyrimPerf {} geladen (Tracy on-demand, Report alle 10 s)", SKSE::GetPluginVersion().string());
 
 	Stats::Init();
+	Config::Load();
 	Hooks::Install();
+	ShadowCulling::Install();
 
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
 	return true;

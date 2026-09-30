@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SkyrimPerf
-	VERSION 0.2.1
+	VERSION 0.3.0
 	LANGUAGES CXX
 )
 
@@ -23,7 +23,8 @@ add_commonlibsse_plugin(
 	SOURCES
 		src/main.cpp
 		src/Hooks.cpp
-		src/RenderHooks.cpp
+		src/Config.cpp
+		src/ShadowCulling.cpp
 		src/Stats.cpp
 		extern/tracy/public/TracyClient.cpp
 )
@@ -32,7 +33,7 @@ add_commonlibsse_plugin(
 # ON_DEMAND: kein Overhead/Speicher, solange kein Profiler verbunden ist.
 # NO_CRASH_HANDLER: Crash Logger nicht in die Quere kommen.
 target_include_directories(${PROJECT_NAME} PRIVATE src extern/tracy/public)
-target_compile_definitions(${PROJECT_NAME} PRIVATE TRACY_ENABLE TRACY_ON_DEMAND TRACY_NO_CRASH_HANDLER)
+target_compile_definitions(${PROJECT_NAME} PRIVATE TRACY_ENABLE TRACY_ON_DEMAND TRACY_NO_CRASH_HANDLER NOMINMAX)
 target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32 dbghelp)
 target_precompile_headers(${PROJECT_NAME} PRIVATE src/PCH.h)
 set_source_files_properties(extern/tracy/public/TracyClient.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON COMPILE_OPTIONS "/W0")

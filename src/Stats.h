@@ -21,20 +21,24 @@ namespace Stats
 		"Player Update",
 	};
 
-	// Zaehler pro Frame (Render-Aufrufe)
+	// Zaehler pro Frame (Meshes, die in Culling-Listen aufgenommen bzw. verworfen werden)
 	enum class Counter : std::size_t
 	{
-		ColorDraws,      // Draws mit Render-Target (Hauptszene, UI, Post-Processing)
-		DepthOnlyDraws,  // Draws nur mit Depth-Buffer (Shadow-Maps, Prepass, Occlusion)
-		Dispatches,      // Compute-Shader (v. a. Community Shaders)
+		SunCascade0,      // Meshes in Sonnen-Kaskade 0 (nah)
+		SunCascade1,      // Meshes in Sonnen-Kaskade 1
+		SunCascade2Plus,  // Meshes in Sonnen-Kaskade 2+
+		SunCulled,        // von ShadowCulling verworfene Meshes
+		OtherCullers,     // AppendVirtual anderer Culler (Hauptszene, Punktlichter, ...)
 
 		kTotal
 	};
 
 	inline constexpr std::array<const char*, static_cast<std::size_t>(Counter::kTotal)> kCounterNames{
-		"Draws Farbe",
-		"Draws Depth-only",
-		"Dispatches",
+		"Sonne Kaskade 0",
+		"Sonne Kaskade 1",
+		"Sonne Kaskade 2+",
+		"Sonne gecullt",
+		"Andere Culler",
 	};
 
 	void Init();
