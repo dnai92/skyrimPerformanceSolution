@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SkyrimPerf
-	VERSION 0.4.1
+	VERSION 0.4.2
 	LANGUAGES CXX
 )
 
@@ -39,3 +39,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32 dbghelp)
 target_precompile_headers(${PROJECT_NAME} PRIVATE src/PCH.h)
 set_source_files_properties(extern/tracy/public/TracyClient.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON COMPILE_OPTIONS "/W0")
 target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive- /utf-8)
+
+# DLL verweist nur auf den PDB-Dateinamen (liegt neben der DLL) -> laufendes Skyrim sperrt nicht die Build-PDB
+target_link_options(${PROJECT_NAME} PRIVATE "/PDBALTPATH:%_PDB%")

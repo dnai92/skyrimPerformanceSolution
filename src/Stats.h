@@ -10,6 +10,8 @@ namespace Stats
 		PapyrusTasklets,
 		NpcUpdate,
 		PlayerUpdate,
+		SunShadowAccumulate,  // BSShadowDirectionalLight::Accumulate (Culling/Eintragen)
+		SunShadowRender,      // BSShadowDirectionalLight::Render (Draw Calls)
 
 		kTotal
 	};
@@ -19,6 +21,8 @@ namespace Stats
 		"Papyrus Tasklets",
 		"NPC Actor::Update",
 		"Player Update",
+		"Sonne Accumulate",
+		"Sonne Render",
 	};
 
 	// Zaehler pro Frame (Meshes, die in Culling-Listen aufgenommen bzw. verworfen werden)
@@ -29,6 +33,9 @@ namespace Stats
 		SunCascade2Plus,  // Meshes in Sonnen-Kaskade 2+
 		SunCulled,        // von ShadowCulling verworfene Meshes
 		OtherCullers,     // AppendVirtual anderer Culler (Hauptszene, Punktlichter, ...)
+		SunRenderCalls,   // Aufrufe von BSShadowDirectionalLight::Render
+		SunDraws,         // Utility-SetupGeometry waehrend Sonnen-Render (= Draws)
+		UtilityDraws,     // Utility-SetupGeometry insgesamt
 
 		kTotal
 	};
@@ -39,6 +46,9 @@ namespace Stats
 		"Sonne Kaskade 2+",
 		"Sonne gecullt",
 		"Andere Culler",
+		"Sonne Render-Aufrufe",
+		"Sonne Draws",
+		"Utility Draws gesamt",
 	};
 
 	void Init();

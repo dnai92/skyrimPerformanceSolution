@@ -1,5 +1,7 @@
 #include "InstancingAnalysis.h"
 
+#include "Stats.h"
+
 #include <mutex>
 #include <unordered_map>
 
@@ -72,9 +74,23 @@ namespace InstancingAnalysis
 		{
 			static void thunk(RE::BSShadowDirectionalLight* a_this, std::uint32_t& a_index)
 			{
+				ZoneScopedN("Sonne Render");
+				Stats::Count(Stats::Counter::SunRenderCalls);
+				Stats::ScopedTimer timer{ Stats::Zone::SunShadowRender };
 				g_inSunShadows.store(true, std::memory_order_relaxed);
 				func(a_this, a_index);
 				g_inSunShadows.store(false, std::memory_order_relaxed);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct SunShadowAccumulate
+		{
+			static void thunk(RE::BSShadowDirectionalLight* a_this, std::uint32_t& a_globalShadowLightCount, std::uint32_t a_shadowMaskChannel, RE::NiAVObject* a_cullingScene, std::uint8_t a_vrUpdateFlag)
+			{
+				ZoneScopedN("Sonne Accumulate");
+				Stats::ScopedTimer timer{ Stats::Zone::SunShadowAccumulate };
+				func(a_this, a_globalShadowLightCount, a_shadowMaskChannel, a_cullingScene, a_vrUpdateFlag);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -131,7 +147,9 @@ namespace InstancingAnalysis
 		{
 			static void thunk(RE::BSShader* a_this, RE::BSRenderPass* a_pass, std::uint32_t a_flags)
 			{
+				Stats::Count(Stats::Counter::UtilityDraws);
 				if (g_inSunShadows.load(std::memory_order_relaxed) && a_pass && a_pass->geometry) {
+					Stats::Count(Stats::Counter::SunDraws);
 					Record(*a_pass);
 				}
 				func(a_this, a_pass, a_flags);
@@ -216,7 +234,8 @@ namespace InstancingAnalysis
 	{
 		REL::Relocation<std::uintptr_t> sunVtbl{ RE::VTABLE_BSShadowDirectionalLight[0] };
 		SunShadowRender::func = sunVtbl.write_vfunc(0xA, SunShadowRender::thunk);
-		logger::info("Hook installiert: BSShadowDirectionalLight::Render (vfunc 0xA)");
+		SunShadowAccumulate::func = sunVtbl.write_vfunc(0x9, SunShadowAccumulate::thunk);
+		logger::info("Hooks installiert: BSShadowDirectionalLight::Accumulate (0x9) / Render (0xA)");
 
 		REL::Relocation<std::uintptr_t> utilVtbl{ RE::VTABLE_BSUtilityShader[0] };
 		UtilitySetupGeometry::func = utilVtbl.write_vfunc(0x6, UtilitySetupGeometry::thunk);
