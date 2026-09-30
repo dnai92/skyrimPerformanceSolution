@@ -10,15 +10,48 @@ namespace ShadowCulling
 		constexpr std::size_t kMaxCascades = 4;
 
 		// Vom Main-Thread pro Frame gesetzt, von den Culling-Jobs (Worker-Threads) gelesen
-		std::array<std::atomic<RE::BSCullingProcess*>, kMaxCascades> g_sunCullers{};
+		// Zuordnung ueber die Kamera: parallele Culling-Jobs nutzen eigene Culler-Instanzen,
+		// aber dieselbe Kaskaden-Kamera wie der Deskriptor.
+		std::array<std::atomic<const RE::NiCamera*>, kMaxCascades> g_sunCameras{};
+		std::array<RE::BSCullingProcess*, kMaxCascades>            g_descCullers{};  // nur Diagnose (Main-Thread)
+		std::uint32_t                                              g_descCount = 0;  // nur Diagnose (Main-Thread)
+
+		// Diagnose: welche Kameras tragen wie viele Meshes ein (lock-freie Tabelle)
+		constexpr std::size_t                                      kDiagSlots = 32;
+		std::array<std::atomic<const RE::NiCamera*>, kDiagSlots>   g_diagCameras{};
+		std::array<std::atomic<std::uint32_t>, kDiagSlots>         g_diagCounts{};
+		std::uint32_t                                              g_frameCounter = 0;
+
+		void DiagRecord(const RE::NiCamera* a_camera) noexcept
+		{
+			for (std::size_t i = 0; i < kDiagSlots; ++i) {
+				auto cur = g_diagCameras[i].load(std::memory_order_relaxed);
+				if (cur == a_camera) {
+					g_diagCounts[i].fetch_add(1, std::memory_order_relaxed);
+					return;
+				}
+				if (!cur && g_diagCameras[i].compare_exchange_strong(cur, a_camera, std::memory_order_relaxed)) {
+					g_diagCounts[i].fetch_add(1, std::memory_order_relaxed);
+					return;
+				}
+				if (cur == a_camera) {
+					g_diagCounts[i].fetch_add(1, std::memory_order_relaxed);
+					return;
+				}
+			}
+		}
 		std::atomic<float>                                           g_camX{ 0.0f };
 		std::atomic<float>                                           g_camY{ 0.0f };
 		std::atomic<float>                                           g_camZ{ 0.0f };
 
 		int CascadeIndexOf(const RE::BSCullingProcess* a_culler) noexcept
 		{
+			const auto camera = a_culler->camera;
+			if (!camera) {
+				return -1;
+			}
 			for (std::size_t i = 0; i < kMaxCascades; ++i) {
-				if (g_sunCullers[i].load(std::memory_order_relaxed) == a_culler) {
+				if (g_sunCameras[i].load(std::memory_order_relaxed) == camera) {
 					return static_cast<int>(i);
 				}
 			}
@@ -54,6 +87,7 @@ namespace ShadowCulling
 		{
 			static void thunk(RE::BSCullingProcess* a_this, RE::BSGeometry& a_visible, std::int32_t a_alphaGroupIndex)
 			{
+				DiagRecord(a_this->camera);
 				const int cascade = CascadeIndexOf(a_this);
 				if (cascade >= 0) {
 					if (ShouldCull(a_visible, static_cast<std::uint32_t>(cascade))) {
@@ -86,17 +120,36 @@ namespace ShadowCulling
 			g_camZ.store(pos.z, std::memory_order_relaxed);
 		}
 
-		std::array<RE::BSCullingProcess*, kMaxCascades> cullers{};
+		std::array<const RE::NiCamera*, kMaxCascades> cameras{};
+		g_descCullers = {};
+		g_descCount = 0;
 		if (const auto ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]) {
 			if (const auto sun = ssn->GetRuntimeData().sunShadowDirLight) {
 				const auto& descriptors = sun->GetRuntimeData().shadowmapDescriptors;
+				g_descCount = descriptors.size();
 				for (std::uint32_t i = 0; i < descriptors.size() && i < kMaxCascades; ++i) {
-					cullers[i] = descriptors[i].cullingProcess;
+					cameras[i] = descriptors[i].camera.get();
+					g_descCullers[i] = descriptors[i].cullingProcess;
 				}
 			}
 		}
 		for (std::size_t i = 0; i < kMaxCascades; ++i) {
-			g_sunCullers[i].store(cullers[i], std::memory_order_relaxed);
+			g_sunCameras[i].store(cameras[i], std::memory_order_relaxed);
+		}
+
+		// Diagnose alle ~600 Frames ins Log
+		if (++g_frameCounter % 600 == 0) {
+			logger::info("[ShadowCulling-Diag] Sonnen-Deskriptoren: {}", g_descCount);
+			for (std::size_t i = 0; i < kMaxCascades && i < g_descCount; ++i) {
+				logger::info("[ShadowCulling-Diag]   Kaskade {}: Kamera {:p}, Culler {:p}", i, static_cast<const void*>(cameras[i]), static_cast<const void*>(g_descCullers[i]));
+			}
+			for (std::size_t i = 0; i < kDiagSlots; ++i) {
+				const auto cam = g_diagCameras[i].exchange(nullptr, std::memory_order_relaxed);
+				const auto cnt = g_diagCounts[i].exchange(0, std::memory_order_relaxed);
+				if (cnt > 0) {
+					logger::info("[ShadowCulling-Diag]   Kamera {:p}: {} Meshes (~{}/Frame)", static_cast<const void*>(cam), cnt, cnt / 600);
+				}
+			}
 		}
 	}
 }
