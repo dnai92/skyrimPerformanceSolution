@@ -85,10 +85,32 @@ namespace Config
 		si.enabled = ini.GetBoolValue("ShadowInstancing", "bEnabled", si.enabled);
 		si.verify = ini.GetBoolValue("ShadowInstancing", "bVerify", si.verify);
 		si.debugOffsetZ = static_cast<float>(ini.GetDoubleValue("ShadowInstancing", "fDebugOffsetZ", si.debugOffsetZ));
-		si.technique = static_cast<std::uint32_t>(std::strtoul(ini.GetValue("ShadowInstancing", "sTechnique", "C046"), nullptr, 16));
+		{
+			// Kommagetrennte Hex-Liste, z. B. "C046,C006"
+			std::string list = ini.GetValue("ShadowInstancing", "sTechnique", "C046");
+			si.techniqueCount = 0;
+			std::size_t pos = 0;
+			while (pos < list.size() && si.techniqueCount < si.techniques.size()) {
+				const auto end = list.find(',', pos);
+				const auto item = list.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+				if (!item.empty()) {
+					si.techniques[si.techniqueCount++] = static_cast<std::uint32_t>(std::strtoul(item.c_str(), nullptr, 16));
+				}
+				if (end == std::string::npos) {
+					break;
+				}
+				pos = end + 1;
+			}
+			si.technique = si.techniqueCount ? si.techniques[0] : 0;
+		}
+		si.allowTwoSided = ini.GetBoolValue("ShadowInstancing", "bAllowTwoSided", si.allowTwoSided);
 		si.debugMode = static_cast<std::uint32_t>(ini.GetLongValue("ShadowInstancing", "iDebugMode", si.debugMode));
 		si.minGroup = std::max<std::uint32_t>(2, static_cast<std::uint32_t>(ini.GetLongValue("ShadowInstancing", "iMinGroup", si.minGroup)));
-		logger::info("ShadowInstancing: {} | Pruefmodus {} (Versatz {:.0f}) | Technik {:X} | ab {} gleichen Meshes | Debug-Modus {}", si.enabled ? "AN" : "AUS", si.verify, si.debugOffsetZ, si.technique, si.minGroup, si.debugMode);
+		std::string techs;
+		for (std::uint32_t i = 0; i < si.techniqueCount; ++i) {
+			techs += std::format("{}{:X}", i ? "," : "", si.techniques[i]);
+		}
+		logger::info("ShadowInstancing: {} | Pruefmodus {} (Versatz {:.0f}) | Techniken {} | zweiseitig {} | Debug-Modus {}", si.enabled ? "AN" : "AUS", si.verify, si.debugOffsetZ, techs, si.allowTwoSided, si.debugMode);
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);

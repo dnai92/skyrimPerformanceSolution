@@ -134,6 +134,13 @@ namespace InstancingAnalysis
 			double        renderMs = 0.0;
 		} g_window2;
 
+		// Techniken der einfachen Kategorie: Draws und moegliche Ersparnis (fuer die Freischaltung in sTechnique)
+		struct TechStat
+		{
+			std::uint64_t draws = 0, saved = 0, twoSidedDraws = 0;
+		};
+		std::unordered_map<std::uint32_t, TechStat> g_techStats;
+
 		Cat Classify(RE::BSGeometry& a_geom, const void*& a_texture) noexcept;
 		bool PositionIsFloat32(std::uint64_t a_desc) noexcept;
 
@@ -145,6 +152,8 @@ namespace InstancingAnalysis
 			const void*   vertexBuffer;
 			const void*   indexBuffer;
 			std::uint64_t vertexDesc;
+			std::uint32_t technique;
+			bool          twoSided;
 			bool operator==(const InstKey&) const = default;
 		};
 		struct InstKeyHash
@@ -154,6 +163,7 @@ namespace InstancingAnalysis
 				std::size_t h = std::hash<const void*>{}(k.vertexBuffer);
 				h ^= std::hash<const void*>{}(k.indexBuffer) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
 				h ^= std::hash<std::uint64_t>{}(k.vertexDesc) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+				h ^= (static_cast<std::size_t>(k.technique) << 1 | (k.twoSided ? 1 : 0)) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
 				return h;
 			}
 		};
@@ -199,7 +209,15 @@ namespace InstancingAnalysis
 		// Qualifiziert sich der Pass fuer Instancing? (einfach: statisch, undurchsichtig, einseitig, gewuenschte Technik)
 		bool Qualifies(const RE::BSRenderPass& a_pass, bool a_alphaTest) noexcept
 		{
-			if (a_alphaTest || a_pass.passEnum != Config::shadowInstancing.technique || !a_pass.geometry) {
+			const auto& cfg = Config::shadowInstancing;
+			if (a_alphaTest || !a_pass.geometry) {
+				return false;
+			}
+			bool allowed = false;
+			for (std::uint32_t i = 0; i < cfg.techniqueCount; ++i) {
+				allowed = allowed || a_pass.passEnum == cfg.techniques[i];
+			}
+			if (!allowed) {
 				return false;
 			}
 			auto& geom = *a_pass.geometry;
@@ -208,7 +226,7 @@ namespace InstancingAnalysis
 				return false;
 			}
 			const auto prop = geom.GetGeometryRuntimeData().shaderProperty.get();
-			if (prop && prop->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kTwoSided)) {
+			if (!cfg.allowTwoSided && prop && prop->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kTwoSided)) {
 				return false;
 			}
 			return geom.AsTriShape() != nullptr;
@@ -291,7 +309,9 @@ namespace InstancingAnalysis
 			auto&       geom = *a_pass.geometry;
 			const auto  rd = geom.GetGeometryRuntimeData().rendererData;
 			const auto  tri = geom.AsTriShape();
-			const InstKey key{ rd->vertexBuffer, rd->indexBuffer, std::bit_cast<std::uint64_t>(rd->vertexDesc) };
+			const auto    prop = geom.GetGeometryRuntimeData().shaderProperty.get();
+			const bool    twoSided = prop && prop->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kTwoSided);
+			const InstKey key{ rd->vertexBuffer, rd->indexBuffer, std::bit_cast<std::uint64_t>(rd->vertexDesc), a_pass.passEnum, twoSided };
 			try {
 				const auto [it, inserted] = g_instIndex.try_emplace(key, g_instUsed);
 				if (inserted) {
@@ -301,7 +321,7 @@ namespace InstancingAnalysis
 					auto& g = g_instGroups[g_instUsed++];
 					auto  desc = rd->vertexDesc;
 					g.group = InstancedDraw::Group{ rd->vertexBuffer, rd->indexBuffer, desc.GetSize(), static_cast<std::uint32_t>(tri->GetTrishapeRuntimeData().triangleCount) * 3u,
-						PositionIsFloat32(std::bit_cast<std::uint64_t>(rd->vertexDesc)), 0, 0 };
+						PositionIsFloat32(std::bit_cast<std::uint64_t>(rd->vertexDesc)), 0, 0, (a_pass.passEnum & 0x8000) != 0, twoSided };
 					g.instances.clear();
 					return false;  // erstes Mesh zeichnet die Engine
 				}
@@ -437,6 +457,11 @@ namespace InstancingAnalysis
 				w.draws[i] += g_frameCat[i];
 			}
 			for (const auto& [key, count] : g_frameGroups2) {
+				if (key.cat == static_cast<std::uint32_t>(Cat::kSimple)) {
+					auto& ts = g_techStats[key.technique];
+					ts.draws += count;
+					ts.saved += count >= 2 ? count - 1 : 0;
+				}
 				if (count >= 2) {
 					w.saved[key.cat] += count - 1;
 					++w.groups[key.cat];
@@ -474,6 +499,12 @@ namespace InstancingAnalysis
 			const double usPerDraw = drawsAll ? a_sunRenderMs * 1000.0 / (drawsAll / f) : 0.0;
 			logger::info("[Instancing-v2]   => Schritt 2 (einfach): -{:.0f} Draws/Frame (~{:.2f} ms) | Schritt 3 (+Alpha-Test): -{:.0f} (~{:.2f} ms) | alles Moegliche: -{:.0f}",
 				simple, simple * usPerDraw / 1000.0, simpleAlpha, simpleAlpha * usPerDraw / 1000.0, savedAll / f);
+			std::vector<std::pair<std::uint32_t, TechStat>> techs(g_techStats.begin(), g_techStats.end());
+			std::ranges::sort(techs, [](const auto& a, const auto& b) { return a.second.saved > b.second.saved; });
+			for (std::size_t i = 0; i < techs.size() && i < 12; ++i) {
+				logger::info("[Instancing-v2]     Technik {:8X}: {:6.0f} Draws/Frame, Instancing spart {:6.0f}", techs[i].first, techs[i].second.draws / f, techs[i].second.saved / f);
+			}
+			g_techStats.clear();
 			w = {};
 		}
 

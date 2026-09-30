@@ -92,6 +92,32 @@ float4 main(VS_INPUT input) : SV_POSITION
 			}
 		}
 
+		ID3D11RasterizerState* g_rsTwoSided = nullptr;  // Kopie des erfassten Zustands mit CullMode NONE
+		ID3D11RasterizerState* g_rsTwoSidedBase = nullptr;
+
+		ID3D11RasterizerState* TwoSidedState(ID3D11RasterizerState* a_base) noexcept
+		{
+			if (!a_base) {
+				return nullptr;
+			}
+			if (a_base == g_rsTwoSidedBase && g_rsTwoSided) {
+				return g_rsTwoSided;
+			}
+			if (g_rsTwoSided) {
+				g_rsTwoSided->Release();
+				g_rsTwoSided = nullptr;
+			}
+			D3D11_RASTERIZER_DESC desc{};
+			a_base->GetDesc(&desc);
+			desc.CullMode = D3D11_CULL_NONE;
+			if (FAILED(g_device->CreateRasterizerState(&desc, &g_rsTwoSided))) {
+				g_rsTwoSided = nullptr;
+				return a_base;
+			}
+			g_rsTwoSidedBase = a_base;
+			return g_rsTwoSided;
+		}
+
 		template <class T>
 		void SafeRelease(T*& a_p) noexcept
 		{
@@ -360,12 +386,24 @@ float4 main(VS_INPUT input) : SV_POSITION
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 		int currentLayout = -1;
+		int currentVS = a_clampZ ? 1 : 0;
+		int currentRS = 0;  // 0 = erfasster Zustand, 1 = ohne Culling
 		for (std::uint32_t i = 0; i < a_groupCount; ++i) {
 			const auto& g = a_groups[i];
 			const int   layout = g.fullPrecision ? 1 : 0;
 			if (layout != currentLayout) {
 				ctx->IASetInputLayout(g_layout[layout]);
 				currentLayout = layout;
+			}
+			const int vs = g.clampZ ? 1 : 0;
+			if (vs != currentVS) {
+				ctx->VSSetShader(g_vs[vs], nullptr, 0);
+				currentVS = vs;
+			}
+			const int rs = g.twoSided ? 1 : 0;
+			if (rs != currentRS) {
+				ctx->RSSetState(rs ? TwoSidedState(g_rs) : g_rs);
+				currentRS = rs;
 			}
 			ID3D11Buffer* vbs[2] = { static_cast<ID3D11Buffer*>(g.vertexBuffer), g_instanceVB };
 			const UINT    strides[2] = { g.stride, static_cast<UINT>(sizeof(Instance)) };

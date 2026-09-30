@@ -66,7 +66,10 @@ namespace Config
 		bool          enabled = true;
 		bool          verify = false;         // Pruefmodus: Engine zeichnet alles, Instanzen werden ZUSAETZLICH gezeichnet
 		float         debugOffsetZ = 0.0f;    // Pruefmodus: Instanzen um diesen Wert nach oben versetzen (sichtbarer Beweis)
-		std::uint32_t technique = 0xC046;     // nur diese Utility-Technik (Shadowmap, clamped, ohne Alpha-Test)
+		std::uint32_t technique = 0xC046;     // erste Technik der Liste (Kompatibilitaet)
+		std::array<std::uint32_t, 16> techniques{ 0xC046 };  // erlaubte Utility-Techniken (Shadowmap ohne Alpha-Test)
+		std::uint32_t techniqueCount = 1;
+		bool          allowTwoSided = false;  // zweiseitige Meshes (anderer Rasterizer-Zustand) mit instanzieren
 		std::uint32_t minGroup = 2;           // ab so vielen gleichen Meshes pro Batch
 		std::uint32_t debugMode = 0;          // Diagnose: 1 = Flush ohne Draw-Aufrufe (nur Zustand), 2 = gar kein Flush, 3 = nur sammeln/zaehlen
 	};

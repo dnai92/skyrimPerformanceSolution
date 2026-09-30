@@ -24,6 +24,8 @@ namespace InstancedDraw
 		bool          fullPrecision;  // Position als 4x float32 statt 4x float16
 		std::uint32_t firstInstance;  // Index in das Instanz-Array dieses Flushs
 		std::uint32_t instanceCount;
+		bool          clampZ;  // Variante RENDER_SHADOWMAP_CLAMPED
+		bool          twoSided;  // Rasterizer ohne Backface-Culling
 	};
 
 	// Einmalig (Main-Thread, Device vorhanden). Rueckgabe false + Fehlertext bei Problemen.
