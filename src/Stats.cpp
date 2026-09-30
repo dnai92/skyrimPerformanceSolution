@@ -116,6 +116,8 @@ namespace Stats
 			std::string col{ name };
 			std::ranges::replace(col, ' ', '_');
 			std::erase(col, ':');
+			std::erase(col, '(');
+			std::erase(col, ')');
 			csv << std::format(",{0}_avg_ms,{0}_p99_ms,{0}_max_ms", col);
 		}
 		for (const auto name : kCounterNames) {

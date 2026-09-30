@@ -12,6 +12,8 @@ namespace Stats
 		PlayerUpdate,
 		SunShadowAccumulate,  // BSShadowDirectionalLight::Accumulate (Culling/Eintragen)
 		SunShadowRender,      // BSShadowDirectionalLight::Render (Draw Calls)
+		FsmpWaitMain,         // Main-Thread wartet in hdtsmp64.dll (SwitchToThread/Sleep/Wait/Locks)
+		CbpcWaitMain,         // Main-Thread wartet in cbp.dll
 
 		kTotal
 	};
@@ -23,6 +25,8 @@ namespace Stats
 		"Player Update",
 		"Sonne Accumulate",
 		"Sonne Render",
+		"FSMP Warten (Main)",
+		"CBPC Warten (Main)",
 	};
 
 	// Zaehler pro Frame (Meshes, die in Culling-Listen aufgenommen bzw. verworfen werden)
@@ -47,6 +51,8 @@ namespace Stats
 		SunRenderCalls,   // Aufrufe von BSShadowDirectionalLight::Render
 		SunDraws,         // Utility-SetupGeometry waehrend Sonnen-Render (= Draws)
 		UtilityDraws,     // Utility-SetupGeometry insgesamt
+		FsmpWaitCalls,    // Warte-Aufrufe von FSMP auf dem Main-Thread
+		CbpcWaitCalls,    // Warte-Aufrufe von CBPC auf dem Main-Thread
 
 		kTotal
 	};
@@ -71,6 +77,8 @@ namespace Stats
 		"Sonne Render-Aufrufe",
 		"Sonne Draws",
 		"Utility Draws gesamt",
+		"FSMP Warte-Aufrufe",
+		"CBPC Warte-Aufrufe",
 	};
 
 	void Init();

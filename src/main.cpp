@@ -4,12 +4,18 @@
 #include "Config.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
+#include "WaitProbe.h"
 
 namespace
 {
 	void OnMessage(SKSE::MessagingInterface::Message* a_msg)
 	{
-		if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
+		if (a_msg->type == SKSE::MessagingInterface::kPostLoad) {
+			WaitProbe::ModuleResult fsmp, cbpc;
+			WaitProbe::Install(fsmp, cbpc);
+			logger::info("WaitProbe: FSMP (hdtsmp64.dll) {} - {} Import-Eintraege umgebogen | CBPC (cbp.dll) {} - {} umgebogen",
+				fsmp.found ? "gefunden" : "NICHT geladen", fsmp.patched, cbpc.found ? "gefunden" : "NICHT geladen", cbpc.patched);
+		} else if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
 			ShadowCulling::InstallLate();
 			Hotkey::Register();
