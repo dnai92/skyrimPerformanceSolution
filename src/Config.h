@@ -60,6 +60,17 @@ namespace Config
 	};
 	inline CascadeCache cascadeCache;  // [ShadowCascadeCache]
 
+	// Instancing der Sonnenschatten (Schritt 2): gleiche einfache Meshes eines Batches in einem Draw Call
+	struct ShadowInstancing
+	{
+		bool          enabled = true;
+		bool          verify = false;         // Pruefmodus: Engine zeichnet alles, Instanzen werden ZUSAETZLICH gezeichnet
+		float         debugOffsetZ = 0.0f;    // Pruefmodus: Instanzen um diesen Wert nach oben versetzen (sichtbarer Beweis)
+		std::uint32_t technique = 0xC046;     // nur diese Utility-Technik (Shadowmap, clamped, ohne Alpha-Test)
+		std::uint32_t minGroup = 2;           // ab so vielen gleichen Meshes pro Batch
+	};
+	inline ShadowInstancing shadowInstancing;  // [ShadowInstancing]
+
 	void Load();
 
 	// Prueft (alle ~2 s, Main-Thread) ob die INI geaendert wurde und laedt sie dann neu

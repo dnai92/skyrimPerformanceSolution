@@ -81,6 +81,14 @@ namespace Config
 		logger::info("ShadowCascadeCache: {} | ab Kaskade {} | neu zeichnen jeden {}. Frame | Matrix {} | Kamera {} | Grenzen {} | Clear aus {} | Kopie Schatten {} | Kopie Volumetric {} | Draws weglassen {} | nur bei gleicher Projektion {} (eps {})",
 			cc.enabled ? "AN" : "AUS", cc.cascade, cc.interval, cc.freezeMatrix, cc.freezeCamera, cc.freezeSplits, cc.noClear, cc.restoreShadowmap, cc.restoreVolumetric, cc.skipDraws, cc.requireSameProjection, cc.projectionEpsilon);
 
+		auto& si = shadowInstancing;
+		si.enabled = ini.GetBoolValue("ShadowInstancing", "bEnabled", si.enabled);
+		si.verify = ini.GetBoolValue("ShadowInstancing", "bVerify", si.verify);
+		si.debugOffsetZ = static_cast<float>(ini.GetDoubleValue("ShadowInstancing", "fDebugOffsetZ", si.debugOffsetZ));
+		si.technique = static_cast<std::uint32_t>(std::strtoul(ini.GetValue("ShadowInstancing", "sTechnique", "C046"), nullptr, 16));
+		si.minGroup = std::max<std::uint32_t>(2, static_cast<std::uint32_t>(ini.GetLongValue("ShadowInstancing", "iMinGroup", si.minGroup)));
+		logger::info("ShadowInstancing: {} | Pruefmodus {} (Versatz {:.0f}) | Technik {:X} | ab {} gleichen Meshes", si.enabled ? "AN" : "AUS", si.verify, si.debugOffsetZ, si.technique, si.minGroup);
+
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
 		sky.minRadius = static_cast<float>(ini.GetDoubleValue("SkylightingCulling", "fMinRadius", sky.minRadius));

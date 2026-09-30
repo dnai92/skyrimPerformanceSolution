@@ -1,6 +1,8 @@
 #include "InstancingAnalysis.h"
 
+#include "Config.h"
 #include "DetourHelper.h"
+#include "InstancedDraw.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
 
@@ -132,15 +134,181 @@ namespace InstancingAnalysis
 			double        renderMs = 0.0;
 		} g_window2;
 
-		// BSBatchRenderer::RenderBatches (dieselbe Funktion wie in Community Shaders FrameAnnotations): Batch-Grenzen zaehlen
+		Cat Classify(RE::BSGeometry& a_geom, const void*& a_texture) noexcept;
+
+		// ---- Shadow-Instancing (Schritt 2) ----
+		// Innerhalb eines RenderBatches-Aufrufs der Sonnenschatten: das erste Mesh einer Gruppe zeichnet die Engine,
+		// alle weiteren gleichen Meshes werden gesammelt und am Ende des Batches mit einem Draw Call nachgezeichnet.
+		struct InstKey
+		{
+			const void*   vertexBuffer;
+			const void*   indexBuffer;
+			std::uint64_t vertexDesc;
+			bool operator==(const InstKey&) const = default;
+		};
+		struct InstKeyHash
+		{
+			std::size_t operator()(const InstKey& k) const noexcept
+			{
+				std::size_t h = std::hash<const void*>{}(k.vertexBuffer);
+				h ^= std::hash<const void*>{}(k.indexBuffer) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+				h ^= std::hash<std::uint64_t>{}(k.vertexDesc) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+				return h;
+			}
+		};
+		struct InstGroup
+		{
+			InstancedDraw::Group                 group{};
+			std::vector<InstancedDraw::Instance> instances;
+		};
+
+		bool                                                    g_instBatchActive = false;  // aktueller RenderBatches-Aufruf sammelt
+		bool                                                    g_instCaptured = false;
+		bool                                                    g_instInitFailed = false;
+		std::unordered_map<InstKey, std::uint32_t, InstKeyHash> g_instIndex;
+		std::vector<InstGroup>                                  g_instGroups;
+		std::uint32_t                                           g_instUsed = 0;  // benutzte Eintraege in g_instGroups
+		std::vector<InstancedDraw::Instance>                    g_instFlat;
+		std::vector<InstancedDraw::Group>                       g_instFlatGroups;
+
+		void* D3DContext() noexcept
+		{
+			const auto r = RE::BSGraphics::Renderer::GetSingleton();
+			return r ? static_cast<void*>(r->GetRuntimeData().context) : nullptr;
+		}
+
+		bool InstancingWanted() noexcept
+		{
+			const auto& cfg = Config::shadowInstancing;
+			if (!cfg.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || g_instInitFailed) {
+				return false;
+			}
+			if (!InstancedDraw::Ready()) {
+				char err[512]{};
+				if (!InstancedDraw::Init(RE::BSGraphics::Renderer::GetDevice(), err, sizeof(err))) {
+					g_instInitFailed = true;
+					logger::error("ShadowInstancing: Initialisierung fehlgeschlagen - {}", err);
+					return false;
+				}
+				logger::info("ShadowInstancing: Shader und Puffer angelegt");
+			}
+			return true;
+		}
+
+		// Qualifiziert sich der Pass fuer Instancing? (einfach: statisch, undurchsichtig, einseitig, gewuenschte Technik)
+		bool Qualifies(const RE::BSRenderPass& a_pass, bool a_alphaTest) noexcept
+		{
+			if (a_alphaTest || a_pass.passEnum != Config::shadowInstancing.technique || !a_pass.geometry) {
+				return false;
+			}
+			auto& geom = *a_pass.geometry;
+			const void* texture = nullptr;
+			if (Classify(geom, texture) != Cat::kSimple) {
+				return false;
+			}
+			const auto prop = geom.GetGeometryRuntimeData().shaderProperty.get();
+			if (prop && prop->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kTwoSided)) {
+				return false;
+			}
+			return geom.AsTriShape() != nullptr;
+		}
+
+		InstancedDraw::Instance MakeInstance(const RE::BSGeometry& a_geom) noexcept
+		{
+			const auto& w = a_geom.world;
+			RE::NiPoint3 adjust{};
+			if (const auto state = RE::BSGraphics::RendererShadowState::GetSingleton()) {
+				adjust = state->GetRuntimeData().posAdjust.getEye();
+			}
+			InstancedDraw::Instance inst{};
+			for (int r = 0; r < 3; ++r) {
+				for (int c = 0; c < 3; ++c) {
+					inst.rows[r][c] = w.rotate.entry[r][c] * w.scale;
+				}
+			}
+			inst.rows[0][3] = w.translate.x - adjust.x;
+			inst.rows[1][3] = w.translate.y - adjust.y;
+			inst.rows[2][3] = w.translate.z - adjust.z + Config::shadowInstancing.debugOffsetZ;
+			return inst;
+		}
+
+		// true = Pass wurde uebernommen (Engine soll ihn NICHT zeichnen)
+		bool CollectInstance(RE::BSRenderPass& a_pass) noexcept
+		{
+			auto&       geom = *a_pass.geometry;
+			const auto  rd = geom.GetGeometryRuntimeData().rendererData;
+			const auto  tri = geom.AsTriShape();
+			const InstKey key{ rd->vertexBuffer, rd->indexBuffer, std::bit_cast<std::uint64_t>(rd->vertexDesc) };
+			try {
+				const auto [it, inserted] = g_instIndex.try_emplace(key, g_instUsed);
+				if (inserted) {
+					if (g_instUsed == g_instGroups.size()) {
+						g_instGroups.emplace_back();
+					}
+					auto& g = g_instGroups[g_instUsed++];
+					auto  desc = rd->vertexDesc;
+					g.group = InstancedDraw::Group{ rd->vertexBuffer, rd->indexBuffer, desc.GetSize(), static_cast<std::uint32_t>(tri->GetTrishapeRuntimeData().triangleCount) * 3u,
+						desc.HasFlag(RE::BSGraphics::Vertex::VF_FULLPREC), 0, 0 };
+					g.instances.clear();
+					return false;  // erstes Mesh zeichnet die Engine
+				}
+				g_instGroups[it->second].instances.push_back(MakeInstance(geom));
+				return !Config::shadowInstancing.verify;
+			} catch (...) {
+				return false;
+			}
+		}
+
+		void FlushInstances() noexcept
+		{
+			const auto& cfg = Config::shadowInstancing;
+			g_instFlat.clear();
+			g_instFlatGroups.clear();
+			for (std::uint32_t i = 0; i < g_instUsed; ++i) {
+				auto& g = g_instGroups[i];
+				// Gruppen unter der Mindestgroesse: fehlende Meshes trotzdem per Instancing nachzeichnen (sonst fehlen sie)
+				if (g.instances.empty()) {
+					continue;
+				}
+				g.group.firstInstance = static_cast<std::uint32_t>(g_instFlat.size());
+				g.group.instanceCount = static_cast<std::uint32_t>(g.instances.size());
+				g_instFlat.insert(g_instFlat.end(), g.instances.begin(), g.instances.end());
+				g_instFlatGroups.push_back(g.group);
+			}
+			if (!g_instFlatGroups.empty()) {
+				if (InstancedDraw::Flush(D3DContext(), g_instFlat.data(), static_cast<std::uint32_t>(g_instFlat.size()), g_instFlatGroups.data(),
+						static_cast<std::uint32_t>(g_instFlatGroups.size()), (cfg.technique & 0x8000) != 0)) {
+					for (std::size_t n = 0; n < g_instFlat.size(); ++n) {
+						Stats::Count(Stats::Counter::InstancedMeshes);
+					}
+					for (std::size_t n = 0; n < g_instFlatGroups.size(); ++n) {
+						Stats::Count(Stats::Counter::InstancedCalls);
+					}
+				}
+			}
+			g_instIndex.clear();
+			g_instUsed = 0;
+			InstancedDraw::ReleaseState();
+			g_instCaptured = false;
+		}
+
+		// BSBatchRenderer::RenderBatches (dieselbe Funktion wie in Community Shaders FrameAnnotations): Batch-Grenzen
 		struct RenderBatches
 		{
 			static bool thunk(void* a_renderer, std::uint32_t* a_currentPass, std::uint32_t* a_bucketIndex, void* a_passIndexList, std::uint32_t a_renderFlags)
 			{
-				if (g_inSunShadows.load(std::memory_order_relaxed)) {
+				const bool sun = g_inSunShadows.load(std::memory_order_relaxed);
+				if (sun) {
 					++g_batchCounter;
 				}
-				return func(a_renderer, a_currentPass, a_bucketIndex, a_passIndexList, a_renderFlags);
+				g_instBatchActive = sun && !g_instBatchActive && InstancingWanted();
+				const bool mine = g_instBatchActive;
+				const bool r = func(a_renderer, a_currentPass, a_bucketIndex, a_passIndexList, a_renderFlags);
+				if (mine) {
+					FlushInstances();
+					g_instBatchActive = false;
+				}
+				return r;
 			}
 			static inline bool (*func)(void*, std::uint32_t*, std::uint32_t*, void*, std::uint32_t) = nullptr;
 		};
@@ -307,10 +475,22 @@ namespace InstancingAnalysis
 				if (a_pass && ShadowCulling::ShouldSkipDepthPrepassDraw(*a_pass)) {
 					return;  // Tiefenvorpass: kleines, fernes Objekt -> Draw ueberspringen
 				}
+				bool first = false;
+				if (Site == 1 && g_instBatchActive && a_pass && Qualifies(*a_pass, a_alphaTest)) {
+					if (CollectInstance(*a_pass)) {
+						return;  // wird am Ende des Batches per Instancing gezeichnet
+					}
+					first = !g_instCaptured;
+				}
 				const auto prev = t_callSite;
 				t_callSite = Site;
 				func(a_pass, a_technique, a_alphaTest, a_renderFlags);
 				t_callSite = prev;
+				if (first) {
+					// Zustand des ersten normal gezeichneten Meshes merken (Pixel-Shader, Kamera, Raster-/Tiefenzustand)
+					InstancedDraw::CaptureState(D3DContext());
+					g_instCaptured = true;
+				}
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};

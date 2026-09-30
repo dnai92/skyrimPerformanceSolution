@@ -58,6 +58,8 @@ namespace Stats
 		GameWaitCalls,    // Warte-Aufrufe der Engine auf dem Main-Thread
 		CascadeSkipped,   // Meshes, die wegen Kaskaden-Cache nicht neu gezeichnet werden
 		CascadeSkipFrames,// Frames, in denen die ferne Kaskade aus dem Cache kam (0/1)
+		InstancedMeshes,  // per Instancing gezeichnete Meshes (ohne das jeweils erste der Gruppe)
+		InstancedCalls,   // dafuer abgesetzte Instanced-Draw-Calls
 
 		kTotal
 	};
@@ -87,6 +89,8 @@ namespace Stats
 		"Engine Warte-Aufrufe",
 		"Kaskaden-Cache Meshes gespart",
 		"Kaskaden-Cache Frames",
+		"Instancing Meshes",
+		"Instancing Draw-Calls",
 	};
 
 	void Init();
