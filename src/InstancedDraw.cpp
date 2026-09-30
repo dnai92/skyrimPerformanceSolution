@@ -3,7 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
-#include <d3d11.h>
+#include <d3d11_1.h>
 #include <d3dcompiler.h>
 
 #include <cstdio>
@@ -166,6 +166,49 @@ float4 main(VS_INPUT input) : SV_POSITION
 		ctx->OMGetDepthStencilState(&g_ds, &g_stencilRef);
 		ctx->OMGetBlendState(&g_bs, g_blendFactor, &g_sampleMask);
 		g_captured = true;
+	}
+
+	bool DebugReadVSConstants(void* a_context, std::uint32_t a_slot, float* a_out, std::uint32_t a_floats) noexcept
+	{
+		const auto ctx = static_cast<ID3D11DeviceContext*>(a_context);
+		if (!ctx || !g_device) {
+			return false;
+		}
+		ID3D11Buffer* cb = nullptr;
+		UINT          first = 0, num = 0;
+		ID3D11DeviceContext1* ctx1 = nullptr;
+		if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), reinterpret_cast<void**>(&ctx1))) && ctx1) {
+			ctx1->VSGetConstantBuffers1(a_slot, 1, &cb, &first, &num);
+			ctx1->Release();
+		} else {
+			ctx->VSGetConstantBuffers(a_slot, 1, &cb);
+		}
+		if (!cb) {
+			return false;
+		}
+		D3D11_BUFFER_DESC desc{};
+		cb->GetDesc(&desc);
+		desc.Usage = D3D11_USAGE_STAGING;
+		desc.BindFlags = 0;
+		desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		desc.MiscFlags = 0;
+		ID3D11Buffer* staging = nullptr;
+		bool          ok = false;
+		if (SUCCEEDED(g_device->CreateBuffer(&desc, nullptr, &staging))) {
+			ctx->CopyResource(staging, cb);
+			D3D11_MAPPED_SUBRESOURCE mapped{};
+			if (SUCCEEDED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &mapped))) {
+				const UINT offsetBytes = first * 16;
+				const UINT avail = desc.ByteWidth > offsetBytes ? (desc.ByteWidth - offsetBytes) / 4 : 0;
+				const UINT n = a_floats < avail ? a_floats : avail;
+				std::memcpy(a_out, static_cast<const char*>(mapped.pData) + offsetBytes, n * 4);
+				ctx->Unmap(staging, 0);
+				ok = n > 0;
+			}
+			staging->Release();
+		}
+		cb->Release();
+		return ok;
 	}
 
 	bool Flush(void* a_context, const Instance* a_instances, std::uint32_t a_instanceCount, const Group* a_groups, std::uint32_t a_groupCount, bool a_clampZ) noexcept

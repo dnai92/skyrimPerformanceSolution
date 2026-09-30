@@ -232,6 +232,31 @@ namespace InstancingAnalysis
 			return inst;
 		}
 
+		// Diagnose: World-Matrix der Engine (PerGeometry b2, c1..c4) und CameraViewProj (b12, c8..c11) mit unserer vergleichen
+		std::uint32_t g_debugCompareBudget = 3;  // Anzahl Vergleiche pro Report-Fenster
+		void DebugCompareWorld(const RE::BSRenderPass& a_pass) noexcept
+		{
+			if (g_debugCompareBudget == 0 || !a_pass.geometry) {
+				return;
+			}
+			--g_debugCompareBudget;
+			float cb2[20]{};
+			float cb12[48]{};
+			const bool ok2 = InstancedDraw::DebugReadVSConstants(D3DContext(), 2, cb2, 20);
+			const bool ok12 = InstancedDraw::DebugReadVSConstants(D3DContext(), 12, cb12, 48);
+			const auto ours = MakeInstance(*a_pass.geometry);
+			const auto& w = a_pass.geometry->world;
+			logger::info("[Instancing-Debug] '{}' Welt-Pos ({:.1f} {:.1f} {:.1f}) Skalierung {:.3f} | CB2 gelesen {} | CB12 gelesen {}", a_pass.geometry->name.c_str(),
+				w.translate.x, w.translate.y, w.translate.z, w.scale, ok2, ok12);
+			for (int r = 0; r < 4; ++r) {
+				logger::info("[Instancing-Debug]   Engine World Zeile {}: {:10.4f} {:10.4f} {:10.4f} {:10.4f}   | unsere: {}", r, cb2[4 + r * 4], cb2[5 + r * 4], cb2[6 + r * 4], cb2[7 + r * 4],
+					r < 3 ? std::format("{:10.4f} {:10.4f} {:10.4f} {:10.4f}", ours.rows[r][0], ours.rows[r][1], ours.rows[r][2], ours.rows[r][3]) : std::string("0 0 0 1"));
+			}
+			for (int r = 0; r < 4; ++r) {
+				logger::info("[Instancing-Debug]   CB12 CameraViewProj Zeile {}: {:10.5f} {:10.5f} {:10.5f} {:10.5f}", r, cb12[32 + r * 4], cb12[33 + r * 4], cb12[34 + r * 4], cb12[35 + r * 4]);
+			}
+		}
+
 		// true = Pass wurde uebernommen (Engine soll ihn NICHT zeichnen)
 		bool CollectInstance(RE::BSRenderPass& a_pass) noexcept
 		{
@@ -490,6 +515,7 @@ namespace InstancingAnalysis
 					// Zustand des ersten normal gezeichneten Meshes merken (Pixel-Shader, Kamera, Raster-/Tiefenzustand)
 					InstancedDraw::CaptureState(D3DContext());
 					g_instCaptured = true;
+					DebugCompareWorld(*a_pass);
 				}
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -656,6 +682,7 @@ namespace InstancingAnalysis
 		if (++g_frameCounter % kReportFrames == 0) {
 			Report();
 			Report2(g_sunRenderNs / 1e6 / kReportFrames);
+			g_debugCompareBudget = 3;
 			g_sunRenderNs = 0;
 		}
 	}

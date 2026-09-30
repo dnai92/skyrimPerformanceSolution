@@ -35,6 +35,10 @@ namespace InstancedDraw
 	void CaptureState(void* a_context) noexcept;
 	void ReleaseState() noexcept;
 
+	// Diagnose: liest den aktuell im Vertex-Shader gebundenen Constant Buffer (Slot) aus (Stall, nur selten aufrufen).
+	// Beruecksichtigt D3D11.1-Offsets. a_out erhaelt bis zu a_floats Floats ab dem Bindungs-Offset.
+	bool DebugReadVSConstants(void* a_context, std::uint32_t a_slot, float* a_out, std::uint32_t a_floats) noexcept;
+
 	// Zeichnet alle Gruppen; stellt den vorherigen D3D-Zustand danach wieder her.
 	// a_clampZ: Variante RENDER_SHADOWMAP_CLAMPED (z = max(0, z))
 	bool Flush(void* a_context, const Instance* a_instances, std::uint32_t a_instanceCount, const Group* a_groups, std::uint32_t a_groupCount, bool a_clampZ) noexcept;
