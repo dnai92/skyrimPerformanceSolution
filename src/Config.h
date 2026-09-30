@@ -16,7 +16,7 @@ namespace Config
 
 	inline CullRule shadowCulling;                                               // Sonne [ShadowCulling]
 	inline CullRule pointLightCulling{ true, 0, 1000.0f, 150.0f, 0.035f, true };  // Punktlichter [PointLightShadowCulling]
-	inline CullRule depthPrepassCulling{ true, 0, 2000.0f, 150.0f, 0.015f, true }; // Tiefenvorpass [DepthPrepassCulling]
+	inline CullRule depthPrepassCulling{ true, 0, 1500.0f, 200.0f, 0.025f, true }; // Tiefenvorpass [DepthPrepassCulling]
 
 	struct SkylightingCulling
 	{
