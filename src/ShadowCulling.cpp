@@ -146,21 +146,31 @@ namespace ShadowCulling
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Sucht in [a_begin, a_begin + a_size) nach einem call rel32 (E8) mit Ziel a_target
-		std::uintptr_t FindCallTo(std::uintptr_t a_begin, std::size_t a_size, std::uintptr_t a_target) noexcept
+		struct BranchSite
 		{
-			const auto* bytes = reinterpret_cast<const std::uint8_t*>(a_begin);
-			for (std::size_t i = 0; i + 5 <= a_size; ++i) {
-				if (bytes[i] != 0xE8) {
+			std::uintptr_t address;
+			bool           isCall;  // E8 = call, E9 = jmp (Tail-Call)
+		};
+
+		// Durchsucht den gesamten Code-Abschnitt von SkyrimSE.exe nach call/jmp rel32 mit Ziel a_target
+		std::vector<BranchSite> FindBranchesTo(std::uintptr_t a_target)
+		{
+			std::vector<BranchSite> sites;
+			const auto text = REL::Module::get().segment(REL::Segment::textx);
+			const auto  begin = text.address();
+			const auto  size = text.size();
+			const auto* bytes = reinterpret_cast<const std::uint8_t*>(begin);
+			for (std::size_t i = 0; i + 5 <= size; ++i) {
+				if (bytes[i] != 0xE8 && bytes[i] != 0xE9) {
 					continue;
 				}
 				std::int32_t rel;
 				std::memcpy(&rel, bytes + i + 1, sizeof(rel));
-				if (a_begin + i + 5 + static_cast<std::intptr_t>(rel) == a_target) {
-					return a_begin + i;
+				if (begin + i + 5 + static_cast<std::intptr_t>(rel) == a_target) {
+					sites.push_back({ begin + i, bytes[i] == 0xE8 });
 				}
 			}
-			return 0;
+			return sites;
 		}
 
 		// Eigene vtable von BSParabolicCullingProcess (Punktlicht-Schatten): der Eintrag 0x18 zeigt direkt auf die
@@ -220,15 +230,22 @@ namespace ShadowCulling
 		OcclusionRenderPasses::func = vtbl.write_vfunc(0x2D, OcclusionRenderPasses::thunk);
 		logger::info("Hook installiert: BSLightingShaderProperty::GetRenderPasses_Occlusion (vfunc 0x2D, nach Community Shaders)");
 
-		// Main::RenderDepth wird aus Main::RenderPlayerView per call aufgerufen. Beide Funktionen leitet Community Shaders
-		// per Detours um (nur der Funktionsanfang) - daher die call-Stelle im Rumpf von RenderPlayerView suchen und dort einhaken.
+		// Main::RenderDepth: Community Shaders leitet den Funktionsanfang per Detours um. Statt dort einzuhaken, werden alle
+		// direkten Aufrufe (call/jmp rel32) im Spielcode gesucht und dort umgebogen. Nur bei genau EINER Fundstelle aktiv.
 		const auto renderDepth = REL::Relocation<std::uintptr_t>{ RELOCATION_ID(100421, 107139) }.address();
-		const auto playerView = REL::Relocation<std::uintptr_t>{ RELOCATION_ID(35560, 36559) }.address();
-		if (const auto site = FindCallTo(playerView, 0x1000, renderDepth)) {
-			RenderDepth::func = SKSE::GetTrampoline().write_call<5>(site, RenderDepth::thunk);
-			logger::info("Hook installiert: Main::RenderPlayerView -> Main::RenderDepth (call bei +0x{:X})", site - playerView);
+		const auto base = REL::Module::get().base();
+		const auto sites = FindBranchesTo(renderDepth);
+		for (const auto& s : sites) {
+			logger::info("Main::RenderDepth: {} bei SkyrimSE.exe+0x{:X}", s.isCall ? "call" : "jmp", s.address - base);
+		}
+		if (sites.size() == 1 && sites[0].isCall) {
+			RenderDepth::func = SKSE::GetTrampoline().write_call<5>(sites[0].address, RenderDepth::thunk);
+			logger::info("Hook installiert: Aufruf von Main::RenderDepth (SkyrimSE.exe+0x{:X})", sites[0].address - base);
+		} else if (sites.size() == 1) {
+			RenderDepth::func = SKSE::GetTrampoline().write_branch<5>(sites[0].address, RenderDepth::thunk);
+			logger::info("Hook installiert: Sprung zu Main::RenderDepth (SkyrimSE.exe+0x{:X})", sites[0].address - base);
 		} else {
-			logger::warn("Aufruf von Main::RenderDepth nicht gefunden - Tiefenvorpass-Culling deaktiviert");
+			logger::warn("Main::RenderDepth: {} direkte Aufrufe gefunden (erwartet 1) - Tiefenvorpass-Culling deaktiviert", sites.size());
 		}
 	}
 
