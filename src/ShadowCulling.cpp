@@ -60,6 +60,10 @@ namespace ShadowCulling
 			RE::NiCamera::RUNTIME_DATA2    engData2{};
 			RE::NiFrustumPlanes            engClipPlanes{};
 			bool                           camTouched = false;
+			// lightTransform NACH Render (falls Render sie neu berechnet) - diese Matrix gehoert zum Inhalt der Karte
+			REX::W32::XMFLOAT4X4           lightTransformFinal{};
+			REX::W32::XMFLOAT4X4           lightTransformAfterAccum{};  // Diagnose
+			bool                           finalValid = false;
 			RE::NiRect<std::int32_t>       port{};
 			bool                           isEnabled = true;
 			bool                           clearSaved = false;    // clearRenderTarget vor unserer Aenderung (nur Cache-Frame)
@@ -78,6 +82,8 @@ namespace ShadowCulling
 		};
 		FrameDiff g_diffCache{};   // Cache-Frame vs. letzter gezeichneter Frame
 		FrameDiff g_diffNormal{};  // gezeichneter Frame vs. vorheriger gezeichneter Frame (Vergleichswert)
+		std::uint32_t g_renderChangedMatrix = 0, g_renderChecked = 0;  // Diagnose: aendert Render die lightTransform?
+		float         g_renderChangedMax = 0.0f;
 
 		float MaxAbsDiff(const float* a_a, const float* a_b, std::size_t a_n) noexcept
 		{
@@ -511,11 +517,29 @@ namespace ShadowCulling
 		const auto& cfg = Config::cascadeCache;
 		// clearRenderTarget der Engine zuruecksetzen (auch wenn der Cache inzwischen abgeschaltet wurde)
 		if (g_cacheLight) {
-			auto& descs = g_cacheLight->GetRuntimeData().shadowmapDescriptors;
+			auto&      descs = g_cacheLight->GetRuntimeData().shadowmapDescriptors;
+			const bool skipNow = g_cacheSkip.load(std::memory_order_relaxed);
 			for (std::uint32_t i = 0; i < descs.size() && i < kMaxCascades; ++i) {
-				if (g_cached[i].clearTouched) {
-					descs[i].clearRenderTarget = g_cached[i].clearSaved;
-					g_cached[i].clearTouched = false;
+				auto& c = g_cached[i];
+				if (c.clearTouched) {
+					descs[i].clearRenderTarget = c.clearSaved;
+					c.clearTouched = false;
+				}
+				if (i < cfg.cascade) {
+					continue;
+				}
+				// Diagnose: hat Render die Matrix nach Accumulate noch veraendert?
+				const float diff = MaxAbsDiff(&descs[i].lightTransform.m[0][0], &c.lightTransformAfterAccum.m[0][0], 16);
+				++g_renderChecked;
+				if (diff > 1e-4f) {
+					++g_renderChangedMatrix;
+					g_renderChangedMax = std::max(g_renderChangedMax, diff);
+				}
+				if (skipNow && cfg.freezeMatrix && c.finalValid) {
+					descs[i].lightTransform = c.lightTransformFinal;  // gilt fuer alle spaeteren Leser (CS Deferred)
+				} else if (!skipNow) {
+					c.lightTransformFinal = descs[i].lightTransform;
+					c.finalValid = true;
 				}
 			}
 		}
@@ -575,6 +599,11 @@ namespace ShadowCulling
 			auto& d = descs[i];
 			auto& c = g_cached[i];
 			c.clearTouched = false;
+			if (skip && cfg.freezeMatrix && c.finalValid) {
+				c.lightTransformAfterAccum = c.lightTransformFinal;  // Vergleich nach Render gegen den eingefrorenen Wert
+			} else {
+				c.lightTransformAfterAccum = d.lightTransform;
+			}
 			if (skip) {
 				if (d.renderTarget != c.renderTarget || d.shadowmapIndex != c.shadowmapIndex) {
 					// Ziel hat sich geaendert -> alter Inhalt unbrauchbar
@@ -584,7 +613,7 @@ namespace ShadowCulling
 				}
 				Compare(g_diffCache, d, c, a_light);
 				if (cfg.freezeMatrix) {
-					d.lightTransform = c.lightTransform;  // alte Matrix passend zum alten Inhalt der Schattenkarte
+					d.lightTransform = c.finalValid ? c.lightTransformFinal : c.lightTransform;  // alte Matrix passend zum alten Inhalt
 				}
 				if (cfg.freezeCamera) {
 					c.engClipPlanes = d.clipPlanes;
@@ -718,6 +747,9 @@ namespace ShadowCulling
 			logger::info("[Cascade-Diag]   Cache-Invalidierungen (Ziel/Slice gewechselt): {} | Normal-Frames ferne Kaskade clearRenderTarget false/true: {}/{}",
 				g_cacheInvalidations, g_clearFlagSeen[0], g_clearFlagSeen[1]);
 			g_clearFlagSeen = {};
+			logger::info("[Cascade-Diag]   Render veraendert lightTransform nach Accumulate: {}/{} (max {:.4f})", g_renderChangedMatrix, g_renderChecked, g_renderChangedMax);
+			g_renderChangedMatrix = g_renderChecked = 0;
+			g_renderChangedMax = 0.0f;
 			LogDiff("Cache-Frame vs. letzter gezeichneter", g_diffCache);
 			LogDiff("Gezeichnet vs. vorheriger gezeichneter", g_diffNormal);
 			if (const auto mainCam = RE::Main::WorldRootCamera()) {
