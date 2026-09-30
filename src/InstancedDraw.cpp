@@ -55,6 +55,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 		// Zustand des ersten normal gezeichneten Draws (Referenzen gehalten)
 		ID3D11PixelShader*      g_ps = nullptr;
 		ID3D11Buffer*           g_cb12 = nullptr;
+		UINT                    g_cb12First = 0, g_cb12Num = 0;  // D3D11.1-Offset (Engine nutzt einen Ring-Constant-Buffer)
 		ID3D11RasterizerState*  g_rs = nullptr;
 		ID3D11DepthStencilState* g_ds = nullptr;
 		UINT                    g_stencilRef = 0;
@@ -62,6 +63,30 @@ float4 main(VS_INPUT input) : SV_POSITION
 		float                   g_blendFactor[4]{};
 		UINT                    g_sampleMask = 0xFFFFFFFF;
 		bool                    g_captured = false;
+
+		// VS-Constant-Buffer mit D3D11.1-Offsets lesen/setzen (ohne Offsets wuerde auf den Pufferanfang gebunden -> falsche Matrix)
+		void GetVSCB1(ID3D11DeviceContext* a_ctx, UINT a_slot, ID3D11Buffer** a_cb, UINT* a_first, UINT* a_num) noexcept
+		{
+			ID3D11DeviceContext1* ctx1 = nullptr;
+			*a_first = 0;
+			*a_num = 0;
+			if (SUCCEEDED(a_ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), reinterpret_cast<void**>(&ctx1))) && ctx1) {
+				ctx1->VSGetConstantBuffers1(a_slot, 1, a_cb, a_first, a_num);
+				ctx1->Release();
+			} else {
+				a_ctx->VSGetConstantBuffers(a_slot, 1, a_cb);
+			}
+		}
+		void SetVSCB1(ID3D11DeviceContext* a_ctx, UINT a_slot, ID3D11Buffer* a_cb, UINT a_first, UINT a_num) noexcept
+		{
+			ID3D11DeviceContext1* ctx1 = nullptr;
+			if (a_num > 0 && SUCCEEDED(a_ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), reinterpret_cast<void**>(&ctx1))) && ctx1) {
+				ctx1->VSSetConstantBuffers1(a_slot, 1, &a_cb, &a_first, &a_num);
+				ctx1->Release();
+			} else {
+				a_ctx->VSSetConstantBuffers(a_slot, 1, &a_cb);
+			}
+		}
 
 		template <class T>
 		void SafeRelease(T*& a_p) noexcept
@@ -161,7 +186,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 		}
 		ReleaseState();
 		ctx->PSGetShader(&g_ps, nullptr, nullptr);
-		ctx->VSGetConstantBuffers(12, 1, &g_cb12);
+		GetVSCB1(ctx, 12, &g_cb12, &g_cb12First, &g_cb12Num);
 		ctx->RSGetState(&g_rs);
 		ctx->OMGetDepthStencilState(&g_ds, &g_stencilRef);
 		ctx->OMGetBlendState(&g_bs, g_blendFactor, &g_sampleMask);
@@ -243,6 +268,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 		D3D11_PRIMITIVE_TOPOLOGY oldTopo = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
 		ID3D11VertexShader*      oldVS = nullptr;
 		ID3D11Buffer*            oldCB12 = nullptr;
+		UINT                     oldCB12First = 0, oldCB12Num = 0;
 		ID3D11PixelShader*       oldPS = nullptr;
 		ID3D11RasterizerState*   oldRS = nullptr;
 		ID3D11DepthStencilState* oldDS = nullptr;
@@ -255,7 +281,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 		ctx->IAGetIndexBuffer(&oldIB, &oldIBFormat, &oldIBOffset);
 		ctx->IAGetPrimitiveTopology(&oldTopo);
 		ctx->VSGetShader(&oldVS, nullptr, nullptr);
-		ctx->VSGetConstantBuffers(12, 1, &oldCB12);
+		GetVSCB1(ctx, 12, &oldCB12, &oldCB12First, &oldCB12Num);
 		ctx->PSGetShader(&oldPS, nullptr, nullptr);
 		ctx->RSGetState(&oldRS);
 		ctx->OMGetDepthStencilState(&oldDS, &oldStencilRef);
@@ -263,7 +289,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 
 		// Eigener Zustand
 		ctx->VSSetShader(g_vs[a_clampZ ? 1 : 0], nullptr, 0);
-		ctx->VSSetConstantBuffers(12, 1, &g_cb12);
+		SetVSCB1(ctx, 12, g_cb12, g_cb12First, g_cb12Num);
 		ctx->PSSetShader(g_ps, nullptr, 0);
 		ctx->RSSetState(g_rs);
 		ctx->OMSetDepthStencilState(g_ds, g_stencilRef);
@@ -292,7 +318,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 		ctx->IASetIndexBuffer(oldIB, oldIBFormat, oldIBOffset);
 		ctx->IASetPrimitiveTopology(oldTopo);
 		ctx->VSSetShader(oldVS, nullptr, 0);
-		ctx->VSSetConstantBuffers(12, 1, &oldCB12);
+		SetVSCB1(ctx, 12, oldCB12, oldCB12First, oldCB12Num);
 		ctx->PSSetShader(oldPS, nullptr, 0);
 		ctx->RSSetState(oldRS);
 		ctx->OMSetDepthStencilState(oldDS, oldStencilRef);
