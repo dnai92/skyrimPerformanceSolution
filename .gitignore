@@ -5,3 +5,4 @@ traces/
 *.tracy
 tools/sampling-export/build/
 tools/sampling-export/build.log
+tools/renderdoc/analyze_passes.cfg
