@@ -113,6 +113,8 @@ namespace ShadowCulling
 
 	void OnFrame()
 	{
+		Config::ReloadIfChanged();
+
 		if (const auto camera = RE::PlayerCamera::GetSingleton(); camera && camera->cameraRoot) {
 			const auto& pos = camera->cameraRoot->world.translate;
 			g_camX.store(pos.x, std::memory_order_relaxed);

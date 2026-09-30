@@ -16,4 +16,7 @@ namespace Config
 	inline ShadowCulling shadowCulling;
 
 	void Load();
+
+	// Prueft (alle ~2 s, Main-Thread) ob die INI geaendert wurde und laedt sie dann neu
+	void ReloadIfChanged();
 }
