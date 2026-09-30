@@ -35,7 +35,7 @@ namespace Config
 	struct DecalCulling
 	{
 		bool  enabled = true;
-		float maxDistance = 2000.0f;  // Decals (Fussabdruecke, Blut, Schmutz) weiter weg werden nicht gezeichnet
+		float maxDistance = 1500.0f;  // Decals (Fussabdruecke, Blut, Schmutz) weiter weg werden nicht gezeichnet
 		float maxRadius = 100.0f;     // nur kleine Decals
 	};
 	inline DecalCulling decalCulling;
