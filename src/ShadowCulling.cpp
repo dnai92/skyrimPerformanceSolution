@@ -71,9 +71,6 @@ namespace ShadowCulling
 					return Kind::kSun;
 				}
 			}
-			if (camera == g_mainCamera.load(std::memory_order_relaxed)) {
-				return Kind::kMain;
-			}
 			const auto count = g_pointCameraCount.load(std::memory_order_relaxed);
 			for (std::uint32_t i = 0; i < count && i < kMaxPointCameras; ++i) {
 				if (g_pointCameras[i].load(std::memory_order_relaxed) == camera) {
@@ -115,7 +112,8 @@ namespace ShadowCulling
 			return std::sqrt(dx * dx + dy * dy + dz * dz) - a_bound.radius;
 		}
 
-		// Hauptszene: Decal-Culling (Fussabdruecke & Co.) und optionales Mikro-Culling winziger Objekte
+		// Hauptszene: Decal-Culling (Laub, Schmutz, Fussabdruecke, Blut) und optionales Mikro-Culling winziger Objekte.
+		// Die Hauptkamera ('WorldRoot Camera') laeuft NICHT ueber AppendVirtual -> Aufruf aus GetRenderPasses (vfunc 0x2A).
 		bool ShouldCullMain(RE::BSGeometry& a_geom) noexcept
 		{
 			const auto  property = a_geom.GetGeometryRuntimeData().shaderProperty.get();
@@ -158,11 +156,6 @@ namespace ShadowCulling
 					}
 					Stats::Count(Stats::Counter::PointKept);
 					break;
-				case Kind::kMain:
-					if (ShouldCullMain(a_visible)) {
-						return;
-					}
-					break;
 				default:
 					Stats::Count(Stats::Counter::OtherCullers);
 					break;
@@ -199,6 +192,22 @@ namespace ShadowCulling
 				}
 				Stats::Count(Stats::Counter::PointKept);
 				func(a_this, a_visible, a_alphaGroupIndex);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// BSLightingShaderProperty::GetRenderPasses (vfunc 0x2A): Draws fuer die normale Darstellung (Hauptszene,
+		// Reflexions-Cubemaps). Community Shaders (TruePBR) haengt sich ebenfalls hier ein und ruft das Original auf;
+		// wir liegen dahinter und leeren die Liste fuer ferne kleine Decals bzw. winzige Objekte.
+		struct LightingRenderPasses
+		{
+			static RE::BSShaderProperty::RenderPassArray* thunk(RE::BSLightingShaderProperty* a_this, RE::BSGeometry* a_geometry, std::uint32_t a_renderFlags, RE::BSShaderAccumulator* a_accumulator)
+			{
+				const auto passes = func(a_this, a_geometry, a_renderFlags, a_accumulator);
+				if (passes && passes->head && a_geometry && ShouldCullMain(*a_geometry)) {
+					passes->Clear();
+				}
+				return passes;
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -241,6 +250,8 @@ namespace ShadowCulling
 	{
 		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSLightingShaderProperty[0] };
 		OcclusionRenderPasses::func = vtbl.write_vfunc(0x2D, OcclusionRenderPasses::thunk);
+		LightingRenderPasses::func = vtbl.write_vfunc(0x2A, LightingRenderPasses::thunk);
+		logger::info("Hook installiert: BSLightingShaderProperty::GetRenderPasses (vfunc 0x2A, nach Community Shaders)");
 		logger::info("Hook installiert: BSLightingShaderProperty::GetRenderPasses_Occlusion (vfunc 0x2D, nach Community Shaders)");
 
 		// Main::RenderDepth wird nur indirekt aufgerufen (kein direkter call/jmp im Spielcode). Community Shaders leitet den
