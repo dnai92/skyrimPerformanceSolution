@@ -54,6 +54,7 @@ namespace Config
 		};
 		readRule("ShadowCulling", shadowCulling);
 		readRule("PointLightShadowCulling", pointLightCulling);
+		readRule("DepthPrepassCulling", depthPrepassCulling);
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
@@ -66,5 +67,8 @@ namespace Config
 		logger::info("PointLightShadowCulling: {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {}",
 			pc.enabled ? "AN" : "AUS", pc.minDistance, pc.maxRadius, pc.minAngularSize, pc.skipSkinned);
 		logger::info("SkylightingCulling: {} | Mindestradius {:.0f}", sky.enabled ? "AN" : "AUS", sky.minRadius);
+		const auto& dc = depthPrepassCulling;
+		logger::info("DepthPrepassCulling: {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {}",
+			dc.enabled ? "AN" : "AUS", dc.minDistance, dc.maxRadius, dc.minAngularSize, dc.skipSkinned);
 	}
 }

@@ -77,7 +77,7 @@ namespace ShadowCulling
 			return Kind::kOther;
 		}
 
-		bool ShouldCull(const Config::CullRule& a_rule, RE::BSGeometry& a_geom, std::uint32_t a_cascade) noexcept
+		bool ShouldCull(const Config::CullRule& a_rule, const RE::BSGeometry& a_geom, std::uint32_t a_cascade) noexcept
 		{
 			if (!a_rule.enabled || a_cascade < a_rule.minCascade) {
 				return false;
@@ -131,6 +131,37 @@ namespace ShadowCulling
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
+
+		// Markierung: Main::RenderDepth laeuft (Render-Thread = Main-Thread)
+		std::atomic<bool> g_inDepthPrepass{ false };
+
+		struct RenderDepth
+		{
+			static void thunk(bool a_arg1, bool a_arg2)
+			{
+				g_inDepthPrepass.store(true, std::memory_order_relaxed);
+				func(a_arg1, a_arg2);
+				g_inDepthPrepass.store(false, std::memory_order_relaxed);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// Sucht in [a_begin, a_begin + a_size) nach einem call rel32 (E8) mit Ziel a_target
+		std::uintptr_t FindCallTo(std::uintptr_t a_begin, std::size_t a_size, std::uintptr_t a_target) noexcept
+		{
+			const auto* bytes = reinterpret_cast<const std::uint8_t*>(a_begin);
+			for (std::size_t i = 0; i + 5 <= a_size; ++i) {
+				if (bytes[i] != 0xE8) {
+					continue;
+				}
+				std::int32_t rel;
+				std::memcpy(&rel, bytes + i + 1, sizeof(rel));
+				if (a_begin + i + 5 + static_cast<std::intptr_t>(rel) == a_target) {
+					return a_begin + i;
+				}
+			}
+			return 0;
+		}
 
 		// Eigene vtable von BSParabolicCullingProcess (Punktlicht-Schatten): der Eintrag 0x18 zeigt direkt auf die
 		// Basis-Implementierung und laeuft daher NICHT ueber den Hook auf BSCullingProcess. Alles hier ist Punktlicht.
@@ -188,6 +219,32 @@ namespace ShadowCulling
 		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSLightingShaderProperty[0] };
 		OcclusionRenderPasses::func = vtbl.write_vfunc(0x2D, OcclusionRenderPasses::thunk);
 		logger::info("Hook installiert: BSLightingShaderProperty::GetRenderPasses_Occlusion (vfunc 0x2D, nach Community Shaders)");
+
+		// Main::RenderDepth wird aus Main::RenderPlayerView per call aufgerufen. Beide Funktionen leitet Community Shaders
+		// per Detours um (nur der Funktionsanfang) - daher die call-Stelle im Rumpf von RenderPlayerView suchen und dort einhaken.
+		const auto renderDepth = REL::Relocation<std::uintptr_t>{ RELOCATION_ID(100421, 107139) }.address();
+		const auto playerView = REL::Relocation<std::uintptr_t>{ RELOCATION_ID(35560, 36559) }.address();
+		if (const auto site = FindCallTo(playerView, 0x1000, renderDepth)) {
+			RenderDepth::func = SKSE::GetTrampoline().write_call<5>(site, RenderDepth::thunk);
+			logger::info("Hook installiert: Main::RenderPlayerView -> Main::RenderDepth (call bei +0x{:X})", site - playerView);
+		} else {
+			logger::warn("Aufruf von Main::RenderDepth nicht gefunden - Tiefenvorpass-Culling deaktiviert");
+		}
+	}
+
+	bool InDepthPrepass() noexcept { return g_inDepthPrepass.load(std::memory_order_relaxed); }
+
+	bool ShouldSkipDepthPrepassDraw(const RE::BSRenderPass& a_pass) noexcept
+	{
+		if (!g_inDepthPrepass.load(std::memory_order_relaxed) || !a_pass.geometry) {
+			return false;
+		}
+		if (ShouldCull(Config::depthPrepassCulling, *a_pass.geometry, UINT32_MAX)) {
+			Stats::Count(Stats::Counter::DepthCulled);
+			return true;
+		}
+		Stats::Count(Stats::Counter::DepthKept);
+		return false;
 	}
 
 	void OnFrame()

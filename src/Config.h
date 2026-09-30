@@ -16,11 +16,12 @@ namespace Config
 
 	inline CullRule shadowCulling;                                               // Sonne [ShadowCulling]
 	inline CullRule pointLightCulling{ true, 0, 1000.0f, 150.0f, 0.035f, true };  // Punktlichter [PointLightShadowCulling]
+	inline CullRule depthPrepassCulling{ true, 0, 2000.0f, 150.0f, 0.015f, true }; // Tiefenvorpass [DepthPrepassCulling]
 
 	struct SkylightingCulling
 	{
 		bool  enabled = true;
-		float minRadius = 64.0f;  // Community Shaders nimmt selbst nur Objekte ab Radius 32 auf
+		float minRadius = 128.0f;  // Community Shaders nimmt selbst nur Objekte ab Radius 32 auf
 	};
 	inline SkylightingCulling skylightingCulling;
 

@@ -1,5 +1,6 @@
 #include "InstancingAnalysis.h"
 
+#include "ShadowCulling.h"
 #include "Stats.h"
 
 #include <mutex>
@@ -100,6 +101,9 @@ namespace InstancingAnalysis
 		{
 			static void thunk(RE::BSRenderPass* a_pass, std::uint32_t a_technique, bool a_alphaTest, std::uint32_t a_renderFlags)
 			{
+				if (a_pass && ShadowCulling::ShouldSkipDepthPrepassDraw(*a_pass)) {
+					return;  // Tiefenvorpass: kleines, fernes Objekt -> Draw ueberspringen
+				}
 				const auto prev = t_callSite;
 				t_callSite = Site;
 				func(a_pass, a_technique, a_alphaTest, a_renderFlags);
@@ -148,6 +152,9 @@ namespace InstancingAnalysis
 			static void thunk(RE::BSShader* a_this, RE::BSRenderPass* a_pass, std::uint32_t a_flags)
 			{
 				Stats::Count(Stats::Counter::UtilityDraws);
+				if (ShadowCulling::InDepthPrepass()) {
+					Stats::Count(Stats::Counter::DepthDrawsAll);
+				}
 				if (g_inSunShadows.load(std::memory_order_relaxed) && a_pass && a_pass->geometry) {
 					Stats::Count(Stats::Counter::SunDraws);
 					Record(*a_pass);

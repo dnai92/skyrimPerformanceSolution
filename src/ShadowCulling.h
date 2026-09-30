@@ -11,6 +11,10 @@ namespace ShadowCulling
 	// Hooks, die NACH Community Shaders installiert werden muessen (kDataLoaded)
 	void InstallLate();
 
+	// Tiefenvorpass: true, wenn der Draw dieses Passes uebersprungen werden soll (nur waehrend Main::RenderDepth)
+	bool ShouldSkipDepthPrepassDraw(const RE::BSRenderPass& a_pass) noexcept;
+	bool InDepthPrepass() noexcept;
+
 	// Einmal pro Frame auf dem Main-Thread: Kamera-Position und Kaskaden-Culler der Sonne cachen
 	void OnFrame();
 }

@@ -37,6 +37,9 @@ namespace Stats
 		PointCulled,      // davon verworfen
 		SkylightKept,     // Objekte in der Skylighting-/Niederschlags-Verdeckungskarte
 		SkylightCulled,   // davon verworfen
+		DepthKept,        // Draws im Tiefenvorpass (ueber gehookte Aufrufstelle)
+		DepthCulled,      // davon uebersprungen
+		DepthDrawsAll,    // alle Utility-Draws waehrend Main::RenderDepth (Kontrolle der Abdeckung)
 		SunRenderCalls,   // Aufrufe von BSShadowDirectionalLight::Render
 		SunDraws,         // Utility-SetupGeometry waehrend Sonnen-Render (= Draws)
 		UtilityDraws,     // Utility-SetupGeometry insgesamt
@@ -54,6 +57,9 @@ namespace Stats
 		"Punktlicht gecullt",
 		"Skylight behalten",
 		"Skylight gecullt",
+		"Tiefenvorpass behalten",
+		"Tiefenvorpass gecullt",
+		"Tiefenvorpass Draws gesamt",
 		"Sonne Render-Aufrufe",
 		"Sonne Draws",
 		"Utility Draws gesamt",
