@@ -333,7 +333,7 @@ namespace ShadowCulling
 				std::uint32_t cascade = 0;
 				switch (Classify(a_this, cascade)) {
 				case Kind::kSun:
-					if (g_cacheSkip.load(std::memory_order_relaxed) && cascade >= Config::cascadeCache.cascade) {
+					if (g_cacheSkip.load(std::memory_order_relaxed) && Config::cascadeCache.skipDraws && cascade >= Config::cascadeCache.cascade) {
 						Stats::Count(Stats::Counter::CascadeSkipped);
 						return;  // Kaskade kommt diesen Frame aus dem Cache
 					}
