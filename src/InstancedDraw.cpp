@@ -63,6 +63,10 @@ float4 main(VS_INPUT input) : SV_POSITION
 		float                   g_blendFactor[4]{};
 		UINT                    g_sampleMask = 0xFFFFFFFF;
 		bool                    g_captured = false;
+		ID3D11DepthStencilView* g_dsv = nullptr;       // Ziel des ersten Draws (Kaskaden-Ebene)
+		D3D11_VIEWPORT          g_viewport{};
+		std::uint32_t           g_flushMismatch = 0;   // Diagnose: Ziel beim Flush != Ziel beim ersten Draw
+		std::uint32_t           g_flushTotal = 0;
 
 		// VS-Constant-Buffer mit D3D11.1-Offsets lesen/setzen (ohne Offsets wuerde auf den Pufferanfang gebunden -> falsche Matrix)
 		void GetVSCB1(ID3D11DeviceContext* a_ctx, UINT a_slot, ID3D11Buffer** a_cb, UINT* a_first, UINT* a_num) noexcept
@@ -175,6 +179,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 		SafeRelease(g_rs);
 		SafeRelease(g_ds);
 		SafeRelease(g_bs);
+		SafeRelease(g_dsv);
 		g_captured = false;
 	}
 
@@ -190,6 +195,9 @@ float4 main(VS_INPUT input) : SV_POSITION
 		ctx->RSGetState(&g_rs);
 		ctx->OMGetDepthStencilState(&g_ds, &g_stencilRef);
 		ctx->OMGetBlendState(&g_bs, g_blendFactor, &g_sampleMask);
+		ctx->OMGetRenderTargets(0, nullptr, &g_dsv);
+		UINT nvp = 1;
+		ctx->RSGetViewports(&nvp, &g_viewport);
 		g_captured = true;
 	}
 
@@ -234,6 +242,13 @@ float4 main(VS_INPUT input) : SV_POSITION
 		}
 		cb->Release();
 		return ok;
+	}
+
+	void DebugFlushStats(std::uint32_t& a_mismatch, std::uint32_t& a_total) noexcept
+	{
+		a_mismatch = g_flushMismatch;
+		a_total = g_flushTotal;
+		g_flushMismatch = g_flushTotal = 0;
 	}
 
 	void DebugDescribeState(void* a_context, char* a_out, std::size_t a_size) noexcept
@@ -322,8 +337,20 @@ float4 main(VS_INPUT input) : SV_POSITION
 		ctx->RSGetState(&oldRS);
 		ctx->OMGetDepthStencilState(&oldDS, &oldStencilRef);
 		ctx->OMGetBlendState(&oldBS, oldBlendFactor, &oldSampleMask);
+		ID3D11RenderTargetView* oldRTV[8]{};
+		ID3D11DepthStencilView* oldDSV = nullptr;
+		ctx->OMGetRenderTargets(8, oldRTV, &oldDSV);
+		D3D11_VIEWPORT oldVP[16]{};
+		UINT           oldNVP = 16;
+		ctx->RSGetViewports(&oldNVP, oldVP);
+		++g_flushTotal;
+		if (oldDSV != g_dsv) {
+			++g_flushMismatch;
+		}
 
-		// Eigener Zustand
+		// Eigener Zustand (Ziel und Viewport des ersten Draws dieses Batches)
+		ctx->OMSetRenderTargets(0, nullptr, g_dsv);
+		ctx->RSSetViewports(1, &g_viewport);
 		ctx->VSSetShader(g_vs[a_clampZ ? 1 : 0], nullptr, 0);
 		SetVSCB1(ctx, 12, g_cb12, g_cb12First, g_cb12Num);
 		ctx->PSSetShader(g_ps, nullptr, 0);
@@ -359,6 +386,12 @@ float4 main(VS_INPUT input) : SV_POSITION
 		ctx->RSSetState(oldRS);
 		ctx->OMSetDepthStencilState(oldDS, oldStencilRef);
 		ctx->OMSetBlendState(oldBS, oldBlendFactor, oldSampleMask);
+		ctx->OMSetRenderTargets(8, oldRTV, oldDSV);
+		ctx->RSSetViewports(oldNVP, oldVP);
+		for (auto& rtv : oldRTV) {
+			SafeRelease(rtv);
+		}
+		SafeRelease(oldDSV);
 		SafeRelease(oldLayout);
 		SafeRelease(oldVB[0]);
 		SafeRelease(oldVB[1]);

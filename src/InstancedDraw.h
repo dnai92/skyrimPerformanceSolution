@@ -41,6 +41,8 @@ namespace InstancedDraw
 
 	// Diagnose: aktueller Input-Assembler- und Output-Merger-Zustand als Text
 	void DebugDescribeState(void* a_context, char* a_out, std::size_t a_size) noexcept;
+	// Diagnose: wie oft war beim Flush ein anderes Ziel gebunden als beim ersten Draw (seit letztem Aufruf)
+	void DebugFlushStats(std::uint32_t& a_mismatch, std::uint32_t& a_total) noexcept;
 
 	// Zeichnet alle Gruppen; stellt den vorherigen D3D-Zustand danach wieder her.
 	// a_clampZ: Variante RENDER_SHADOWMAP_CLAMPED (z = max(0, z))

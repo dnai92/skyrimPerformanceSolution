@@ -692,6 +692,11 @@ namespace InstancingAnalysis
 			Report();
 			Report2(g_sunRenderNs / 1e6 / kReportFrames);
 			g_debugCompareBudget = 3;
+			std::uint32_t mism = 0, tot = 0;
+			InstancedDraw::DebugFlushStats(mism, tot);
+			if (tot) {
+				logger::info("[Instancing-Debug] Flushes {} | davon mit anderem Tiefenziel als beim ersten Draw: {}", tot, mism);
+			}
 			g_sunRenderNs = 0;
 		}
 	}
