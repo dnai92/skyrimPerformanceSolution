@@ -112,6 +112,22 @@ namespace ShadowCulling
 			return std::sqrt(dx * dx + dy * dy + dz * dz) - a_bound.radius;
 		}
 
+		// Diagnose: Verteilung der Decals nach Entfernung (Zeilen) und Radius (Spalten)
+		constexpr std::array<float, 5>                     kDecalDistEdges{ 500.0f, 1000.0f, 1500.0f, 3000.0f, 6000.0f };
+		constexpr std::array<float, 5>                     kDecalRadEdges{ 25.0f, 50.0f, 100.0f, 200.0f, 500.0f };
+		std::array<std::array<std::atomic<std::uint32_t>, 6>, 6> g_decalHist{};
+		std::atomic<std::uint32_t>                          g_decalNames[4]{};  // nur Zaehler fuer Namen 'Decal', 'DecalDirt', sonstige, leer
+
+		template <std::size_t N>
+		std::size_t Bucket(const std::array<float, N>& a_edges, float a_value) noexcept
+		{
+			std::size_t i = 0;
+			while (i < N && a_value >= a_edges[i]) {
+				++i;
+			}
+			return i;
+		}
+
 		// Hauptszene: Decal-Culling (Laub, Schmutz, Fussabdruecke, Blut) und optionales Mikro-Culling winziger Objekte.
 		// Die Hauptkamera ('WorldRoot Camera') laeuft NICHT ueber AppendVirtual -> Aufruf aus GetRenderPasses (vfunc 0x2A).
 		bool ShouldCullMain(RE::BSGeometry& a_geom) noexcept
@@ -120,6 +136,9 @@ namespace ShadowCulling
 			const bool  isDecal = property && property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kDecal, RE::BSShaderProperty::EShaderPropertyFlag::kDynamicDecal);
 			const auto& dec = Config::decalCulling;
 			if (isDecal) {
+				g_decalHist[Bucket(kDecalDistEdges, DistanceToCamera(a_geom.worldBound))][Bucket(kDecalRadEdges, a_geom.worldBound.radius)].fetch_add(1, std::memory_order_relaxed);
+				const std::string_view name{ a_geom.name.c_str() ? a_geom.name.c_str() : "" };
+				g_decalNames[name == "Decal" ? 0 : name == "DecalDirt" ? 1 : name.empty() ? 3 : 2].fetch_add(1, std::memory_order_relaxed);
 				if (dec.enabled && a_geom.worldBound.radius < dec.maxRadius && DistanceToCamera(a_geom.worldBound) > dec.maxDistance) {
 					Stats::Count(Stats::Counter::DecalCulled);
 					return true;
@@ -338,6 +357,16 @@ namespace ShadowCulling
 			}
 			for (std::size_t i = 0; i < kMaxCascades && i < g_descCount; ++i) {
 				logger::info("[ShadowCulling-Diag]   Kaskade {}: Kamera {:p}, Culler {:p}", i, static_cast<const void*>(cameras[i]), static_cast<const void*>(g_descCullers[i]));
+			}
+			logger::info("[Decal-Diag] Decals/Frame nach Entfernung (Zeilen) x Radius (Spalten <25 <50 <100 <200 <500 >=500) | Namen: Decal {} DecalDirt {} sonstige {} leer {}",
+				g_decalNames[0].exchange(0) / 600, g_decalNames[1].exchange(0) / 600, g_decalNames[2].exchange(0) / 600, g_decalNames[3].exchange(0) / 600);
+			constexpr std::array<const char*, 6> kDistLabels{ "   <500", "  <1000", "  <1500", "  <3000", "  <6000", "  >6000" };
+			for (std::size_t d = 0; d < 6; ++d) {
+				std::string row;
+				for (std::size_t rr = 0; rr < 6; ++rr) {
+					row += std::format("{:7}", g_decalHist[d][rr].exchange(0, std::memory_order_relaxed) / 600);
+				}
+				logger::info("[Decal-Diag] {} {}", kDistLabels[d], row);
 			}
 			for (std::size_t i = 0; i < kDiagSlots; ++i) {
 				const auto cam = g_diagCameras[i].exchange(nullptr, std::memory_order_relaxed);
