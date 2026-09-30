@@ -1,4 +1,5 @@
 #include "Hooks.h"
+#include "InstancingAnalysis.h"
 #include "Config.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
@@ -17,6 +18,8 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::InitInfo info{};
 	info.logName = "SkyrimPerf";
+	info.trampoline = true;
+	info.trampolineSize = 64;
 	SKSE::Init(a_skse, info);
 
 	logger::info("SkyrimPerf {} geladen (Tracy on-demand, Report alle 10 s)", SKSE::GetPluginVersion().string());
@@ -25,6 +28,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	Config::Load();
 	Hooks::Install();
 	ShadowCulling::Install();
+	InstancingAnalysis::Install();
 
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
 	return true;

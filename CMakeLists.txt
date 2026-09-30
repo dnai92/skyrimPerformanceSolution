@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SkyrimPerf
-	VERSION 0.3.2
+	VERSION 0.4.0
 	LANGUAGES CXX
 )
 
@@ -23,6 +23,7 @@ add_commonlibsse_plugin(
 	SOURCES
 		src/main.cpp
 		src/Hooks.cpp
+		src/InstancingAnalysis.cpp
 		src/Config.cpp
 		src/ShadowCulling.cpp
 		src/Stats.cpp

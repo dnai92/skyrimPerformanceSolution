@@ -1,5 +1,6 @@
 #include "Hooks.h"
 
+#include "InstancingAnalysis.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
 
@@ -63,6 +64,7 @@ namespace Hooks
 				FrameMark;
 				Stats::OnFrame();
 				ShadowCulling::OnFrame();
+				InstancingAnalysis::OnFrame();
 				ZoneScopedN("Player Update");
 				Stats::ScopedTimer timer{ Stats::Zone::PlayerUpdate };
 				func(a_this, a_delta);
