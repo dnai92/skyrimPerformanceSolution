@@ -52,10 +52,84 @@ namespace ShadowCulling
 			float                          camWorldToCam[4][4]{};
 			RE::NiCamera::RUNTIME_DATA2    camData2{};
 			RE::NiFrustumPlanes            clipPlanes{};
+			RE::NiRect<std::int32_t>       port{};
+			bool                           isEnabled = true;
 			bool                           clearSaved = false;    // clearRenderTarget vor unserer Aenderung (nur Cache-Frame)
 			bool                           clearTouched = false;  // wir haben clearRenderTarget in diesem Frame geaendert
 		};
 		RE::BSShadowDirectionalLight* g_cacheLight = nullptr;      // Licht des laufenden Frames (Main-Thread)
+		std::array<float, 3>          g_cachedStartSplits{};       // Kaskaden-Grenzen des letzten gezeichneten Frames
+		std::array<float, 3>          g_cachedEndSplits{};
+
+		// Diagnose: was rechnet die Engine im Cache-Frame (leere ferne Kaskade) anders als im letzten gezeichneten Frame?
+		struct FrameDiff
+		{
+			std::uint32_t frames = 0;
+			std::uint32_t lightTransform = 0, worldToCam = 0, frustum = 0, clipPlanes = 0, splits = 0, enabled = 0, port = 0;
+			float         maxLightTransform = 0.0f, maxWorldToCam = 0.0f, maxFrustum = 0.0f, maxSplits = 0.0f;
+		};
+		FrameDiff g_diffCache{};   // Cache-Frame vs. letzter gezeichneter Frame
+		FrameDiff g_diffNormal{};  // gezeichneter Frame vs. vorheriger gezeichneter Frame (Vergleichswert)
+
+		float MaxAbsDiff(const float* a_a, const float* a_b, std::size_t a_n) noexcept
+		{
+			float m = 0.0f;
+			for (std::size_t i = 0; i < a_n; ++i) {
+				m = std::max(m, std::abs(a_a[i] - a_b[i]));
+			}
+			return m;
+		}
+
+		template <class Cached>
+		void Compare(FrameDiff& a_out, const RE::BSShadowLight::ShadowmapDescriptor& a_d, const Cached& a_c, const RE::BSShadowDirectionalLight* a_light) noexcept
+		{
+			constexpr float eps = 1e-4f;
+			++a_out.frames;
+			const float lt = MaxAbsDiff(&a_d.lightTransform.m[0][0], &a_c.lightTransform.m[0][0], 16);
+			if (lt > eps) {
+				++a_out.lightTransform;
+				a_out.maxLightTransform = std::max(a_out.maxLightTransform, lt);
+			}
+			if (const auto cam = a_d.camera.get()) {
+				const float wc = MaxAbsDiff(&cam->GetRuntimeData().worldToCam[0][0], &a_c.camWorldToCam[0][0], 16);
+				if (wc > eps) {
+					++a_out.worldToCam;
+					a_out.maxWorldToCam = std::max(a_out.maxWorldToCam, wc);
+				}
+				const auto& f1 = cam->GetRuntimeData2().viewFrustum;
+				const auto& f2 = a_c.camData2.viewFrustum;
+				const float fr = std::max({ std::abs(f1.fLeft - f2.fLeft), std::abs(f1.fRight - f2.fRight), std::abs(f1.fTop - f2.fTop),
+					std::abs(f1.fBottom - f2.fBottom), std::abs(f1.fNear - f2.fNear), std::abs(f1.fFar - f2.fFar) });
+				if (fr > eps) {
+					++a_out.frustum;
+					a_out.maxFrustum = std::max(a_out.maxFrustum, fr);
+				}
+			}
+			if (std::memcmp(&a_d.clipPlanes, &a_c.clipPlanes, sizeof(a_d.clipPlanes)) != 0) {
+				++a_out.clipPlanes;
+			}
+			if (a_d.isEnabled != a_c.isEnabled) {
+				++a_out.enabled;
+			}
+			if (std::memcmp(&a_d.port, &a_c.port, sizeof(a_d.port)) != 0) {
+				++a_out.port;
+			}
+			if (a_light) {
+				const auto& dir = a_light->GetShadowDirectionalLightRuntimeData();
+				const float sp = std::max(MaxAbsDiff(dir.startSplitDistances, g_cachedStartSplits.data(), 3), MaxAbsDiff(dir.endSplitDistances, g_cachedEndSplits.data(), 3));
+				if (sp > eps) {
+					++a_out.splits;
+					a_out.maxSplits = std::max(a_out.maxSplits, sp);
+				}
+			}
+		}
+
+		void LogDiff(const char* a_label, FrameDiff& a_d)
+		{
+			logger::info("[Cascade-Diag]   {}: {} Frames | lightTransform {} (max {:.4f}) | worldToCam {} (max {:.4f}) | Frustum {} (max {:.2f}) | clipPlanes {} | Grenzen {} (max {:.1f}) | isEnabled {} | Port {}",
+				a_label, a_d.frames, a_d.lightTransform, a_d.maxLightTransform, a_d.worldToCam, a_d.maxWorldToCam, a_d.frustum, a_d.maxFrustum, a_d.clipPlanes, a_d.splits, a_d.maxSplits, a_d.enabled, a_d.port);
+			a_d = {};
+		}
 		std::array<std::uint32_t, 2>  g_clearFlagSeen{};           // Diagnose: Normal-Frames mit clearRenderTarget false/true (ferne Kaskade)
 		std::array<CachedCascade, kMaxCascades> g_cached{};
 		std::uint32_t                           g_cacheInvalidations = 0;  // Diagnose: Ziel/Slice hat sich geaendert
@@ -483,14 +557,24 @@ namespace ShadowCulling
 					c.valid = false;
 					continue;
 				}
+				Compare(g_diffCache, d, c, a_light);
 				if (cfg.freezeMatrix) {
 					d.lightTransform = c.lightTransform;  // alte Matrix passend zum alten Inhalt der Schattenkarte
+				}
+				if (cfg.freezeCamera) {
 					d.clipPlanes = c.clipPlanes;
 					if (const auto cam = d.camera.get()) {
 						cam->world = c.camWorld;
 						std::memcpy(cam->GetRuntimeData().worldToCam, c.camWorldToCam, sizeof(c.camWorldToCam));
 						cam->GetRuntimeData2() = c.camData2;
 					}
+				}
+				if (cfg.freezeSplits) {
+					d.isEnabled = c.isEnabled;
+					d.port = c.port;
+					auto& dir = a_light->GetShadowDirectionalLightRuntimeData();
+					std::copy(g_cachedStartSplits.begin(), g_cachedStartSplits.end(), dir.startSplitDistances);
+					std::copy(g_cachedEndSplits.begin(), g_cachedEndSplits.end(), dir.endSplitDistances);
 				}
 				if (cfg.noClear) {
 					// Nur fuer diesen Frame; nach Render wird der Engine-Wert wiederhergestellt (AfterSunRender)
@@ -502,7 +586,17 @@ namespace ShadowCulling
 			} else {
 				// Normal-Frame: Engine-Werte unangetastet lassen, nur Stand merken
 				++g_clearFlagSeen[d.clearRenderTarget ? 1 : 0];
+				if (c.valid) {
+					Compare(g_diffNormal, d, c, a_light);
+				}
 				c.lightTransform = d.lightTransform;
+				c.port = d.port;
+				c.isEnabled = d.isEnabled;
+				if (i == cfg.cascade) {
+					const auto& dir = a_light->GetShadowDirectionalLightRuntimeData();
+					std::copy(std::begin(dir.startSplitDistances), std::end(dir.startSplitDistances), g_cachedStartSplits.begin());
+					std::copy(std::begin(dir.endSplitDistances), std::end(dir.endSplitDistances), g_cachedEndSplits.begin());
+				}
 				c.clipPlanes = d.clipPlanes;
 				if (const auto cam = d.camera.get()) {
 					c.camWorld = cam->world;
@@ -594,6 +688,8 @@ namespace ShadowCulling
 			logger::info("[Cascade-Diag]   Cache-Invalidierungen (Ziel/Slice gewechselt): {} | Normal-Frames ferne Kaskade clearRenderTarget false/true: {}/{}",
 				g_cacheInvalidations, g_clearFlagSeen[0], g_clearFlagSeen[1]);
 			g_clearFlagSeen = {};
+			LogDiff("Cache-Frame vs. letzter gezeichneter", g_diffCache);
+			LogDiff("Gezeichnet vs. vorheriger gezeichneter", g_diffNormal);
 			if (const auto mainCam = RE::Main::WorldRootCamera()) {
 				logger::info("[ShadowCulling-Diag]   Hauptkamera (WorldRootCamera): {:p} '{}'", static_cast<const void*>(mainCam), mainCam->name.c_str());
 			}

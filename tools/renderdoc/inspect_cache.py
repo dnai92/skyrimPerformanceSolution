@@ -71,6 +71,14 @@ def analyze(ctrl):
     for r in resources:
         if r.name in TEX_NAMES:
             tex[int(r.resourceId)] = r.name
+    if not tex:
+        # Engine-Ziele unbenannt -> ueber Groesse/Format erkennen (Sonne 2048x2048[2], Volumetric 256x256[2], R16_TYPELESS)
+        for t in ctrl.GetTextures():
+            if t.arraysize == 2 and "R16_TYPELESS" in t.format.Name():
+                if t.width == 2048:
+                    tex[int(t.resourceId)] = TEX_NAMES[0]
+                elif t.width == 256:
+                    tex[int(t.resourceId)] = TEX_NAMES[1]
     views = {}  # view-id -> (texname, beschreibung)
     for r in resources:
         parents = [int(p) for p in r.parentResources]
@@ -90,6 +98,11 @@ def analyze(ctrl):
                             stack.append(o.GetChild(i))
                 views[int(r.resourceId)] = (tex[p], "%s Ebene %s+%s" % (r.name, first, size))
     log("Texturen:", tex)
+    if not tex:
+        cand = [r.name for r in resources if "shadow" in r.name.lower() or "ESRAM" in r.name]
+        log("Keine Namens-Treffer. Ressourcen gesamt:", len(resources), "Kandidaten:", cand[:40])
+        big = [(r.name, int(r.resourceId)) for r in resources if r.type == rd.ResourceType.Texture][:60]
+        log("Erste Texturen:", big)
     for v, (t, d) in views.items():
         log("  View", v, t, d)
     watch = set(tex) | set(views)
