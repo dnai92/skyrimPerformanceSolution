@@ -49,7 +49,7 @@ namespace Config
 		std::uint32_t interval = 2;  // 2 = jeden 2. Frame neu zeichnen
 		// Diagnose-Schalter (einzeln abschaltbar, um Flackern einzugrenzen)
 		bool freezeMatrix = true;       // im Cache-Frame alte lightTransform einsetzen
-		bool freezeCamera = false;      // im Cache-Frame Kamera + clipPlanes der Kaskade einfrieren (0.9.4: eher schlechter)
+		bool freezeCamera = true;       // im Cache-Frame Kamera + clipPlanes einfrieren; Engine-Stand vor naechstem Accumulate zurueck
 		bool freezeSplits = true;       // im Cache-Frame Kaskaden-Grenzen, isEnabled und Port einfrieren
 		bool noClear = true;            // im Cache-Frame clearRenderTarget = false
 		bool restoreShadowmap = true;   // Sonnen-Schattenkarte per GPU-Kopie sichern/zuruecklegen

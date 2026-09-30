@@ -52,6 +52,14 @@ namespace ShadowCulling
 			float                          camWorldToCam[4][4]{};
 			RE::NiCamera::RUNTIME_DATA2    camData2{};
 			RE::NiFrustumPlanes            clipPlanes{};
+			// Frisch berechneter Engine-Stand der Kamera im Cache-Frame: wird vor dem naechsten Accumulate
+			// zurueckgeschrieben, damit UpdateCamera von ihrem eigenen Stand weiterrechnet (0.9.4 rechnete vom
+			// eingefrorenen Stand weiter -> Schatten sprangen staerker)
+			RE::NiTransform                engWorld{};
+			float                          engWorldToCam[4][4]{};
+			RE::NiCamera::RUNTIME_DATA2    engData2{};
+			RE::NiFrustumPlanes            engClipPlanes{};
+			bool                           camTouched = false;
 			RE::NiRect<std::int32_t>       port{};
 			bool                           isEnabled = true;
 			bool                           clearSaved = false;    // clearRenderTarget vor unserer Aenderung (nur Cache-Frame)
@@ -463,6 +471,23 @@ namespace ShadowCulling
 	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept
 	{
 		const auto& cfg = Config::cascadeCache;
+		// Kamera-Stand der Engine aus dem letzten Cache-Frame zuruecklegen (auch wenn der Cache inzwischen aus ist)
+		if (a_light) {
+			auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
+			for (std::uint32_t i = 0; i < descs.size() && i < kMaxCascades; ++i) {
+				auto& c = g_cached[i];
+				if (!c.camTouched) {
+					continue;
+				}
+				descs[i].clipPlanes = c.engClipPlanes;
+				if (const auto cam = descs[i].camera.get()) {
+					cam->world = c.engWorld;
+					std::memcpy(cam->GetRuntimeData().worldToCam, c.engWorldToCam, sizeof(c.engWorldToCam));
+					cam->GetRuntimeData2() = c.engData2;
+				}
+				c.camTouched = false;
+			}
+		}
 		bool        skip = false;
 		if (cfg.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && cfg.interval > 1 && a_light) {
 			const auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
@@ -562,8 +587,13 @@ namespace ShadowCulling
 					d.lightTransform = c.lightTransform;  // alte Matrix passend zum alten Inhalt der Schattenkarte
 				}
 				if (cfg.freezeCamera) {
+					c.engClipPlanes = d.clipPlanes;
 					d.clipPlanes = c.clipPlanes;
 					if (const auto cam = d.camera.get()) {
+						c.engWorld = cam->world;
+						std::memcpy(c.engWorldToCam, cam->GetRuntimeData().worldToCam, sizeof(c.engWorldToCam));
+						c.engData2 = cam->GetRuntimeData2();
+						c.camTouched = true;
 						cam->world = c.camWorld;
 						std::memcpy(cam->GetRuntimeData().worldToCam, c.camWorldToCam, sizeof(c.camWorldToCam));
 						cam->GetRuntimeData2() = c.camData2;
