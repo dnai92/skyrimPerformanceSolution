@@ -112,6 +112,12 @@ namespace Config
 		}
 		logger::info("ShadowInstancing: {} | Pruefmodus {} (Versatz {:.0f}) | Techniken {} | zweiseitig {} | Debug-Modus {}", si.enabled ? "AN" : "AUS", si.verify, si.debugOffsetZ, techs, si.allowTwoSided, si.debugMode);
 
+		auto& ac = actorShadowCulling;
+		ac.enabled = ini.GetBoolValue("ActorShadowCulling", "bEnabled", ac.enabled);
+		ac.minDistance = static_cast<float>(ini.GetDoubleValue("ActorShadowCulling", "fMinDistance", ac.minDistance));
+		ac.pointLights = ini.GetBoolValue("ActorShadowCulling", "bPointLights", ac.pointLights);
+		logger::info("ActorShadowCulling: {} | ab Distanz {:.0f} | Punktlichter {}", ac.enabled ? "AN" : "AUS", ac.minDistance, ac.pointLights);
+
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
 		sky.minRadius = static_cast<float>(ini.GetDoubleValue("SkylightingCulling", "fMinRadius", sky.minRadius));

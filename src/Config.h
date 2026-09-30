@@ -63,7 +63,7 @@ namespace Config
 	// Instancing der Sonnenschatten (Schritt 2): gleiche einfache Meshes eines Batches in einem Draw Call
 	struct ShadowInstancing
 	{
-		bool          enabled = true;
+		bool          enabled = true;         // im Markt-Test nur ~0,1 ms, in anderen Szenen evtl. mehr
 		bool          verify = false;         // Pruefmodus: Engine zeichnet alles, Instanzen werden ZUSAETZLICH gezeichnet
 		float         debugOffsetZ = 0.0f;    // Pruefmodus: Instanzen um diesen Wert nach oben versetzen (sichtbarer Beweis)
 		std::uint32_t technique = 0xC046;     // erste Technik der Liste (Kompatibilitaet)
@@ -74,6 +74,15 @@ namespace Config
 		std::uint32_t debugMode = 0;          // Diagnose: 1 = Flush ohne Draw-Aufrufe (nur Zustand), 2 = gar kein Flush, 3 = nur sammeln/zaehlen
 	};
 	inline ShadowInstancing shadowInstancing;  // [ShadowInstancing]
+
+	// Schatten entfernter Charaktere/Kreaturen (geskinnte Meshes: Koerper, Kleidung, Haare) weglassen
+	struct ActorShadowCulling
+	{
+		bool  enabled = true;
+		float minDistance = 2500.0f;  // ab dieser Entfernung zur Kamera (~35 m)
+		bool  pointLights = true;      // auch in Punktlicht-Schatten (Fackeln)
+	};
+	inline ActorShadowCulling actorShadowCulling;  // [ActorShadowCulling]
 
 	void Load();
 

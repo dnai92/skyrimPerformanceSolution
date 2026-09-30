@@ -60,6 +60,8 @@ namespace Stats
 		CascadeSkipFrames,// Frames, in denen die ferne Kaskade aus dem Cache kam (0/1)
 		InstancedMeshes,  // per Instancing gezeichnete Meshes (ohne das jeweils erste der Gruppe)
 		InstancedCalls,   // dafuer abgesetzte Instanced-Draw-Calls
+		ActorShadowKept,  // geskinnte Meshes in Schattenkarten (Sonne + Punktlicht)
+		ActorShadowCulled,// davon wegen Entfernung verworfen
 
 		kTotal
 	};
@@ -91,6 +93,8 @@ namespace Stats
 		"Kaskaden-Cache Frames",
 		"Instancing Meshes",
 		"Instancing Draw-Calls",
+		"Charakter-Schatten behalten",
+		"Charakter-Schatten gecullt",
 	};
 
 	void Init();

@@ -289,12 +289,30 @@ namespace ShadowCulling
 			return radius / distance < a_rule.minAngularSize;
 		}
 
+		// Entfernte Charaktere: geskinnte Meshes ab fMinDistance nicht in die Schattenkarte (true = verwerfen)
+		bool CullActorShadow(const RE::BSGeometry& a_geom, bool a_pointLight) noexcept;
+
 		float DistanceToCamera(const RE::NiBound& a_bound) noexcept
 		{
 			const float dx = a_bound.center.x - g_camX.load(std::memory_order_relaxed);
 			const float dy = a_bound.center.y - g_camY.load(std::memory_order_relaxed);
 			const float dz = a_bound.center.z - g_camZ.load(std::memory_order_relaxed);
 			return std::sqrt(dx * dx + dy * dy + dz * dz) - a_bound.radius;
+		}
+
+		bool CullActorShadow(const RE::BSGeometry& a_geom, bool a_pointLight) noexcept
+		{
+			const auto& cfg = Config::actorShadowCulling;
+			if (!cfg.enabled || (a_pointLight && !cfg.pointLights) || !Config::masterEnabled.load(std::memory_order_relaxed) ||
+				!const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData().skinInstance) {
+				return false;
+			}
+			if (DistanceToCamera(a_geom.worldBound) > cfg.minDistance) {
+				Stats::Count(Stats::Counter::ActorShadowCulled);
+				return true;
+			}
+			Stats::Count(Stats::Counter::ActorShadowKept);
+			return false;
 		}
 
 		// Diagnose: Verteilung der Decals nach Entfernung (Zeilen) und Radius (Spalten)
@@ -350,6 +368,9 @@ namespace ShadowCulling
 						Stats::Count(Stats::Counter::CascadeSkipped);
 						return;  // Kaskade kommt diesen Frame aus dem Cache
 					}
+					if (g_sunCullAllowed.load(std::memory_order_relaxed) && CullActorShadow(a_visible, false)) {
+						return;
+					}
 					if (g_sunCullAllowed.load(std::memory_order_relaxed) && ShouldCull(Config::shadowCulling, a_visible, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
 						Stats::Count(Stats::Counter::SunCulled);
 						return;
@@ -357,6 +378,9 @@ namespace ShadowCulling
 					Stats::Count(cascade == 0 ? Stats::Counter::SunCascade0 : cascade == 1 ? Stats::Counter::SunCascade1 : Stats::Counter::SunCascade2Plus);
 					break;
 				case Kind::kPoint:
+					if (CullActorShadow(a_visible, true)) {
+						return;
+					}
 					// minCascade gilt nur fuer die Sonne -> hier Kaskade als "hinreichend gross" uebergeben
 					if (ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX)) {
 						Stats::Count(Stats::Counter::PointCulled);
