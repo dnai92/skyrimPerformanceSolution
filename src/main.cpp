@@ -1,4 +1,5 @@
 #include "Hooks.h"
+#include "Hotkey.h"
 #include "InstancingAnalysis.h"
 #include "Config.h"
 #include "ShadowCulling.h"
@@ -11,6 +12,7 @@ namespace
 		if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
 			ShadowCulling::InstallLate();
+			Hotkey::Register();
 		}
 	}
 }

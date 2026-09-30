@@ -82,7 +82,7 @@ namespace ShadowCulling
 
 		bool ShouldCull(const Config::CullRule& a_rule, const RE::BSGeometry& a_geom, std::uint32_t a_cascade) noexcept
 		{
-			if (!a_rule.enabled || a_cascade < a_rule.minCascade) {
+			if (!a_rule.enabled || a_cascade < a_rule.minCascade || !Config::masterEnabled.load(std::memory_order_relaxed)) {
 				return false;
 			}
 
@@ -139,7 +139,7 @@ namespace ShadowCulling
 				g_decalHist[Bucket(kDecalDistEdges, DistanceToCamera(a_geom.worldBound))][Bucket(kDecalRadEdges, a_geom.worldBound.radius)].fetch_add(1, std::memory_order_relaxed);
 				const std::string_view name{ a_geom.name.c_str() ? a_geom.name.c_str() : "" };
 				g_decalNames[name == "Decal" ? 0 : name == "DecalDirt" ? 1 : name.empty() ? 3 : 2].fetch_add(1, std::memory_order_relaxed);
-				if (dec.enabled && a_geom.worldBound.radius < dec.maxRadius && DistanceToCamera(a_geom.worldBound) > dec.maxDistance) {
+				if (dec.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && a_geom.worldBound.radius < dec.maxRadius && DistanceToCamera(a_geom.worldBound) > dec.maxDistance) {
 					Stats::Count(Stats::Counter::DecalCulled);
 					return true;
 				}
@@ -241,7 +241,7 @@ namespace ShadowCulling
 				const auto passes = func(a_this, a_geometry, a_renderMode, a_accumulator);
 				const auto& cfg = Config::skylightingCulling;
 				if (passes && a_geometry && passes->head) {
-					if (cfg.enabled && a_geometry->worldBound.radius < cfg.minRadius) {
+					if (cfg.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && a_geometry->worldBound.radius < cfg.minRadius) {
 						passes->Clear();
 						Stats::Count(Stats::Counter::SkylightCulled);
 					} else {

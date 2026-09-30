@@ -44,6 +44,8 @@ namespace Config
 		}
 
 		// Werte einzeln setzen; die Culling-Jobs lesen parallel (einzelne Felder, kein Absturz-Risiko)
+		toggleKey.store(static_cast<std::uint32_t>(ini.GetLongValue("General", "iToggleKey", toggleKey.load())), std::memory_order_relaxed);
+
 		const auto readRule = [&](const char* a_section, CullRule& a_rule) {
 			a_rule.enabled = ini.GetBoolValue(a_section, "bEnabled", a_rule.enabled);
 			a_rule.minCascade = static_cast<std::uint32_t>(ini.GetLongValue(a_section, "iMinCascade", a_rule.minCascade));
