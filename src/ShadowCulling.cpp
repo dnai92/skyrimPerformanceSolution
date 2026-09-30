@@ -1,6 +1,7 @@
 #include "ShadowCulling.h"
 
 #include "Config.h"
+#include "DetourHelper.h"
 #include "Stats.h"
 
 namespace ShadowCulling
@@ -143,35 +144,8 @@ namespace ShadowCulling
 				func(a_arg1, a_arg2);
 				g_inDepthPrepass.store(false, std::memory_order_relaxed);
 			}
-			static inline REL::Relocation<decltype(thunk)> func;
+			static inline void (*func)(bool, bool) = nullptr;
 		};
-
-		struct BranchSite
-		{
-			std::uintptr_t address;
-			bool           isCall;  // E8 = call, E9 = jmp (Tail-Call)
-		};
-
-		// Durchsucht den gesamten Code-Abschnitt von SkyrimSE.exe nach call/jmp rel32 mit Ziel a_target
-		std::vector<BranchSite> FindBranchesTo(std::uintptr_t a_target)
-		{
-			std::vector<BranchSite> sites;
-			const auto text = REL::Module::get().segment(REL::Segment::textx);
-			const auto  begin = text.address();
-			const auto  size = text.size();
-			const auto* bytes = reinterpret_cast<const std::uint8_t*>(begin);
-			for (std::size_t i = 0; i + 5 <= size; ++i) {
-				if (bytes[i] != 0xE8 && bytes[i] != 0xE9) {
-					continue;
-				}
-				std::int32_t rel;
-				std::memcpy(&rel, bytes + i + 1, sizeof(rel));
-				if (begin + i + 5 + static_cast<std::intptr_t>(rel) == a_target) {
-					sites.push_back({ begin + i, bytes[i] == 0xE8 });
-				}
-			}
-			return sites;
-		}
 
 		// Eigene vtable von BSParabolicCullingProcess (Punktlicht-Schatten): der Eintrag 0x18 zeigt direkt auf die
 		// Basis-Implementierung und laeuft daher NICHT ueber den Hook auf BSCullingProcess. Alles hier ist Punktlicht.
@@ -230,22 +204,13 @@ namespace ShadowCulling
 		OcclusionRenderPasses::func = vtbl.write_vfunc(0x2D, OcclusionRenderPasses::thunk);
 		logger::info("Hook installiert: BSLightingShaderProperty::GetRenderPasses_Occlusion (vfunc 0x2D, nach Community Shaders)");
 
-		// Main::RenderDepth: Community Shaders leitet den Funktionsanfang per Detours um. Statt dort einzuhaken, werden alle
-		// direkten Aufrufe (call/jmp rel32) im Spielcode gesucht und dort umgebogen. Nur bei genau EINER Fundstelle aktiv.
-		const auto renderDepth = REL::Relocation<std::uintptr_t>{ RELOCATION_ID(100421, 107139) }.address();
-		const auto base = REL::Module::get().base();
-		const auto sites = FindBranchesTo(renderDepth);
-		for (const auto& s : sites) {
-			logger::info("Main::RenderDepth: {} bei SkyrimSE.exe+0x{:X}", s.isCall ? "call" : "jmp", s.address - base);
-		}
-		if (sites.size() == 1 && sites[0].isCall) {
-			RenderDepth::func = SKSE::GetTrampoline().write_call<5>(sites[0].address, RenderDepth::thunk);
-			logger::info("Hook installiert: Aufruf von Main::RenderDepth (SkyrimSE.exe+0x{:X})", sites[0].address - base);
-		} else if (sites.size() == 1) {
-			RenderDepth::func = SKSE::GetTrampoline().write_branch<5>(sites[0].address, RenderDepth::thunk);
-			logger::info("Hook installiert: Sprung zu Main::RenderDepth (SkyrimSE.exe+0x{:X})", sites[0].address - base);
+		// Main::RenderDepth wird nur indirekt aufgerufen (kein direkter call/jmp im Spielcode). Community Shaders leitet den
+		// Funktionsanfang per Detours um; Detours verkettet einen weiteren Hook sauber dahinter.
+		RenderDepth::func = reinterpret_cast<void (*)(bool, bool)>(REL::Relocation<std::uintptr_t>{ RELOCATION_ID(100421, 107139) }.address());
+		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&RenderDepth::func), reinterpret_cast<void*>(&RenderDepth::thunk)); err == 0) {
+			logger::info("Hook installiert: Main::RenderDepth (Detours)");
 		} else {
-			logger::warn("Main::RenderDepth: {} direkte Aufrufe gefunden (erwartet 1) - Tiefenvorpass-Culling deaktiviert", sites.size());
+			logger::warn("Main::RenderDepth: Detours-Fehler {} - Tiefenvorpass-Culling deaktiviert", err);
 		}
 	}
 

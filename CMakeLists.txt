@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SkyrimPerf
-	VERSION 0.6.1
+	VERSION 0.6.2
 	LANGUAGES CXX
 )
 
@@ -25,6 +25,7 @@ add_commonlibsse_plugin(
 		src/Hooks.cpp
 		src/InstancingAnalysis.cpp
 		src/Config.cpp
+		src/DetourHelper.cpp
 		src/ShadowCulling.cpp
 		src/Stats.cpp
 		extern/tracy/public/TracyClient.cpp
@@ -37,6 +38,13 @@ target_include_directories(${PROJECT_NAME} PRIVATE src extern/tracy/public)
 target_compile_definitions(${PROJECT_NAME} PRIVATE TRACY_ENABLE TRACY_ON_DEMAND TRACY_NO_CRASH_HANDLER NOMINMAX)
 target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32 dbghelp)
 target_precompile_headers(${PROJECT_NAME} PRIVATE src/PCH.h)
+# Microsoft Detours (wie Community Shaders) - fuer Funktionen, die CS bereits per Detours umleitet
+find_path(DETOURS_INCLUDE_DIRS "detours/detours.h" REQUIRED)
+find_library(DETOURS_LIBRARY detours REQUIRED)
+target_include_directories(${PROJECT_NAME} PRIVATE ${DETOURS_INCLUDE_DIRS})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${DETOURS_LIBRARY})
+set_source_files_properties(src/DetourHelper.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+
 set_source_files_properties(extern/tracy/public/TracyClient.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON COMPILE_OPTIONS "/W0")
 target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive- /utf-8)
 
