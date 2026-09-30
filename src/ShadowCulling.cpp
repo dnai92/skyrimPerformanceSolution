@@ -315,6 +315,16 @@ namespace ShadowCulling
 		// Diagnose alle ~600 Frames ins Log
 		if (++g_frameCounter % 600 == 0) {
 			logger::info("[ShadowCulling-Diag] Sonnen-Deskriptoren: {} | Punktlicht-Kameras: {}", g_descCount, pointCount);
+			if (const auto mainCam = RE::Main::WorldRootCamera()) {
+				logger::info("[ShadowCulling-Diag]   Hauptkamera (WorldRootCamera): {:p} '{}'", static_cast<const void*>(mainCam), mainCam->name.c_str());
+			}
+			if (const auto pc = RE::PlayerCamera::GetSingleton(); pc && pc->cameraRoot) {
+				for (const auto& child : pc->cameraRoot->GetChildren()) {
+					if (child && child->GetRTTI() && std::string_view{ child->GetRTTI()->GetName() } == "NiCamera") {
+						logger::info("[ShadowCulling-Diag]   PlayerCamera-Kind (NiCamera): {:p} '{}'", static_cast<const void*>(child.get()), child->name.c_str());
+					}
+				}
+			}
 			for (std::size_t i = 0; i < kMaxCascades && i < g_descCount; ++i) {
 				logger::info("[ShadowCulling-Diag]   Kaskade {}: Kamera {:p}, Culler {:p}", i, static_cast<const void*>(cameras[i]), static_cast<const void*>(g_descCullers[i]));
 			}
