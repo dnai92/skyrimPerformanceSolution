@@ -55,6 +55,7 @@ namespace Config
 			a_rule.skipSkinned = ini.GetBoolValue(a_section, "bSkipSkinned", a_rule.skipSkinned);
 		};
 		readRule("ShadowCulling", shadowCulling);
+		sunMinElevation.store(static_cast<float>(ini.GetDoubleValue("ShadowCulling", "fMinSunElevation", sunMinElevation.load())), std::memory_order_relaxed);
 		readRule("PointLightShadowCulling", pointLightCulling);
 		readRule("DepthPrepassCulling", depthPrepassCulling);
 		readRule("MainViewCulling", mainViewCulling);
@@ -69,8 +70,8 @@ namespace Config
 		sky.minRadius = static_cast<float>(ini.GetDoubleValue("SkylightingCulling", "fMinRadius", sky.minRadius));
 
 		const auto& sc = shadowCulling;
-		logger::info("ShadowCulling: {} | ab Kaskade {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {}",
-			sc.enabled ? "AN" : "AUS", sc.minCascade, sc.minDistance, sc.maxRadius, sc.minAngularSize, sc.skipSkinned);
+		logger::info("ShadowCulling: {} | ab Kaskade {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {} | erst ab Sonnenhoehe {:.0f} Grad",
+			sc.enabled ? "AN" : "AUS", sc.minCascade, sc.minDistance, sc.maxRadius, sc.minAngularSize, sc.skipSkinned, sunMinElevation.load());
 		const auto& pc = pointLightCulling;
 		logger::info("PointLightShadowCulling: {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {}",
 			pc.enabled ? "AN" : "AUS", pc.minDistance, pc.maxRadius, pc.minAngularSize, pc.skipSkinned);

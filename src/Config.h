@@ -19,6 +19,7 @@ namespace Config
 	};
 
 	inline CullRule shadowCulling;                                               // Sonne [ShadowCulling]
+	inline std::atomic<float> sunMinElevation{ 25.0f };  // Sonne tiefer (Grad) -> kein Sonnen-Culling (lange Schatten) [ShadowCulling] fMinSunElevation
 	inline CullRule pointLightCulling{ true, 0, 1000.0f, 150.0f, 0.035f, true };  // Punktlichter [PointLightShadowCulling]
 	inline CullRule depthPrepassCulling{ false, 0, 1500.0f, 200.0f, 0.025f, true }; // Tiefenvorpass [DepthPrepassCulling]
 

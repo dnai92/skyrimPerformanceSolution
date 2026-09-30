@@ -35,6 +35,7 @@ namespace ShadowCulling
 		// Schatten -> Sonnen-Culling bewertet dann die Schattenlaenge (Radius / sin) statt des Radius.
 		std::atomic<float> g_sunSin{ 1.0f };
 		constexpr float    kMinSunSin = 0.05f;
+		std::atomic<bool>  g_sunCullAllowed{ true };  // false, solange die Sonne unter fMinSunElevation steht
 
 		void DiagRecord(const RE::NiCamera* a_camera) noexcept
 		{
@@ -167,7 +168,7 @@ namespace ShadowCulling
 				std::uint32_t cascade = 0;
 				switch (Classify(a_this, cascade)) {
 				case Kind::kSun:
-					if (ShouldCull(Config::shadowCulling, a_visible, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
+					if (g_sunCullAllowed.load(std::memory_order_relaxed) && ShouldCull(Config::shadowCulling, a_visible, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
 						Stats::Count(Stats::Counter::SunCulled);
 						return;
 					}
@@ -327,7 +328,9 @@ namespace ShadowCulling
 			if (sun) {
 				const auto& v = sun->GetShadowDirectionalLightRuntimeData().sunVector;
 				const float len = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-				g_sunSin.store(len > 0.0f ? std::clamp(std::abs(v.z) / len, kMinSunSin, 1.0f) : 1.0f, std::memory_order_relaxed);
+				const float sunSin = len > 0.0f ? std::clamp(std::abs(v.z) / len, kMinSunSin, 1.0f) : 1.0f;
+				g_sunSin.store(sunSin, std::memory_order_relaxed);
+				g_sunCullAllowed.store(sunSin >= std::sin(Config::sunMinElevation.load(std::memory_order_relaxed) * 0.0174533f), std::memory_order_relaxed);
 				const auto& descriptors = sun->GetRuntimeData().shadowmapDescriptors;
 				g_descCount = descriptors.size();
 				for (std::uint32_t i = 0; i < descriptors.size() && i < kMaxCascades; ++i) {
