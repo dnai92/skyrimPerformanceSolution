@@ -81,6 +81,7 @@ namespace InstancingAnalysis
 				g_inSunShadows.store(true, std::memory_order_relaxed);
 				func(a_this, a_index);
 				g_inSunShadows.store(false, std::memory_order_relaxed);
+				ShadowCulling::AfterSunRender();
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};

@@ -51,6 +51,53 @@ namespace ShadowCulling
 		std::array<CachedCascade, kMaxCascades> g_cached{};
 		std::uint32_t                           g_cacheInvalidations = 0;  // Diagnose: Ziel/Slice hat sich geaendert
 
+		// Die Engine loescht jede Kaskaden-Ebene per ClearDepthStencilView, unabhaengig von clearRenderTarget
+		// (RenderDoc). Deshalb wird die ferne Kaskade nach dem Zeichnen in eine eigene Textur kopiert und im
+		// Cache-Frame nach dem (leeren) Render zurueckkopiert. Betroffen: Sonnen-Schattenkarte und die
+		// Volumetric-Lighting-Schattenkarte von Community Shaders (beide 2 Ebenen = 2 Kaskaden).
+		struct CascadeBackup
+		{
+			RE::RENDER_TARGETS_DEPTHSTENCIL::RENDER_TARGET_DEPTHSTENCIL target;
+			REX::W32::ID3D11Texture2D*                                  source = nullptr;  // Engine-Textur (nicht besessen)
+			REX::W32::ID3D11Texture2D*                                  copy = nullptr;    // eigene Kopie
+			std::uint32_t                                               mipLevels = 1;
+			std::uint32_t                                               arraySize = 0;
+		};
+		std::array<CascadeBackup, 2> g_backups{ { { RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS_ESRAM }, { RE::RENDER_TARGETS_DEPTHSTENCIL::kVOLUMETRIC_LIGHTING_SHADOWMAPS_ESRAM } } };
+		bool                         g_backupValid = false;  // Kopie passt zum letzten gezeichneten Frame
+		bool                         g_backupFailed = false;
+
+		// Kopie anlegen bzw. bei geaenderter Engine-Textur (Aufloesung) neu anlegen
+		bool EnsureBackup(CascadeBackup& a_b, REX::W32::ID3D11Texture2D* a_src) noexcept
+		{
+			if (a_b.source == a_src && a_b.copy) {
+				return true;
+			}
+			if (a_b.copy) {
+				a_b.copy->Release();
+				a_b.copy = nullptr;
+			}
+			a_b.source = a_src;
+			if (!a_src) {
+				return false;
+			}
+			REX::W32::D3D11_TEXTURE2D_DESC desc{};
+			a_src->GetDesc(&desc);
+			a_b.mipLevels = desc.mipLevels;
+			a_b.arraySize = desc.arraySize;
+			desc.usage = REX::W32::D3D11_USAGE_DEFAULT;
+			desc.bindFlags = 0;
+			desc.cpuAccessFlags = 0;
+			desc.miscFlags = 0;
+			const auto device = RE::BSGraphics::Renderer::GetDevice();
+			if (!device || device->CreateTexture2D(&desc, nullptr, &a_b.copy) < 0 || !a_b.copy) {
+				a_b.copy = nullptr;
+				return false;
+			}
+			logger::info("Kaskaden-Cache: Sicherungstextur {}x{} x{} angelegt (Ziel {})", desc.width, desc.height, desc.arraySize, static_cast<std::uint32_t>(a_b.target));
+			return true;
+		}
+
 		void DiagRecord(const RE::NiCamera* a_camera) noexcept
 		{
 			for (std::size_t i = 0; i < kDiagSlots; ++i) {
@@ -330,7 +377,8 @@ namespace ShadowCulling
 		if (cfg.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && cfg.interval > 1 && a_light) {
 			const auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
 			skip = (++g_cacheCounter % cfg.interval) != 0 && cfg.cascade < descs.size();
-			// Nur ueberspringen, wenn fuer alle betroffenen Kaskaden ein gueltiger Stand vorliegt
+			// Nur ueberspringen, wenn eine Sicherung und fuer alle betroffenen Kaskaden ein gueltiger Stand vorliegt
+			skip = skip && g_backupValid && !g_backupFailed;
 			for (std::uint32_t i = cfg.cascade; skip && i < descs.size() && i < kMaxCascades; ++i) {
 				skip = g_cached[i].valid;
 			}
@@ -338,8 +386,55 @@ namespace ShadowCulling
 			for (auto& c : g_cached) {
 				c.valid = false;
 			}
+			g_backupValid = false;
 		}
 		g_cacheSkip.store(skip, std::memory_order_relaxed);
+	}
+
+	void AfterSunRender() noexcept
+	{
+		const auto& cfg = Config::cascadeCache;
+		if (!cfg.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || cfg.interval <= 1 || g_backupFailed) {
+			return;
+		}
+		const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
+		if (!renderer) {
+			return;
+		}
+		const auto context = renderer->GetRuntimeData().context;
+		auto&      depth = renderer->GetDepthStencilData().depthStencils;
+		if (!context) {
+			return;
+		}
+		const bool skip = g_cacheSkip.load(std::memory_order_relaxed);
+		bool       ok = true;
+		for (auto& b : g_backups) {
+			const auto src = depth[b.target].texture;
+			if (!src) {
+				continue;  // Volumetric-Schatten ggf. nicht vorhanden
+			}
+			if (!EnsureBackup(b, src)) {
+				ok = false;
+				continue;
+			}
+			for (std::uint32_t slice = cfg.cascade; slice < b.arraySize; ++slice) {
+				const auto sub = slice * b.mipLevels;  // Mip 0 der Ebene
+				if (skip) {
+					context->CopySubresourceRegion(src, sub, 0, 0, 0, b.copy, sub, nullptr);  // alten Stand zuruecklegen
+				} else {
+					context->CopySubresourceRegion(b.copy, sub, 0, 0, 0, src, sub, nullptr);  // frisch gezeichneten Stand sichern
+				}
+			}
+		}
+		if (!ok) {
+			g_backupFailed = true;
+			g_backupValid = false;
+			logger::error("Kaskaden-Cache: Sicherungstextur konnte nicht angelegt werden - Cache deaktiviert");
+			return;
+		}
+		if (!skip) {
+			g_backupValid = true;
+		}
 	}
 
 	void AfterSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept

@@ -18,6 +18,8 @@ namespace ShadowCulling
 	// Kaskaden-Cache: vor bzw. nach BSShadowDirectionalLight::Accumulate (Main-Thread)
 	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept;
 	void AfterSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept;
+	// Nach BSShadowDirectionalLight::Render: ferne Kaskade sichern (gezeichneter Frame) bzw. zuruecklegen (Cache-Frame)
+	void AfterSunRender() noexcept;
 
 	// Einmal pro Frame auf dem Main-Thread: Kamera-Position und Kaskaden-Culler der Sonne cachen
 	void OnFrame();
