@@ -5,7 +5,7 @@ namespace Config
 {
 	// Hauptschalter (Taste, siehe Hotkey) - wirkt auf ALLE Culling-Funktionen, unabhaengig von den einzelnen bEnabled
 	inline std::atomic<bool>          masterEnabled{ true };
-	inline std::atomic<std::uint32_t> toggleKey{ 0xC7 };  // DirectInput-Scancode, 0xC7 = Pos1 (Home)
+	inline std::atomic<std::uint32_t> toggleKey{ 0xC9 };  // DirectInput-Scancode, 0xC9 = Bild auf (Page Up)
 
 	// Regel fuer das Kleinobjekt-Culling in einer Schattenkarte. Ein Mesh wird verworfen, wenn ALLE Bedingungen zutreffen.
 	struct CullRule
