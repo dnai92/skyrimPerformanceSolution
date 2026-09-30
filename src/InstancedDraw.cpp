@@ -287,7 +287,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 		SafeRelease(vs);
 	}
 
-	bool Flush(void* a_context, const Instance* a_instances, std::uint32_t a_instanceCount, const Group* a_groups, std::uint32_t a_groupCount, bool a_clampZ) noexcept
+	bool Flush(void* a_context, const Instance* a_instances, std::uint32_t a_instanceCount, const Group* a_groups, std::uint32_t a_groupCount, bool a_clampZ, bool a_skipDraws) noexcept
 	{
 		const auto ctx = static_cast<ID3D11DeviceContext*>(a_context);
 		if (!g_ready || !g_captured || !ctx || a_instanceCount == 0 || a_groupCount == 0 || a_instanceCount > kInstanceCapacity) {
@@ -372,7 +372,9 @@ float4 main(VS_INPUT input) : SV_POSITION
 			const UINT    offsets[2] = { 0, 0 };
 			ctx->IASetVertexBuffers(0, 2, vbs, strides, offsets);
 			ctx->IASetIndexBuffer(static_cast<ID3D11Buffer*>(g.indexBuffer), DXGI_FORMAT_R16_UINT, 0);
-			ctx->DrawIndexedInstanced(g.indexCount, g.instanceCount, 0, 0, base + g.firstInstance);
+			if (!a_skipDraws) {
+				ctx->DrawIndexedInstanced(g.indexCount, g.instanceCount, 0, 0, base + g.firstInstance);
+			}
 		}
 
 		// Zustand wiederherstellen

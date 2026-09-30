@@ -309,9 +309,9 @@ namespace InstancingAnalysis
 				g_instFlat.insert(g_instFlat.end(), g.instances.begin(), g.instances.end());
 				g_instFlatGroups.push_back(g.group);
 			}
-			if (!g_instFlatGroups.empty()) {
+			if (!g_instFlatGroups.empty() && cfg.debugMode != 2 && cfg.debugMode != 3) {
 				if (InstancedDraw::Flush(D3DContext(), g_instFlat.data(), static_cast<std::uint32_t>(g_instFlat.size()), g_instFlatGroups.data(),
-						static_cast<std::uint32_t>(g_instFlatGroups.size()), (cfg.technique & 0x8000) != 0)) {
+						static_cast<std::uint32_t>(g_instFlatGroups.size()), (cfg.technique & 0x8000) != 0, cfg.debugMode == 1)) {
 					for (std::size_t n = 0; n < g_instFlat.size(); ++n) {
 						Stats::Count(Stats::Counter::InstancedMeshes);
 					}
@@ -514,7 +514,7 @@ namespace InstancingAnalysis
 					if (CollectInstance(*a_pass)) {
 						return;  // wird am Ende des Batches per Instancing gezeichnet
 					}
-					first = !g_instCaptured;
+					first = !g_instCaptured && Config::shadowInstancing.debugMode != 3;
 				}
 				const auto prev = t_callSite;
 				t_callSite = Site;

@@ -46,5 +46,5 @@ namespace InstancedDraw
 
 	// Zeichnet alle Gruppen; stellt den vorherigen D3D-Zustand danach wieder her.
 	// a_clampZ: Variante RENDER_SHADOWMAP_CLAMPED (z = max(0, z))
-	bool Flush(void* a_context, const Instance* a_instances, std::uint32_t a_instanceCount, const Group* a_groups, std::uint32_t a_groupCount, bool a_clampZ) noexcept;
+	bool Flush(void* a_context, const Instance* a_instances, std::uint32_t a_instanceCount, const Group* a_groups, std::uint32_t a_groupCount, bool a_clampZ, bool a_skipDraws = false) noexcept;
 }

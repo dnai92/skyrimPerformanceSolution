@@ -86,8 +86,9 @@ namespace Config
 		si.verify = ini.GetBoolValue("ShadowInstancing", "bVerify", si.verify);
 		si.debugOffsetZ = static_cast<float>(ini.GetDoubleValue("ShadowInstancing", "fDebugOffsetZ", si.debugOffsetZ));
 		si.technique = static_cast<std::uint32_t>(std::strtoul(ini.GetValue("ShadowInstancing", "sTechnique", "C046"), nullptr, 16));
+		si.debugMode = static_cast<std::uint32_t>(ini.GetLongValue("ShadowInstancing", "iDebugMode", si.debugMode));
 		si.minGroup = std::max<std::uint32_t>(2, static_cast<std::uint32_t>(ini.GetLongValue("ShadowInstancing", "iMinGroup", si.minGroup)));
-		logger::info("ShadowInstancing: {} | Pruefmodus {} (Versatz {:.0f}) | Technik {:X} | ab {} gleichen Meshes", si.enabled ? "AN" : "AUS", si.verify, si.debugOffsetZ, si.technique, si.minGroup);
+		logger::info("ShadowInstancing: {} | Pruefmodus {} (Versatz {:.0f}) | Technik {:X} | ab {} gleichen Meshes | Debug-Modus {}", si.enabled ? "AN" : "AUS", si.verify, si.debugOffsetZ, si.technique, si.minGroup, si.debugMode);
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);

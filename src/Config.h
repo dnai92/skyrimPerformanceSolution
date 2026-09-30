@@ -68,6 +68,7 @@ namespace Config
 		float         debugOffsetZ = 0.0f;    // Pruefmodus: Instanzen um diesen Wert nach oben versetzen (sichtbarer Beweis)
 		std::uint32_t technique = 0xC046;     // nur diese Utility-Technik (Shadowmap, clamped, ohne Alpha-Test)
 		std::uint32_t minGroup = 2;           // ab so vielen gleichen Meshes pro Batch
+		std::uint32_t debugMode = 0;          // Diagnose: 1 = Flush ohne Draw-Aufrufe (nur Zustand), 2 = gar kein Flush, 3 = nur sammeln/zaehlen
 	};
 	inline ShadowInstancing shadowInstancing;  // [ShadowInstancing]
 
