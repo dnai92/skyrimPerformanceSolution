@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SkyrimPerf
-	VERSION 0.13.4
+	VERSION 0.13.5
 	LANGUAGES CXX
 )
 

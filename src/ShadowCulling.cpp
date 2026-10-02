@@ -351,6 +351,60 @@ namespace ShadowCulling
 			}
 		}
 
+		// Diagnose: Texturen der Decals in der Hauptszene (zeigt, von welcher Mod sie stammen)
+		struct DecalTexInfo
+		{
+			std::uint32_t count = 0;
+			float         minDist = 1e30f;
+			float         maxDist = 0.0f;
+			float         maxRadius = 0.0f;
+			std::string   meshName;
+		};
+		std::mutex                                    g_decalTexLock;
+		std::unordered_map<std::string, DecalTexInfo> g_decalTex;
+
+		void RecordDecalTexture(RE::BSGeometry& a_geom, float a_distance) noexcept
+		{
+			try {
+				std::string tex = "(keine Textur)";
+				if (const auto prop = a_geom.GetGeometryRuntimeData().shaderProperty.get()) {
+					if (const auto lighting = netimmerse_cast<RE::BSLightingShaderProperty*>(prop)) {
+						if (const auto mat = static_cast<RE::BSLightingShaderMaterialBase*>(lighting->material)) {
+							if (const auto t = mat->diffuseTexture.get(); t && t->name.c_str()) {
+								tex = t->name.c_str();
+							}
+						}
+					}
+				}
+				std::scoped_lock lock{ g_decalTexLock };
+				auto&            info = g_decalTex[tex];
+				++info.count;
+				info.minDist = std::min(info.minDist, a_distance);
+				info.maxDist = std::max(info.maxDist, a_distance);
+				info.maxRadius = std::max(info.maxRadius, a_geom.worldBound.radius);
+				if (info.meshName.empty() && a_geom.name.c_str()) {
+					info.meshName = a_geom.name.c_str();
+				}
+			} catch (...) {
+			}
+		}
+
+		void ReportDecalTextures()
+		{
+			std::vector<std::pair<std::string, DecalTexInfo>> list;
+			{
+				std::scoped_lock lock{ g_decalTexLock };
+				list.assign(g_decalTex.begin(), g_decalTex.end());
+				g_decalTex.clear();
+			}
+			std::ranges::sort(list, [](const auto& a, const auto& b) { return a.second.count > b.second.count; });
+			logger::info("[Decal-Texturen] {} verschiedene Texturen (Decals/Frame, ueber 600 Frames gemittelt):", list.size());
+			for (std::size_t i = 0; i < list.size() && i < 18; ++i) {
+				const auto& [tex, d] = list[i];
+				logger::info("[Decal-Texturen]   {:6.1f}/Frame  Distanz {:5.0f}-{:5.0f}  Radius<={:4.0f}  '{}'  {}", d.count / 600.0, d.minDist, d.maxDist, d.maxRadius, d.meshName, tex);
+			}
+		}
+
 		// Entfernte Charaktere: geskinnte Meshes ab fMinDistance nicht in die Schattenkarte (true = verwerfen)
 		bool CullActorShadow(const RE::BSGeometry& a_geom, bool a_pointLight) noexcept;
 
@@ -405,6 +459,7 @@ namespace ShadowCulling
 					g_decalHist[Bucket(kDecalDistEdges, DistanceToCamera(a_geom.worldBound))][Bucket(kDecalRadEdges, a_geom.worldBound.radius)].fetch_add(1, std::memory_order_relaxed);
 					const std::string_view name{ a_geom.name.c_str() ? a_geom.name.c_str() : "" };
 					g_decalNames[name == "Decal" ? 0 : name == "DecalDirt" ? 1 : name.empty() ? 3 : 2].fetch_add(1, std::memory_order_relaxed);
+					RecordDecalTexture(a_geom, DistanceToCamera(a_geom.worldBound));
 				}
 				if (dec.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && a_geom.worldBound.radius < dec.maxRadius && DistanceToCamera(a_geom.worldBound) > dec.maxDistance) {
 					Stats::Count(Stats::Counter::DecalCulled);
@@ -898,6 +953,9 @@ namespace ShadowCulling
 				}
 			}
 			ReportCulled();
+			if (Config::analysis.load(std::memory_order_relaxed)) {
+				ReportDecalTextures();
+			}
 			logger::info("[Cascade-Diag]   Cache-Invalidierungen (Ziel/Slice gewechselt): {} | Normal-Frames ferne Kaskade clearRenderTarget false/true: {}/{}",
 				g_cacheInvalidations, g_clearFlagSeen[0], g_clearFlagSeen[1]);
 			g_clearFlagSeen = {};
