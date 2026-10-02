@@ -4,6 +4,9 @@
 #include "DetourHelper.h"
 #include "Stats.h"
 
+#include <mutex>
+#include <unordered_map>
+
 namespace ShadowCulling
 {
 	namespace
@@ -289,6 +292,59 @@ namespace ShadowCulling
 			return radius / distance < a_rule.minAngularSize;
 		}
 
+		// Diagnose: welche GROSSEN Objekte verwirft das Sonnen-Culling? (Tor-Schatten fehlt in der Ferne)
+		// Schluessel = Meshname; gemerkt wird je Name Anzahl, groesster Radius, naechste/fernste Entfernung, Kaskade.
+		struct CulledInfo
+		{
+			std::uint32_t count = 0;
+			float         maxRadius = 0.0f;
+			float         minDist = 1e30f;
+			float         maxDist = 0.0f;
+			float         angular = 0.0f;  // Radius/Distanz des naechsten Treffers
+			std::uint32_t cascade = 0;
+		};
+		std::mutex                                  g_culledLock;
+		std::unordered_map<std::string, CulledInfo> g_culledBig;
+		constexpr float                             kCulledDiagMinRadius = 60.0f;  // nur Objekte ab dieser Groesse (ca. 0,85 m)
+
+		void RecordCulled(const RE::BSGeometry& a_geom, std::uint32_t a_cascade, float a_distance) noexcept
+		{
+			const float radius = a_geom.worldBound.radius;
+			if (radius < kCulledDiagMinRadius) {
+				return;
+			}
+			try {
+				const char* name = a_geom.name.c_str();
+				std::scoped_lock lock{ g_culledLock };
+				auto& info = g_culledBig[name && *name ? name : "(ohne Name)"];
+				++info.count;
+				info.maxRadius = std::max(info.maxRadius, radius);
+				if (a_distance < info.minDist) {
+					info.minDist = a_distance;
+					info.angular = a_distance > 0.0f ? radius / a_distance : 0.0f;
+				}
+				info.maxDist = std::max(info.maxDist, a_distance);
+				info.cascade = a_cascade;
+			} catch (...) {
+			}
+		}
+
+		void ReportCulled()
+		{
+			std::vector<std::pair<std::string, CulledInfo>> list;
+			{
+				std::scoped_lock lock{ g_culledLock };
+				list.assign(g_culledBig.begin(), g_culledBig.end());
+				g_culledBig.clear();
+			}
+			std::ranges::sort(list, [](const auto& a, const auto& b) { return a.second.maxRadius > b.second.maxRadius; });
+			logger::info("[Culled-Diag] Groesste verworfene Sonnenschatten-Objekte (Radius >= {:.0f}), ueber 600 Frames, {} verschiedene Namen:", kCulledDiagMinRadius, list.size());
+			for (std::size_t i = 0; i < list.size() && i < 25; ++i) {
+				const auto& [name, c] = list[i];
+				logger::info("[Culled-Diag]   {:<40} Radius {:6.0f} | Distanz {:6.0f}-{:6.0f} | Radius/Distanz {:.3f} | Kaskade {} | {}x", name, c.maxRadius, c.minDist, c.maxDist, c.angular, c.cascade, c.count);
+			}
+		}
+
 		// Entfernte Charaktere: geskinnte Meshes ab fMinDistance nicht in die Schattenkarte (true = verwerfen)
 		bool CullActorShadow(const RE::BSGeometry& a_geom, bool a_pointLight) noexcept;
 
@@ -373,6 +429,7 @@ namespace ShadowCulling
 					}
 					if (g_sunCullAllowed.load(std::memory_order_relaxed) && ShouldCull(Config::shadowCulling, a_visible, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
 						Stats::Count(Stats::Counter::SunCulled);
+						RecordCulled(a_visible, cascade, DistanceToCamera(a_visible.worldBound));
 						return;
 					}
 					Stats::Count(cascade == 0 ? Stats::Counter::SunCascade0 : cascade == 1 ? Stats::Counter::SunCascade1 : Stats::Counter::SunCascade2Plus);
@@ -832,6 +889,7 @@ namespace ShadowCulling
 					++n;
 				}
 			}
+			ReportCulled();
 			logger::info("[Cascade-Diag]   Cache-Invalidierungen (Ziel/Slice gewechselt): {} | Normal-Frames ferne Kaskade clearRenderTarget false/true: {}/{}",
 				g_cacheInvalidations, g_clearFlagSeen[0], g_clearFlagSeen[1]);
 			g_clearFlagSeen = {};
