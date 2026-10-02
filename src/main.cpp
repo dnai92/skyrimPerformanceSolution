@@ -32,6 +32,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	SKSE::Init(a_skse, info);
 
 	logger::info("SkyrimPerf {} geladen (Tracy on-demand, Report alle 10 s)", SKSE::GetPluginVersion().string());
+	logger::info("Skyrim-Basisadresse 0x{:X} (fuer tools/resolve_rva.py)", REL::Module::get().base());
 
 	Stats::Init();
 	Config::Load();
