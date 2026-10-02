@@ -220,6 +220,9 @@ namespace ShadowCulling
 
 		void DiagRecord(const RE::NiCamera* a_camera) noexcept
 		{
+			if (!Config::analysis.load(std::memory_order_relaxed)) {
+				return;
+			}
 			for (std::size_t i = 0; i < kDiagSlots; ++i) {
 				auto cur = g_diagCameras[i].load(std::memory_order_relaxed);
 				if (cur == a_camera) {
@@ -309,6 +312,9 @@ namespace ShadowCulling
 
 		void RecordCulled(const RE::BSGeometry& a_geom, std::uint32_t a_cascade, float a_distance) noexcept
 		{
+			if (!Config::analysis.load(std::memory_order_relaxed)) {
+				return;
+			}
 			const float radius = a_geom.worldBound.radius;
 			if (radius < kCulledDiagMinRadius) {
 				return;
@@ -395,9 +401,11 @@ namespace ShadowCulling
 			const bool  isDecal = property && property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kDecal, RE::BSShaderProperty::EShaderPropertyFlag::kDynamicDecal);
 			const auto& dec = Config::decalCulling;
 			if (isDecal) {
-				g_decalHist[Bucket(kDecalDistEdges, DistanceToCamera(a_geom.worldBound))][Bucket(kDecalRadEdges, a_geom.worldBound.radius)].fetch_add(1, std::memory_order_relaxed);
-				const std::string_view name{ a_geom.name.c_str() ? a_geom.name.c_str() : "" };
-				g_decalNames[name == "Decal" ? 0 : name == "DecalDirt" ? 1 : name.empty() ? 3 : 2].fetch_add(1, std::memory_order_relaxed);
+				if (Config::analysis.load(std::memory_order_relaxed)) {
+					g_decalHist[Bucket(kDecalDistEdges, DistanceToCamera(a_geom.worldBound))][Bucket(kDecalRadEdges, a_geom.worldBound.radius)].fetch_add(1, std::memory_order_relaxed);
+					const std::string_view name{ a_geom.name.c_str() ? a_geom.name.c_str() : "" };
+					g_decalNames[name == "Decal" ? 0 : name == "DecalDirt" ? 1 : name.empty() ? 3 : 2].fetch_add(1, std::memory_order_relaxed);
+				}
 				if (dec.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && a_geom.worldBound.radius < dec.maxRadius && DistanceToCamera(a_geom.worldBound) > dec.maxDistance) {
 					Stats::Count(Stats::Counter::DecalCulled);
 					return true;

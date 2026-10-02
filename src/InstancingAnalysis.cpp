@@ -625,8 +625,10 @@ namespace InstancingAnalysis
 				}
 				if (g_inSunShadows.load(std::memory_order_relaxed) && a_pass && a_pass->geometry) {
 					Stats::Count(Stats::Counter::SunDraws);
-					Record(*a_pass);
-					Record2(*a_pass);
+					if (Config::analysis.load(std::memory_order_relaxed)) {
+						Record(*a_pass);
+						Record2(*a_pass);
+					}
 				}
 				func(a_this, a_pass, a_flags);
 			}
