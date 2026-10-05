@@ -3,6 +3,7 @@
 #include "InstancingAnalysis.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
+#include "TextureStream.h"
 #include "WaitProbe.h"
 
 namespace Hooks
@@ -142,6 +143,10 @@ namespace Hooks
 
 			RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
 			{
+				// Vor dem Abbau der Welt/Zellen alle eigenen Verweise freigeben (Ladebildschirm oeffnet vor dem Entladen)
+				if (a_event && a_event->opening && (a_event->menuName == RE::MainMenu::MENU_NAME || a_event->menuName == RE::LoadingMenu::MENU_NAME)) {
+					TextureStream::Reset(a_event->menuName == RE::MainMenu::MENU_NAME ? "Hauptmenue" : "Ladebildschirm");
+				}
 				if (TracyIsConnected && a_event) {
 					const auto msg = std::format("Menue {}: {}", a_event->opening ? "auf" : "zu", a_event->menuName.c_str());
 					TracyMessage(msg.data(), msg.size());

@@ -28,6 +28,11 @@ namespace TextureStream
 	// Einmal pro Frame (Main-Thread)
 	void OnFrame();
 
+	// Welt wird abgebaut (Hauptmenue, Spielstand laden, neues Spiel): alle eigenen Verweise auf Szenenknoten und
+	// Texturen sofort freigeben. Sonst wurden sie erst nach dem neuen Laden freigegeben und zerstoerten sich gegen die
+	// bereits abgebaute Textur-Verwaltung -> Heap-Beschaedigung (Absturz 0.19.0 beim Laden aus dem Hauptmenue). Main-Thread.
+	void Reset(const char* a_reason);
+
 	// VRAM-Belegung des Spiels und Budget laut Windows (Bytes; 0 = unbekannt)
 	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget);
 }

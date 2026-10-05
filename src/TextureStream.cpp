@@ -1074,8 +1074,9 @@ namespace TextureStream
 						}
 					}
 				}
-				// Halten nur, solange verkleinert (bis 30 s ungesehen) oder in Bearbeitung
-				if (st.hold && !st.busy && (!st.Reduced() || now - st.lastSeen > 30s)) {
+				// Halten nur fuer laufende Auftraege; sonst nur fuer die Dauer eines Durchlaufs (OnSeen setzt es neu).
+				// Lange gehaltene Verweise ueberlebten den Abbau der Welt -> Heap-Beschaedigung (0.19.0).
+				if (st.hold && !st.busy) {
 					st.hold.reset();
 				}
 				if (!st.hold && !st.busy && now - st.lastSeen > 120s) {
@@ -1136,7 +1137,7 @@ namespace TextureStream
 				if (st.probe == Probe::kBad) {
 					++probeBad;
 				}
-				if (st.Reduced() && st.hold) {
+				if (st.Reduced()) {
 					++reduced;
 					fullMB += ChainBytes(st.fi, st.fullW, st.fullH, st.fullMips) / 1048576.0;
 					curMB += ChainBytes(st.fi, st.curW, st.curH, st.curMips) / 1048576.0;
@@ -1165,6 +1166,23 @@ namespace TextureStream
 				g_loadedReduced.exchange(0), remembered);
 			g_stats = {};
 		}
+	}
+
+	void Reset(const char* a_reason)
+	{
+		std::size_t jobs = 0;
+		{
+			std::scoped_lock lock(g_qLock);
+			jobs = g_jobs.size();
+			g_jobs.clear();  // laufende Ergebnisse finden danach keinen Eintrag mehr und geben ihre Texturen frei
+		}
+		const auto held = std::ranges::count_if(g_tex, [](const auto& a_e) { return static_cast<bool>(a_e.second.hold); });
+		g_stack.clear();
+		g_passActive = false;
+		g_down.clear();
+		g_tex.clear();
+		g_reducedCount = 0;
+		logger::info("[TextureStream] Reset ({}): {} gehaltene Texturen und Durchlauf freigegeben, {} Auftraege verworfen", a_reason, held, jobs);
 	}
 
 	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget)

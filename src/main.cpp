@@ -19,6 +19,10 @@ namespace
 			WaitProbe::Install(fsmp, cbpc, game);
 			logger::info("WaitProbe: FSMP (hdtsmp64.dll) {} - {} Import-Eintraege umgebogen | CBPC (cbp.dll) {} - {} umgebogen | SkyrimSE.exe {} umgebogen",
 				fsmp.found ? "gefunden" : "NICHT geladen", fsmp.patched, cbpc.found ? "gefunden" : "NICHT geladen", cbpc.patched, game.patched);
+		} else if (a_msg->type == SKSE::MessagingInterface::kPreLoadGame) {
+			TextureStream::Reset("Spielstand wird geladen");
+		} else if (a_msg->type == SKSE::MessagingInterface::kNewGame) {
+			TextureStream::Reset("neues Spiel");
 		} else if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
 			ShadowCulling::InstallLate();
