@@ -106,6 +106,14 @@ namespace Config
 	};
 	inline SubtreePruning subtreePruning;  // [SubtreePruning]
 
+	// Texture Streaming (siehe TextureStream.h); Stufe 0 = nur messen
+	struct TextureStream
+	{
+		bool  analysis = true;     // Messung + Bericht im Log (1 Frame pro Sekunde)
+		float safetyFactor = 2.0f; // benoetigte Aufloesung = Bildschirmgroesse x Faktor
+	};
+	inline TextureStream textureStream;  // [TextureStream]
+
 	// Laedt SkyrimPerf.ini (Vorgaben aus dem Mod-Paket) und darueber SkyrimPerf_User.ini (Werte aus dem Menue im Spiel)
 	void Load();
 

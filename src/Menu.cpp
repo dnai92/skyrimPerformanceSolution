@@ -127,6 +127,10 @@ namespace Menu
 			Toggle("Torch / point light shadows##prune", Config::subtreePruning.point, "Apply in point light shadow passes. Default OFF: darkened lit surfaces in a test.");
 			Toggle("Rain / skylighting map##prune", Config::subtreePruning.precip, "Apply in the precipitation / skylighting occlusion pass.");
 
+			ImGuiMCP::SeparatorText("Texture streaming (stage 0: measuring only)");
+			Toggle("Measure texture needs##ts", Config::textureStream.analysis, "Once per second: how much VRAM the visible textures use and how much streaming could save. Results in SkyrimPerf.log.");
+			Slider("Safety factor##ts", Config::textureStream.safetyFactor, 1.0f, 4.0f, "%.1f", "Needed texture size = size on screen x this factor. Higher = sharper, less saving.");
+
 			ImGuiMCP::SeparatorText("Skylighting culling (Community Shaders)");
 			Toggle("Enabled##sky", Config::skylightingCulling.enabled, "Small objects are left out of the skylighting occlusion map.");
 			Slider("Min. object radius##sky", Config::skylightingCulling.minRadius, 32.0f, 512.0f, "%.0f", "Objects smaller than this are left out.");

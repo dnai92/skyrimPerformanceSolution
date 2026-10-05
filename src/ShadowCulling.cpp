@@ -1,6 +1,7 @@
 #include "ShadowCulling.h"
 
 #include "Config.h"
+#include "TextureStream.h"
 #include "DetourHelper.h"
 #include "Stats.h"
 
@@ -580,6 +581,8 @@ namespace ShadowCulling
 				const auto passes = func(a_this, a_geometry, a_renderFlags, a_accumulator);
 				if (passes && passes->head && a_geometry && ShouldCullMain(*a_geometry)) {
 					passes->Clear();
+				} else if (passes && passes->head) {
+					TextureStream::OnGeometry(a_geometry, a_this);
 				}
 				return passes;
 			}
@@ -995,6 +998,7 @@ namespace ShadowCulling
 	void OnFrame()
 	{
 		Config::ReloadIfChanged();
+		TextureStream::OnFrame();
 
 		if (const auto camera = RE::PlayerCamera::GetSingleton(); camera && camera->cameraRoot) {
 			const auto& pos = camera->cameraRoot->world.translate;

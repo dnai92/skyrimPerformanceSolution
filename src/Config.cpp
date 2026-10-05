@@ -53,6 +53,8 @@ namespace Config
 			b("ActorShadowCulling", "bPointLights", actorShadowCulling.pointLights);
 			b("LightGatherThrottle", "bEnabled", lightGather.enabled);
 			b("SubtreePruning", "bEnabled", subtreePruning.enabled);
+			b("TextureStream", "bAnalysis", textureStream.analysis);
+			f("TextureStream", "fSafetyFactor", textureStream.safetyFactor);
 			b("SubtreePruning", "bSun", subtreePruning.sun);
 			b("SubtreePruning", "bPointLights", subtreePruning.point);
 			b("SubtreePruning", "bPrecipitation", subtreePruning.precip);
@@ -195,6 +197,10 @@ namespace Config
 		sp.point = ini.GetBoolValue("SubtreePruning", "bPointLights", sp.point);
 		sp.precip = ini.GetBoolValue("SubtreePruning", "bPrecipitation", sp.precip);
 		logger::info("SubtreePruning: {} | Sonne {} | Punktlicht {} | Regen/Sky {}", sp.enabled ? "AN" : "AUS", sp.sun, sp.point, sp.precip);
+
+		textureStream.analysis = ini.GetBoolValue("TextureStream", "bAnalysis", textureStream.analysis);
+		textureStream.safetyFactor = static_cast<float>(ini.GetDoubleValue("TextureStream", "fSafetyFactor", textureStream.safetyFactor));
+		logger::info("TextureStream: Messung {} | Sicherheitsfaktor {:.1f}", textureStream.analysis ? "AN" : "AUS", textureStream.safetyFactor);
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
