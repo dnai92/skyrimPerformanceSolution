@@ -43,6 +43,12 @@ namespace Config
 				}
 			};
 			b("General", "bAnalysis", analysis.load());
+			{
+				const long key = static_cast<long>(toggleKey.load());
+				if (!haveBase || !base.GetValue("General", "iToggleKey") || base.GetLongValue("General", "iToggleKey", key) != key) {
+					ini.SetLongValue("General", "iToggleKey", key);
+				}
+			}
 			const auto rule = [&](const char* s, const CullRule& r) {
 				b(s, "bEnabled", r.enabled);
 				f(s, "fMinDistance", r.minDistance);

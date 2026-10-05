@@ -28,6 +28,111 @@ namespace Menu
 		// Text je nach Sprache
 		const char* T(const char* a_en, const char* a_de) noexcept { return g_german ? a_de : a_en; }
 
+		void Tip(const char* a_text);
+
+		// ---- Taste fuer den Hauptschalter: ImGui-Taste -> Windows-VK -> DirectInput-Scancode (wie das Spiel ihn meldet) ----
+		extern "C" __declspec(dllimport) unsigned int __stdcall MapVirtualKeyW(unsigned int a_code, unsigned int a_mapType);
+
+		unsigned int VirtualKeyOf(ImGuiMCP::ImGuiKey a_key) noexcept
+		{
+			using namespace ImGuiMCP;
+			const int k = a_key;
+			if (k >= ImGuiKey_0 && k <= ImGuiKey_9) return '0' + (k - ImGuiKey_0);
+			if (k >= ImGuiKey_A && k <= ImGuiKey_Z) return 'A' + (k - ImGuiKey_A);
+			if (k >= ImGuiKey_F1 && k <= ImGuiKey_F24) return 0x70 + (k - ImGuiKey_F1);
+			if (k >= ImGuiKey_Keypad0 && k <= ImGuiKey_Keypad9) return 0x60 + (k - ImGuiKey_Keypad0);
+			switch (k) {
+			case ImGuiKey_Tab: return 0x09;
+			case ImGuiKey_LeftArrow: return 0x25;
+			case ImGuiKey_UpArrow: return 0x26;
+			case ImGuiKey_RightArrow: return 0x27;
+			case ImGuiKey_DownArrow: return 0x28;
+			case ImGuiKey_PageUp: return 0x21;
+			case ImGuiKey_PageDown: return 0x22;
+			case ImGuiKey_Home: return 0x24;
+			case ImGuiKey_End: return 0x23;
+			case ImGuiKey_Insert: return 0x2D;
+			case ImGuiKey_Delete: return 0x2E;
+			case ImGuiKey_Backspace: return 0x08;
+			case ImGuiKey_Space: return 0x20;
+			case ImGuiKey_Enter: return 0x0D;
+			case ImGuiKey_LeftCtrl: return 0xA2;
+			case ImGuiKey_RightCtrl: return 0xA3;
+			case ImGuiKey_LeftShift: return 0xA0;
+			case ImGuiKey_RightShift: return 0xA1;
+			case ImGuiKey_LeftAlt: return 0xA4;
+			case ImGuiKey_RightAlt: return 0xA5;
+			case ImGuiKey_Apostrophe: return 0xDE;
+			case ImGuiKey_Comma: return 0xBC;
+			case ImGuiKey_Minus: return 0xBD;
+			case ImGuiKey_Period: return 0xBE;
+			case ImGuiKey_Slash: return 0xBF;
+			case ImGuiKey_Semicolon: return 0xBA;
+			case ImGuiKey_Equal: return 0xBB;
+			case ImGuiKey_LeftBracket: return 0xDB;
+			case ImGuiKey_Backslash: return 0xDC;
+			case ImGuiKey_RightBracket: return 0xDD;
+			case ImGuiKey_GraveAccent: return 0xC0;
+			case ImGuiKey_CapsLock: return 0x14;
+			case ImGuiKey_ScrollLock: return 0x91;
+			case ImGuiKey_Pause: return 0x13;
+			default: return 0;
+			}
+		}
+
+		// Scancode im DirectInput-Format (erweiterte Tasten wie Pfeile/Bild auf: + 0x80); 0 = nicht zuordenbar
+		std::uint32_t DikOf(ImGuiMCP::ImGuiKey a_key) noexcept
+		{
+			const auto vk = VirtualKeyOf(a_key);
+			if (!vk) {
+				return 0;
+			}
+			const auto sc = MapVirtualKeyW(vk, 4);  // MAPVK_VK_TO_VSC_EX: 0xE0xx bei erweiterten Tasten
+			if (!sc) {
+				return 0;
+			}
+			const bool extended = (sc & 0xFF00) == 0xE000 || (sc & 0xFF00) == 0xE100;
+			return (sc & 0x7F) | (extended ? 0x80u : 0u);
+		}
+
+		std::string KeyName(std::uint32_t a_dik)
+		{
+			char buf[64]{};
+			const std::int32_t lparam = static_cast<std::int32_t>(((a_dik & 0x7F) << 16) | ((a_dik & 0x80) ? (1u << 24) : 0u));
+			if (REX::W32::GetKeyNameTextA(lparam, buf, sizeof(buf)) > 0) {
+				return buf;
+			}
+			return std::format("0x{:X}", a_dik);
+		}
+
+		bool g_capturingKey = false;
+
+		void HotkeyPicker()
+		{
+			const auto current = Config::toggleKey.load();
+			const auto label = g_capturingKey ? std::string(T("Press a key... (Esc = cancel)", "Taste drücken ... (Esc = abbrechen)")) : KeyName(current);
+			if (ImGuiMCP::Button((label + "###hotkey").c_str())) {
+				g_capturingKey = true;
+			}
+			ImGuiMCP::SameLine();
+			ImGuiMCP::TextUnformatted(T("Hotkey for the master switch", "Taste für den Hauptschalter"));
+			Tip(T("Click, then press the new key. Works immediately and is saved.", "Anklicken, dann die neue Taste drücken. Wirkt sofort und wird gespeichert."));
+			if (!g_capturingKey) {
+				return;
+			}
+			ImGuiMCP::SetNextFrameWantCaptureKeyboard(true);
+			if (ImGuiMCP::IsKeyPressed(ImGuiMCP::ImGuiKey_Escape, false)) {
+				g_capturingKey = false;
+			} else if (const auto key = ImGuiMCPComponents::Detail::FindPressedKey(); key != ImGuiMCP::ImGuiKey_None) {
+				if (const auto dik = DikOf(key)) {
+					Config::toggleKey.store(dik);
+					Config::MarkDirty();
+					logger::info("Menue: Hotkey jetzt {} (0x{:X})", KeyName(dik), dik);
+				}
+				g_capturingKey = false;
+			}
+		}
+
 		void Tip(const char* a_text)
 		{
 			if (ImGuiMCP::IsItemHovered()) {
@@ -91,6 +196,7 @@ namespace Menu
 				T("Turns every optimization on/off at once (same as the hotkey, Page Up by default). Not saved - starts ON.",
 					"Schaltet alle Optimierungen auf einmal an/aus (wie die Taste, Standard Bild auf). Wird nicht gespeichert - startet AN."),
 				false);
+			HotkeyPicker();
 			ImGuiMCP::TextWrapped("%s", T("Use this switch (or the hotkey) to compare FPS and look with and without SkyrimPerf. The 10-second report in SkyrimPerf.log shows the numbers.",
 											"Mit diesem Schalter (oder der Taste) FPS und Bild mit und ohne SkyrimPerf vergleichen. Der 10-Sekunden-Bericht in SkyrimPerf.log zeigt die Zahlen."));
 
