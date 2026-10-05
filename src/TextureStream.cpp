@@ -1269,14 +1269,14 @@ namespace TextureStream
 				}
 			}
 			// Auffuellen: so viel, wie bis zur Mitte zwischen Auffuell- und Verkleinerungsschwelle passt, aber gemaechlich
-			// (hoechstens 48 MB pro Durchlauf, ~100 MB/s) - Auffuellen eilt nicht, die Platte soll nicht belastet werden
+			// (fRefillMBPerPass pro Durchlauf). Nur Lesen - nutzt eine SSD nicht ab; begrenzt nur die Konkurrenz zum Zellenladen.
 			if (!refill.empty()) {
 				const double budget = static_cast<double>(g_vramBudget.load(std::memory_order_relaxed));
 				const double usage = static_cast<double>(g_vramUsage.load(std::memory_order_relaxed));
 				double       room = budget * (cfg.budgetStartPct - cfg.refillGapPct / 2.0) / 100.0 - usage;
 				std::ranges::sort(refill, [](const RefillCandidate& a, const RefillCandidate& b) { return a.priority > b.priority; });
 				int    queued = 0;
-				double rate = 48.0 * 1048576.0;
+				double rate = static_cast<double>(cfg.refillMBPerPass) * 1048576.0;
 				for (const auto& c : refill) {
 					if (queued >= 64 || room < static_cast<double>(c.bytes) || (queued > 0 && rate < static_cast<double>(c.bytes))) {
 						break;
@@ -1565,7 +1565,7 @@ namespace TextureStream
 	void OnFrame()
 	{
 		static Clock::time_point lastSave = Clock::now();
-		if (Clock::now() - lastSave >= 60s) {
+		if (Clock::now() - lastSave >= 300s) {
 			lastSave = Clock::now();
 			SaveSizes();
 		}

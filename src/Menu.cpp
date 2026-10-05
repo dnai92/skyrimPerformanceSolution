@@ -330,6 +330,9 @@ namespace Menu
 					"Fällt die Belegung deutlich unter die Schwelle, werden verkleinerte Texturen wieder voll geladen (die meistgebrauchten zuerst)."));
 			Slider(T("Refill below threshold minus (%)##ts", "Auffüllen ab Schwelle minus (%)##ts"), Config::textureStream.refillGapPct, 2.0f, 30.0f, "%.0f",
 				T("Gap between downscaling and refilling, so textures do not go back and forth.", "Abstand zwischen Verkleinern und Auffüllen, damit Texturen nicht hin und her wechseln."));
+			Slider(T("Refill speed (MB per pass)##ts", "Auffüll-Tempo (MB pro Durchlauf)##ts"), Config::textureStream.refillMBPerPass, 16.0f, 1024.0f, "%.0f",
+				T("How much is reloaded per scan pass (about every 0.5 s) while refilling. Reading only - it does not wear out an SSD.",
+					"Wie viel pro Durchlauf (etwa alle 0,5 s) beim Auffüllen neu geladen wird. Nur Lesen - eine SSD nutzt sich dadurch nicht ab."));
 			Slider(T("RAM buffer (MB)##ts", "RAM-Puffer (MB)##ts"), Config::textureStream.ramCacheMB, 0.0f, 8192.0f, "%.0f",
 				T("Texture data that was reloaded stays in RAM up to this size, so the next reload needs no disk access. Least recently used is dropped first. 0 = off.",
 					"Neu geladene Texturdaten bleiben bis zu dieser Größe im RAM, das nächste Neuladen braucht dann keinen Plattenzugriff. Am längsten nicht gebrauchte fliegen zuerst raus. 0 = aus."));
