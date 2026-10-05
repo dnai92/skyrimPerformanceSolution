@@ -21,6 +21,7 @@ namespace
 		} else if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
 			ShadowCulling::InstallLate();
+			EngineTimers::Install();  // nach Community Shaders (Detours verkettet sich dahinter)
 			Hotkey::Register();
 			Menu::Register();
 		}
@@ -44,7 +45,6 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	ShadowCulling::Install();
 	InstancingAnalysis::Install();
 	LightGather::Install();
-	EngineTimers::Install();
 
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
 	return true;

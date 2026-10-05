@@ -1,11 +1,14 @@
 #include "EngineTimers.h"
 
+#include "DetourHelper.h"
 #include "Stats.h"
 
 namespace EngineTimers
 {
 	namespace
 	{
+		// SetupMask wird mit Community Shaders nicht ueber die Aufrufstelle in ID 26175 aufgerufen (Zeit dort 0),
+		// daher am Funktionsanfang per Detours (verkettet sich mit evtl. vorhandenen Detours anderer Mods)
 		struct PrecipSetupMask
 		{
 			static void thunk(void* a_precipitation)
@@ -13,7 +16,7 @@ namespace EngineTimers
 				Stats::ScopedTimer timer(Stats::Zone::PrecipMask);
 				func(a_precipitation);
 			}
-			static inline REL::Relocation<decltype(thunk)> func;
+			static inline void (*func)(void*) = nullptr;
 		};
 
 		struct MainCull
@@ -37,12 +40,11 @@ namespace EngineTimers
 	void Install()
 	{
 		auto& trampoline = SKSE::GetTrampoline();
-		const auto precipSite = REL::Relocation<std::uintptr_t>{ REL::ID(26175), 0xBB }.address();
-		if (CheckCall(precipSite, 26183)) {
-			PrecipSetupMask::func = trampoline.write_call<5>(precipSite, PrecipSetupMask::thunk);
-			logger::info("Zeitmessung installiert: Precipitation::SetupMask (Regen/Sky-Karte)");
+		PrecipSetupMask::func = reinterpret_cast<void (*)(void*)>(REL::Relocation<std::uintptr_t>{ REL::ID(26183) }.address());
+		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&PrecipSetupMask::func), reinterpret_cast<void*>(&PrecipSetupMask::thunk)); err == 0) {
+			logger::info("Zeitmessung installiert: Precipitation::SetupMask (Regen/Sky-Karte, Detours)");
 		} else {
-			logger::warn("Zeitmessung Regen/Sky-Karte: Aufrufstelle passt nicht - nicht installiert");
+			logger::warn("Zeitmessung Regen/Sky-Karte: Detours-Fehler {} - nicht installiert", err);
 		}
 		const auto mainSite = REL::Relocation<std::uintptr_t>{ REL::ID(36560), 0xE9 }.address();
 		if (CheckCall(mainSite, 32174)) {
