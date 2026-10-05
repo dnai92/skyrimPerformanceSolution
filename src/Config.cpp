@@ -181,7 +181,7 @@ namespace Config
 
 		auto& ac = actorShadowCulling;
 		ac.enabled = ini.GetBoolValue("ActorShadowCulling", "bEnabled", ac.enabled);
-		ac.minDistance = static_cast<float>(ini.GetDoubleValue("ActorShadowCulling", "fMinDistance", ac.minDistance));
+		ac.minDistance = std::max(ActorShadowCulling::kMinAllowed, static_cast<float>(ini.GetDoubleValue("ActorShadowCulling", "fMinDistance", ac.minDistance)));
 		ac.pointLights = ini.GetBoolValue("ActorShadowCulling", "bPointLights", ac.pointLights);
 		logger::info("ActorShadowCulling: {} | ab Distanz {:.0f} | Punktlichter {}", ac.enabled ? "AN" : "AUS", ac.minDistance, ac.pointLights);
 

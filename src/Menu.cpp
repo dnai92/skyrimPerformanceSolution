@@ -106,7 +106,7 @@ namespace Menu
 
 			ImGuiMCP::SeparatorText("Character shadow culling");
 			Toggle("Enabled##actor", Config::actorShadowCulling.enabled, "Characters far away do not cast shadows.");
-			Slider("From distance##actor", Config::actorShadowCulling.minDistance, 500.0f, 8000.0f, "%.0f", "Characters farther away than this lose their shadow (2500 = ~35 m).");
+			Slider("From distance##actor", Config::actorShadowCulling.minDistance, Config::ActorShadowCulling::kMinAllowed, 8000.0f, "%.0f", "Characters farther away than this lose their shadow (3500 = ~50 m, the minimum).");
 			Toggle("Also torch shadows##actor", Config::actorShadowCulling.pointLights, "Also leave out character shadows cast by torches and fires.");
 
 			ImGuiMCP::SeparatorText("Shadow instancing");

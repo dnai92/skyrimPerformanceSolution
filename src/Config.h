@@ -80,7 +80,8 @@ namespace Config
 	struct ActorShadowCulling
 	{
 		bool  enabled = true;
-		float minDistance = 2500.0f;  // ab dieser Entfernung zur Kamera (~35 m)
+		float minDistance = 3500.0f;  // ab dieser Entfernung zur Kamera (~50 m); nie darunter (Nutzerwunsch)
+		static constexpr float kMinAllowed = 3500.0f;
 		bool  pointLights = true;      // auch in Punktlicht-Schatten (Fackeln)
 	};
 	inline ActorShadowCulling actorShadowCulling;  // [ActorShadowCulling]
