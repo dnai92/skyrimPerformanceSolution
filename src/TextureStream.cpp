@@ -6,12 +6,56 @@ namespace TextureStream
 {
 	namespace
 	{
+		// Rohdaten einer Textur, abgesichert gelesen (siehe SafeGather)
+		struct RawTex
+		{
+			void*          texture;  // BSGraphics::Texture* (nur als Schluessel)
+			const char*    name;
+			std::uint16_t  width;
+			std::uint16_t  height;
+			std::uint8_t   mips;
+			std::uint8_t   format;
+		};
+
 		struct Sample
 		{
-			RE::BSGraphics::Texture* texture;
-			const char*              name;      // BSFixedString-Daten (bleiben gueltig, solange die Textur lebt)
-			float                    neededPx;  // benoetigte Kantenlaenge in Texeln
+			void*         texture;
+			std::string   name;
+			std::uint16_t width, height;
+			std::uint8_t  mips, format;
+			float         neededPx;  // benoetigte Kantenlaenge in Texeln
 		};
+
+		// Texturen eines Materials lesen, ohne D3D-Objekte anzufassen. SEH-geschuetzt: ein ungueltiger Zeiger
+		// (Textur wird gerade geladen/entladen) fuehrt nur zum Ueberspringen, nicht zum Absturz.
+		int SafeGather(RE::BSLightingShaderMaterialBase* a_material, RawTex* a_out, int a_max) noexcept
+		{
+			__try {
+				RE::NiSourceTexture* textures[16]{};
+				std::uint32_t        count = a_material->GetTextures(textures);
+				if (count > 16) {
+					count = 16;
+				}
+				int n = 0;
+				for (std::uint32_t i = 0; i < count && n < a_max; ++i) {
+					const auto src = textures[i];
+					if (!src || !src->rendererTexture) {
+						continue;
+					}
+					const auto r = src->rendererTexture;
+					a_out[n].texture = r;
+					a_out[n].name = src->name.data();
+					a_out[n].width = r->width;
+					a_out[n].height = r->height;
+					a_out[n].mips = r->mips;
+					a_out[n].format = r->format;
+					++n;
+				}
+				return n;
+			} __except (1) {
+				return -1;
+			}
+		}
 
 		std::atomic<bool>   g_sampling{ false };  // dieser Frame wird ausgewertet
 		std::mutex          g_lock;
@@ -29,7 +73,7 @@ namespace TextureStream
 			float         bytesPerPixel = 0;
 			float         neededPx = 0;  // Maximum ueber alle Mess-Frames im Berichtszeitraum
 		};
-		std::unordered_map<RE::BSGraphics::Texture*, TexStats> g_window;  // nur Main-Thread
+		std::unordered_map<void*, TexStats> g_window;  // nur Main-Thread
 		std::uint32_t                                          g_frames = 0;
 
 		float BytesPerPixel(std::uint32_t a_format) noexcept
@@ -139,20 +183,18 @@ namespace TextureStream
 		const float dist = std::sqrt(dx * dx + dy * dy + dz * dz) - b.radius;
 		const float neededPx = dist <= 1.0f ? 1.0e6f : 2.0f * b.radius / dist * g_pixelsPerUnitAtDistance1;
 
-		std::array<RE::NiSourceTexture*, 16> textures{};
-		std::uint32_t                        count = 0;
-		try {
-			count = std::min<std::uint32_t>(material->GetTextures(textures.data()), static_cast<std::uint32_t>(textures.size()));
-		} catch (...) {
+		RawTex    raw[16];
+		const int count = SafeGather(material, raw, 16);
+		if (count <= 0) {
 			return;
 		}
 		std::scoped_lock lock(g_lock);
-		for (std::uint32_t i = 0; i < count; ++i) {
-			const auto src = textures[i];
-			if (!src || !src->rendererTexture) {
+		for (int i = 0; i < count; ++i) {
+			const auto& r = raw[i];
+			if (r.width == 0 || r.height == 0) {
 				continue;
 			}
-			g_samples.push_back({ src->rendererTexture, src->name.c_str(), neededPx });
+			g_samples.push_back({ r.texture, r.name ? std::string(r.name) : std::string(), r.width, r.height, r.mips, r.format, neededPx });
 		}
 	}
 
@@ -172,24 +214,11 @@ namespace TextureStream
 			for (const auto& s : samples) {
 				auto& t = g_window[s.texture];
 				if (t.width == 0) {
-					const auto tex = s.texture;
-					t.name = s.name ? s.name : "";
-					t.width = tex->width;
-					t.height = tex->height;
-					t.mips = tex->mips;
-					t.bytesPerPixel = BytesPerPixel(tex->format);
-					if (const auto res = tex->texture) {
-						REX::W32::D3D11_RESOURCE_DIMENSION dim{};
-						res->GetType(&dim);
-						if (dim == REX::W32::D3D11_RESOURCE_DIMENSION_TEXTURE2D) {
-							REX::W32::D3D11_TEXTURE2D_DESC desc{};
-							static_cast<REX::W32::ID3D11Texture2D*>(res)->GetDesc(&desc);
-							t.width = desc.width;
-							t.height = desc.height;
-							t.mips = desc.mipLevels;
-							t.bytesPerPixel = BytesPerPixel(desc.format) * static_cast<float>(desc.arraySize);
-						}
-					}
+					t.name = s.name;
+					t.width = s.width;
+					t.height = s.height;
+					t.mips = s.mips;
+					t.bytesPerPixel = BytesPerPixel(s.format);
 				}
 				t.neededPx = std::max(t.neededPx, s.neededPx);
 			}
@@ -205,7 +234,11 @@ namespace TextureStream
 			g_window.clear();
 			g_frames = 0;
 		}
-		// naechsten Frame messen?
+		// naechsten Frame messen? Nicht in Ladebildschirm/Menues (Texturen werden dort geladen/entladen)
+		const auto ui = RE::UI::GetSingleton();
+		if (!ui || ui->GameIsPaused() || ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME)) {
+			return;
+		}
 		if (now - g_lastSample >= std::chrono::milliseconds(1000)) {
 			g_lastSample = now;
 			if (const auto camera = RE::PlayerCamera::GetSingleton(); camera && camera->cameraRoot) {
