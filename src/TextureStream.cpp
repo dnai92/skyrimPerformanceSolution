@@ -220,6 +220,11 @@ namespace TextureStream
 		std::atomic<std::uint64_t> g_procDedicated{ 0 }, g_procShared{ 0 };
 		std::atomic<std::uint64_t> g_dxgiUsage{ 0 };
 		constexpr std::uint64_t    kSharedPressure = 128ull << 20;  // so viel ausgelagert = VRAM laeuft ueber
+		// Auffuellen erst nach ruhiger Phase: direkt nach dem Laden ist der VRAM kurz leer, waehrend die Szene noch
+		// hereinkommt -> 0.20.4 fuellte 4 GB auf und verkleinerte gleich wieder (Hin und Her)
+		Clock::time_point          g_lastPressure{};
+		Clock::time_point          g_lastLoad{};
+		constexpr auto             kRefillCalm = 30s;
 
 		void InitAdapter()
 		{
@@ -1252,7 +1257,11 @@ namespace TextureStream
 			std::vector<RefillCandidate> refill;
 			const auto&                  cfg = Config::textureStream;
 			const float                  pct = g_vramPct.load(std::memory_order_relaxed);
-			const bool                   wantRefill = active && cfg.budgetMode && cfg.refill && pct >= 0.0f && pct < cfg.budgetStartPct - cfg.refillGapPct;
+			if (pressure) {
+				g_lastPressure = now;
+			}
+			const bool calm = now - g_lastPressure >= kRefillCalm && now - g_lastLoad >= kRefillCalm;
+			const bool wantRefill = active && cfg.budgetMode && cfg.refill && calm && pct >= 0.0f && pct < cfg.budgetStartPct - cfg.refillGapPct;
 			g_reducedCount = 0;
 			for (auto it = g_tex.begin(); it != g_tex.end(); ++it) {
 				auto&      st = it->second;
@@ -1513,6 +1522,7 @@ namespace TextureStream
 		g_down.clear();
 		g_tex.clear();
 		g_reducedCount = 0;
+		g_lastLoad = Clock::now();
 		logger::info("[TextureStream] Reset ({}): {} gehaltene Texturen und Durchlauf freigegeben, {} Auftraege verworfen", a_reason, held, jobs);
 	}
 
