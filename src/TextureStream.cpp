@@ -592,6 +592,7 @@ namespace TextureStream
 		bool                                           g_sizesDirty = false;
 		std::atomic<std::uint32_t>                     g_loadedReduced{ 0 };
 		// Diagnose Stufe 3 (je Berichtszeitraum)
+		std::atomic<std::uint32_t> g_diagPreset{ 0 }, g_diagPresetValue{ 0 };  // maxsize schon vom Aufrufer gesetzt
 		std::atomic<std::uint32_t> g_diagCreate{ 0 }, g_diagDDS{ 0 }, g_diagNoSrc{ 0 }, g_diagMiss{ 0 }, g_diagOff{ 0 };
 		std::mutex                 g_missLock;
 		std::vector<std::string>   g_missSamples;
@@ -721,8 +722,13 @@ namespace TextureStream
 			static std::int32_t thunk(void* a_device, void* a_stream, void** a_out, void* a_header, std::uint64_t a_maxSize, std::uint64_t a_6)
 			{
 				g_diagDDS.fetch_add(1, std::memory_order_relaxed);
-				if (a_maxSize == 0) {
-					a_maxSize = LoadMaxSize();
+				// Eine andere Mod kann schon eine Obergrenze mitgeben -> der kleinere Wert gilt (verkleinert nur, nie groesser)
+				if (a_maxSize != 0) {
+					g_diagPreset.fetch_add(1, std::memory_order_relaxed);
+					g_diagPresetValue.store(static_cast<std::uint32_t>(std::min<std::uint64_t>(a_maxSize, UINT32_MAX)), std::memory_order_relaxed);
+				}
+				if (const auto ours = LoadMaxSize(); ours != 0 && (a_maxSize == 0 || ours < a_maxSize)) {
+					a_maxSize = ours;
 				}
 				return func(a_device, a_stream, a_out, a_header, a_maxSize, a_6);
 			}
@@ -1284,8 +1290,8 @@ namespace TextureStream
 				Config::textureStream.budgetStartPct, Pressure() ? "verkleinern" : "genug Platz");
 			logger::info("[TextureStream]   Stufe 3: {} | gleich verkleinert geladen {} | gemerkte Groessen {}", Config::textureStream.loadReduced ? "AN" : "AUS",
 				g_loadedReduced.exchange(0), remembered);
-			logger::info("[TextureStream]   Stufe 3 Diagnose: Ladeaufrufe {} | DDS {} | ohne Textur {} | aus/kein Druck {} | Pfad unbekannt {}", g_diagCreate.exchange(0),
-				g_diagDDS.exchange(0), g_diagNoSrc.exchange(0), g_diagOff.exchange(0), g_diagMiss.exchange(0));
+			logger::info("[TextureStream]   Stufe 3 Diagnose: Ladeaufrufe {} | DDS {} | ohne Textur {} | aus/kein Druck {} | Pfad unbekannt {} | maxsize von anderer Mod {} (zuletzt {})", g_diagCreate.exchange(0),
+				g_diagDDS.exchange(0), g_diagNoSrc.exchange(0), g_diagOff.exchange(0), g_diagMiss.exchange(0), g_diagPreset.exchange(0), g_diagPresetValue.load());
 			{
 				std::scoped_lock missLock(g_missLock);
 				for (const auto& m : g_missSamples) {
