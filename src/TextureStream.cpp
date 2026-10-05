@@ -90,7 +90,8 @@ namespace TextureStream
 			};
 			std::vector<Row> rows;
 			rows.reserve(g_window.size());
-			std::uint32_t big = 0;
+			std::uint32_t big = 0, noMips = 0;
+			double        noMipsBytes = 0;
 			for (const auto& [tex, t] : g_window) {
 				const std::uint32_t edge = std::max(t.width, t.height);
 				const std::uint32_t needEdge = std::min(edge, NextPow2(t.neededPx * safety));
@@ -101,11 +102,21 @@ namespace TextureStream
 				if (edge >= 4096) {
 					++big;
 				}
+				// ohne Mip-Kette laesst sich eine Textur nicht einfach per Kopie verkleinern -> nicht einrechnen
+				if (t.mips <= 1 && edge >= 512) {
+					++noMips;
+					noMipsBytes += f;
+					needed += f - n;
+					continue;
+				}
 				rows.push_back({ &t, f - n, needEdge });
 			}
 			std::ranges::sort(rows, [](const Row& a, const Row& b) { return a.saving > b.saving; });
 			logger::info("[TextureStream] {} Mess-Frames | sichtbare Texturen {} (davon 4K+ {}) | VRAM voll {:.0f} MB | benoetigt (Sicherheit x{:.1f}) {:.0f} MB | Ersparnis {:.0f} MB ({:.0f} %)",
 				g_frames, g_window.size(), big, full / 1048576.0, safety, needed / 1048576.0, (full - needed) / 1048576.0, full > 0 ? 100.0 * (full - needed) / full : 0.0);
+			if (noMips) {
+				logger::info("[TextureStream]   ohne Mip-Kette (ab 512, nicht verkleinerbar): {} Texturen, {:.0f} MB", noMips, noMipsBytes / 1048576.0);
+			}
 			for (std::size_t i = 0; i < rows.size() && i < 12; ++i) {
 				const auto& r = rows[i];
 				logger::info("[TextureStream]   {:5.1f} MB sparen | {}x{} -> {} | {}", r.saving / 1048576.0, r.t->width, r.t->height, r.needEdge, r.t->name);
