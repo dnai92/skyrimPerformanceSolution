@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include "DetourHelper.h"
+#include "GpuMemory.h"
 
 #include <condition_variable>
 #include <deque>
@@ -215,6 +216,10 @@ namespace TextureStream
 		std::atomic<std::uint64_t> g_vramUsage{ 0 }, g_vramBudget{ 0 };
 		std::atomic<float>         g_vramPct{ -1.0f };  // -1 = unbekannt
 		std::uint32_t              g_reducedCount = 0;   // verkleinerte Texturen (Stand letzter Durchlauf)
+		// Windows-Zaehler fuer den ganzen Prozess (Hintergrund-Thread, 1x/s): enthaelt auch CS/DLSS/FG-Speicher
+		std::atomic<std::uint64_t> g_procDedicated{ 0 }, g_procShared{ 0 };
+		std::atomic<std::uint64_t> g_dxgiUsage{ 0 };
+		constexpr std::uint64_t    kSharedPressure = 128ull << 20;  // so viel ausgelagert = VRAM laeuft ueber
 
 		void InitAdapter()
 		{
@@ -241,9 +246,12 @@ namespace TextureStream
 			}
 			W::DXGI_QUERY_VIDEO_MEMORY_INFO info{};
 			if (g_adapter->QueryVideoMemoryInfo(0, W::DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info) >= 0 && info.budget > 0) {
-				g_vramUsage.store(info.currentUsage, std::memory_order_relaxed);
+				// DXGI sieht nur einen Teil (0.20.3: 1,5-2,5 GB zu wenig) -> der groessere Wert zaehlt
+				const auto usage = std::max(info.currentUsage, g_procDedicated.load(std::memory_order_relaxed));
+				g_dxgiUsage.store(info.currentUsage, std::memory_order_relaxed);
+				g_vramUsage.store(usage, std::memory_order_relaxed);
 				g_vramBudget.store(info.budget, std::memory_order_relaxed);
-				g_vramPct.store(100.0f * static_cast<float>(info.currentUsage) / static_cast<float>(info.budget), std::memory_order_relaxed);
+				g_vramPct.store(100.0f * static_cast<float>(usage) / static_cast<float>(info.budget), std::memory_order_relaxed);
 			}
 		}
 
@@ -267,7 +275,11 @@ namespace TextureStream
 				return true;
 			}
 			const float pct = g_vramPct.load(std::memory_order_relaxed);
-			return pct < 0.0f || pct >= cfg.budgetStartPct;
+			// Ausgelagerter Speicher = der VRAM laeuft schon ueber (genau das verursachte die Ruckler beim Umdrehen)
+			// Nur solange der VRAM auch nahe der Schwelle ist - Windows holt Ausgelagertes nicht immer sofort zurueck,
+			// sonst wuerde endlos weiter verkleinert
+			const bool overflowing = g_procShared.load(std::memory_order_relaxed) >= kSharedPressure && pct >= cfg.budgetStartPct - cfg.refillGapPct;
+			return pct < 0.0f || pct >= cfg.budgetStartPct || overflowing;
 		}
 
 		// Gegen Hin und Her (Plattenlast): groesser laden erst bei deutlich mehr Bedarf, verkleinern erst nach
@@ -581,6 +593,7 @@ namespace TextureStream
 		void Worker()
 		{
 			auto lastTick = Clock::now();
+			auto lastGpu = Clock::now() - 1s;
 			for (;;) {
 				Job job;
 				bool have = false;
@@ -609,6 +622,14 @@ namespace TextureStream
 						tasks->AddTask([] { ApplyResults(); });
 					}
 				}
+				if (Clock::now() - lastGpu >= 1s) {
+					lastGpu = Clock::now();
+					unsigned long long dedicated = 0, shared = 0;
+					if (GpuMemory::Query(dedicated, shared)) {
+						g_procDedicated.store(dedicated, std::memory_order_relaxed);
+						g_procShared.store(shared, std::memory_order_relaxed);
+					}
+				}
 				// Vorschau-Menues pruefen (laeuft per SKSE-Task auch, wenn das Spiel pausiert)
 				if (Clock::now() - lastTick >= 250ms) {
 					lastTick = Clock::now();
@@ -619,11 +640,16 @@ namespace TextureStream
 			}
 		}
 
-		void Enqueue(Job a_job)
+		void EnsureWorker()
 		{
 			if (!g_workerStarted.exchange(true)) {
 				std::thread(Worker).detach();
 			}
+		}
+
+		void Enqueue(Job a_job)
+		{
+			EnsureWorker();
 			{
 				std::scoped_lock lock(g_qLock);
 				g_jobs.push_back(std::move(a_job));
@@ -1448,9 +1474,10 @@ namespace TextureStream
 				std::scoped_lock lock(g_sizeLock);
 				remembered = g_loadEdge.size();
 			}
-			logger::info("[TextureStream]   VRAM {:.1f} / {:.1f} GB ({:.0f} %) | Budget-Modus {} ab {:.0f} % -> {}", g_vramUsage.load() / 1073741824.0,
-				g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), Config::textureStream.budgetMode ? "AN" : "AUS",
-				Config::textureStream.budgetStartPct, Pressure() ? "verkleinern" : "genug Platz");
+			logger::info("[TextureStream]   VRAM {:.1f} / {:.1f} GB ({:.0f} %, DXGI {:.1f} GB, ausgelagert {:.0f} MB) | Budget-Modus {} ab {:.0f} % -> {}",
+				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_dxgiUsage.load() / 1073741824.0,
+				g_procShared.load() / 1048576.0, Config::textureStream.budgetMode ? "AN" : "AUS", Config::textureStream.budgetStartPct,
+				Pressure() ? "verkleinern" : "genug Platz");
 			{
 				std::scoped_lock lock(g_cacheLock);
 				CacheTrim(CacheLimit());  // Regler im Menue verkleinert
@@ -1531,6 +1558,7 @@ namespace TextureStream
 			InitAdapter();
 			UpdateVram();
 		}
+		EnsureWorker();  // misst ab jetzt 1x/s den Grafikspeicher des Prozesses
 		auto**        vtbl = *reinterpret_cast<void***>(device);
 		std::uint32_t old = 0;
 		if (REX::W32::VirtualProtect(&vtbl[5], sizeof(void*), 0x40, &old)) {

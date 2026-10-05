@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SkyrimPerf
-	VERSION 0.20.3
+	VERSION 0.20.4
 	LANGUAGES CXX
 )
 
@@ -31,6 +31,7 @@ add_commonlibsse_plugin(
 		src/Menu.cpp
 		src/Config.cpp
 		src/DetourHelper.cpp
+		src/GpuMemory.cpp
 		src/WaitProbe.cpp
 		src/InstancedDraw.cpp
 		src/ShadowCulling.cpp
@@ -50,7 +51,7 @@ find_path(DETOURS_INCLUDE_DIRS "detours/detours.h" REQUIRED)
 find_library(DETOURS_LIBRARY detours REQUIRED)
 target_include_directories(${PROJECT_NAME} PRIVATE ${DETOURS_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${DETOURS_LIBRARY})
-set_source_files_properties(src/DetourHelper.cpp src/WaitProbe.cpp src/InstancedDraw.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+set_source_files_properties(src/DetourHelper.cpp src/GpuMemory.cpp src/WaitProbe.cpp src/InstancedDraw.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 set_source_files_properties(extern/tracy/public/TracyClient.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON COMPILE_OPTIONS "/W0")
 target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive- /utf-8)
