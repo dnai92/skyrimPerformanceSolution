@@ -17,6 +17,8 @@ so you can compare with and without the plugin at any time.
 |---|---|---|
 | **Texture streaming** | Textures of far objects (also behind the camera) are shrunk in VRAM by dropping their top mip levels on the GPU, and reloaded at full size from disk/BSA in the background when you come closer. Files on disk are never changed. UI, maps, LOD, fonts and books are excluded; items in inventory/barter/crafting previews are always shown at full size. | ON, min. 512–1024 px |
 | **VRAM budget mode** | Streaming only kicks in when the game uses more than 85 % of the video memory Windows grants it, largest savings first. With enough VRAM (or no high-res texture packs) it does nothing and costs nothing. | ON |
+| **VRAM refill** | When usage drops clearly below the threshold (default 10 points), downscaled textures are reloaded at full size again, most needed first, so the VRAM stays as full as useful. | ON |
+| **RAM buffer** | Texture data that had to be reloaded stays in RAM up to a set size (default 1 GB, slider in the menu). Textures that go back and forth then come from RAM instead of disk. Least recently used is dropped first. | 1024 MB |
 | **Load at remembered size** | The size a texture needed last time (also in earlier sessions) is passed to the game's DDS loader, so the top mip levels are never read or uploaded. Lowers the VRAM peak when entering areas. | ON |
 | **Sun shadow culling** | Small, far objects do not cast sun shadows. Shadow length is taken into account (no culling below 25° sun elevation). | ON |
 | **Torch / point light shadow culling** | Small, far objects do not cast shadows from torches and fires. | ON |

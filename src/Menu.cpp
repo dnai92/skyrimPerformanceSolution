@@ -325,6 +325,14 @@ namespace Menu
 					"Texturen werden nur verkleinert, wenn das Spiel mehr als die Schwelle unten vom Grafikspeicher belegt, den Windows ihm zuteilt. Mit genug VRAM passiert nichts und es kostet nichts."));
 			Slider(T("Start at (%)##ts", "Ab Belegung (%)##ts"), Config::textureStream.budgetStartPct, 50.0f, 100.0f, "%.0f",
 				T("VRAM usage (percent of the budget) at which downscaling starts.", "VRAM-Belegung (Prozent des Budgets), ab der verkleinert wird."));
+			Toggle(T("Refill VRAM when there is room##ts", "VRAM wieder auffüllen, wenn Platz ist##ts"), Config::textureStream.refill,
+				T("When usage drops clearly below the threshold, downscaled textures are reloaded at full size again (most needed first).",
+					"Fällt die Belegung deutlich unter die Schwelle, werden verkleinerte Texturen wieder voll geladen (die meistgebrauchten zuerst)."));
+			Slider(T("Refill below threshold minus (%)##ts", "Auffüllen ab Schwelle minus (%)##ts"), Config::textureStream.refillGapPct, 2.0f, 30.0f, "%.0f",
+				T("Gap between downscaling and refilling, so textures do not go back and forth.", "Abstand zwischen Verkleinern und Auffüllen, damit Texturen nicht hin und her wechseln."));
+			Slider(T("RAM buffer (MB)##ts", "RAM-Puffer (MB)##ts"), Config::textureStream.ramCacheMB, 0.0f, 8192.0f, "%.0f",
+				T("Texture data that was reloaded stays in RAM up to this size, so the next reload needs no disk access. Least recently used is dropped first. 0 = off.",
+					"Neu geladene Texturdaten bleiben bis zu dieser Größe im RAM, das nächste Neuladen braucht dann keinen Plattenzugriff. Am längsten nicht gebrauchte fliegen zuerst raus. 0 = aus."));
 			Toggle(T("Load at remembered size##ts", "Gleich in gemerkter Größe laden##ts"), Config::textureStream.loadReduced,
 				T("The size a texture needed last time (also in earlier sessions) is used directly when the game loads it again. Less VRAM peak and loading when entering areas.",
 					"Die zuletzt benötigte Größe einer Textur (auch aus früheren Sitzungen) wird direkt beim Laden verwendet. Weniger VRAM-Spitze und Laden beim Betreten von Gebieten."));

@@ -5,6 +5,7 @@
 
 #include <condition_variable>
 #include <deque>
+#include <list>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -279,7 +280,8 @@ namespace TextureStream
 		struct Counters
 		{
 			std::uint32_t downs = 0, ups = 0, upFails = 0, probesBad = 0;
-			std::uint32_t pingPong = 0;  // verkleinert, obwohl erst vor < 60 s neu geladen
+			std::uint32_t pingPong = 0;
+			std::uint32_t refills = 0;  // zum Auffuellen wieder voll geladen  // verkleinert, obwohl erst vor < 60 s neu geladen
 			double        upMs = 0, upMB = 0;
 			std::uint32_t passes = 0, passFrames = 0, passNodes = 0;
 			double        passMs = 0;
@@ -379,11 +381,111 @@ namespace TextureStream
 			return true;
 		}
 
+		// ---------------- RAM-Puffer fuer neu geladene Texturdaten (nur Hintergrund-Thread + Bericht) ----------------
+		// Was einmal von der Platte neu geladen wurde, bleibt (bis fRamCacheMB) im RAM. Wechselt die Textur wieder hin und
+		// her, kommt sie beim naechsten Mal ohne Plattenzugriff/Entpacken. Am laengsten nicht gebrauchte fliegen zuerst raus.
+		struct CacheEntry
+		{
+			std::vector<std::byte>           data;  // Mip-Stufen ab 'skip' bis zur kleinsten
+			std::uint32_t                    skip = 0;
+			std::uint32_t                    fullW = 0, fullH = 0, fullMips = 0;
+			FormatInfo                       fi;
+			std::list<std::string>::iterator lru;
+		};
+		std::mutex                                  g_cacheLock;
+		std::unordered_map<std::string, CacheEntry> g_cache;
+		std::list<std::string>                      g_cacheLru;  // vorne = zuletzt benutzt
+		std::uint64_t                               g_cacheBytes = 0;
+		std::atomic<std::uint32_t>                  g_cacheHits{ 0 }, g_cacheMisses{ 0 };
+
+		std::uint64_t CacheLimit() noexcept { return static_cast<std::uint64_t>(Config::textureStream.ramCacheMB) << 20; }
+
+		void CacheTrim(std::uint64_t a_limit)
+		{
+			while (g_cacheBytes > a_limit && !g_cacheLru.empty()) {
+				const auto it = g_cache.find(g_cacheLru.back());
+				if (it != g_cache.end()) {
+					g_cacheBytes -= it->second.data.size();
+					g_cache.erase(it);
+				}
+				g_cacheLru.pop_back();
+			}
+		}
+
+		// Kopie der Daten ab Stufe a_skip, wenn vorhanden
+		bool CacheGet(const std::string& a_path, std::uint32_t a_fullW, std::uint32_t a_fullH, std::uint32_t a_fullMips, FormatInfo a_fi, std::uint32_t a_skip,
+			std::vector<std::byte>& a_out)
+		{
+			std::scoped_lock lock(g_cacheLock);
+			const auto       it = g_cache.find(a_path);
+			if (it == g_cache.end()) {
+				return false;
+			}
+			auto& e = it->second;
+			if (e.fullW != a_fullW || e.fullH != a_fullH || e.fullMips != a_fullMips || !(e.fi == a_fi) || e.skip > a_skip) {
+				return false;
+			}
+			std::uint64_t off = 0;
+			for (std::uint32_t i = e.skip; i < a_skip; ++i) {
+				off += MipBytes(a_fi, std::max(1u, a_fullW >> i), std::max(1u, a_fullH >> i));
+			}
+			if (off > e.data.size()) {
+				return false;
+			}
+			a_out.assign(e.data.begin() + static_cast<std::ptrdiff_t>(off), e.data.end());
+			g_cacheLru.splice(g_cacheLru.begin(), g_cacheLru, e.lru);
+			return true;
+		}
+
+		void CachePut(const std::string& a_path, std::vector<std::byte>&& a_data, std::uint32_t a_skip, std::uint32_t a_fullW, std::uint32_t a_fullH,
+			std::uint32_t a_fullMips, FormatInfo a_fi)
+		{
+			const auto limit = CacheLimit();
+			if (limit == 0 || a_data.size() > limit / 4) {
+				return;
+			}
+			std::scoped_lock lock(g_cacheLock);
+			if (const auto it = g_cache.find(a_path); it != g_cache.end()) {
+				if (it->second.skip <= a_skip) {
+					return;  // schon mit mindestens so viel Daten vorhanden
+				}
+				g_cacheBytes -= it->second.data.size();
+				g_cacheLru.erase(it->second.lru);
+				g_cache.erase(it);
+			}
+			g_cacheLru.push_front(a_path);
+			auto& e = g_cache[a_path];
+			e.data = std::move(a_data);
+			e.skip = a_skip;
+			e.fullW = a_fullW;
+			e.fullH = a_fullH;
+			e.fullMips = a_fullMips;
+			e.fi = a_fi;
+			e.lru = g_cacheLru.begin();
+			g_cacheBytes += e.data.size();
+			CacheTrim(limit);
+		}
+
 		void RunJob(Result& a_res)
 		{
 			const auto& job = a_res.job;
 			const auto  t0 = Clock::now();
-			auto        stream = std::make_unique<RE::BSResourceNiBinaryStream>(job.path);
+			std::vector<std::byte> data;
+			bool                   fromCache = false;
+			if (job.reload && CacheGet(job.path, job.fullW, job.fullH, job.fullMips, job.fi, job.skip, data)) {
+				fromCache = true;
+				a_res.file.width = job.fullW;
+				a_res.file.height = job.fullH;
+				a_res.file.mips = job.fullMips;
+				a_res.file.fi = job.fi;
+				g_cacheHits.fetch_add(1, std::memory_order_relaxed);
+			}
+			std::unique_ptr<RE::BSResourceNiBinaryStream> stream;
+			if (!fromCache) {
+			if (job.reload) {
+				g_cacheMisses.fetch_add(1, std::memory_order_relaxed);
+			}
+			stream = std::make_unique<RE::BSResourceNiBinaryStream>(job.path);
 			a_res.error = ReadHeader(*stream, a_res.file);
 			if (!a_res.error.empty() || !job.reload) {
 				return;
@@ -406,10 +508,17 @@ namespace TextureStream
 					return;
 				}
 			}
+			}  // !fromCache (Kopf + Springen)
+			const auto&         f = a_res.file;
 			const std::uint32_t w = std::max(1u, f.width >> job.skip), h = std::max(1u, f.height >> job.skip);
 			const std::uint32_t mips = f.mips - job.skip;
 			const auto          bytes = ChainBytes(f.fi, w, h, mips);
-			std::vector<std::byte> data(bytes);
+			if (fromCache && data.size() < bytes) {
+				a_res.error = "RAM-Puffer unvollstaendig";
+				return;
+			}
+			if (!fromCache) {
+			data.resize(bytes);
 			for (std::uint64_t done = 0; done < bytes;) {
 				const auto n = static_cast<std::uint32_t>(std::min<std::uint64_t>(bytes - done, 16u << 20));
 				if (!stream->read(data.data() + done, n)) {
@@ -419,6 +528,7 @@ namespace TextureStream
 				done += n;
 			}
 			stream.reset();
+			}  // !fromCache (Daten)
 
 			std::vector<W::D3D11_SUBRESOURCE_DATA> init(mips);
 			std::uint64_t                          off = 0;
@@ -453,6 +563,9 @@ namespace TextureStream
 			}
 			a_res.mb = bytes / 1048576.0;
 			a_res.ms = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+			if (!fromCache) {
+				CachePut(job.path, std::move(data), job.skip, job.fullW, job.fullH, job.fullMips, job.fi);
+			}
 		}
 
 		void ApplyResults();
@@ -545,19 +658,22 @@ namespace TextureStream
 			return Config::textureStream.enabled && Config::masterEnabled.load(std::memory_order_relaxed);
 		}
 
-		// benoetigte Kantenlaenge fuer eine Bildschirmgroesse (Zweierpotenz, zwischen fMinEdge und Original)
-		std::uint32_t WantedEdge(const TexState& a_st, float a_needPx) noexcept
+		// benoetigte Kantenlaenge fuer eine Bildschirmgroesse, unabhaengig von Schaltern (fuer gemerkte Groessen)
+		std::uint32_t NeededEdge(const TexState& a_st, float a_needPx) noexcept
 		{
-			const auto full = a_st.FullEdge();
-			if (!Active()) {
-				return full;
-			}
+			const auto    full = a_st.FullEdge();
 			const float   need = std::max(a_needPx * Config::textureStream.safetyFactor, Config::textureStream.minEdge);
 			std::uint32_t p = 4;
 			while (p < need && p < full) {
 				p <<= 1;
 			}
 			return std::min(p, full);
+		}
+
+		// benoetigte Kantenlaenge fuer eine Bildschirmgroesse (Zweierpotenz, zwischen fMinEdge und Original)
+		std::uint32_t WantedEdge(const TexState& a_st, float a_needPx) noexcept
+		{
+			return Active() ? NeededEdge(a_st, a_needPx) : a_st.FullEdge();
 		}
 
 		bool ReadDesc(W::ID3D11Resource* a_res, W::D3D11_TEXTURE2D_DESC& a_desc) noexcept
@@ -904,7 +1020,6 @@ namespace TextureStream
 			st.curH = desc.height;
 			st.curMips = desc.mipLevels;
 			st.hold = a_job.src;
-			RememberEdge(st.path, st.CurEdge());
 			if (st.lastReload.time_since_epoch().count() != 0 && Clock::now() - st.lastReload < 60s) {
 				++g_stats.pingPong;
 			}
@@ -991,7 +1106,6 @@ namespace TextureStream
 				st.curW = std::max(1u, job.fullW >> job.skip);
 				st.curH = std::max(1u, job.fullH >> job.skip);
 				st.curMips = job.fullMips - job.skip;
-				RememberEdge(st.path, st.Reduced() ? st.CurEdge() : 0);
 				st.lastReload = Clock::now();
 				++g_stats.ups;
 				g_stats.upMs += res.ms;
@@ -1094,13 +1208,34 @@ namespace TextureStream
 				std::uint64_t saving;
 			};
 			std::vector<Candidate> candidates;
+			// VRAM wieder auffuellen (Budget-Modus, deutlich unter der Schwelle): verkleinerte, gerade gesehene Texturen
+			struct RefillCandidate
+			{
+				RE::BSGraphics::Texture* r;
+				TexState*                st;
+				float                    priority;  // benoetigt / aktuell - die am staerksten gebrauchten zuerst
+				std::uint64_t            bytes;     // zusaetzlicher VRAM bei voller Groesse
+			};
+			std::vector<RefillCandidate> refill;
+			const auto&                  cfg = Config::textureStream;
+			const float                  pct = g_vramPct.load(std::memory_order_relaxed);
+			const bool                   wantRefill = active && cfg.budgetMode && cfg.refill && pct >= 0.0f && pct < cfg.budgetStartPct - cfg.refillGapPct;
 			g_reducedCount = 0;
-			for (auto it = g_tex.begin(); it != g_tex.end();) {
+			for (auto it = g_tex.begin(); it != g_tex.end(); ++it) {
 				auto&      st = it->second;
 				const auto r = it->first;
 				const bool seen = st.passId == g_passId;
 				if (st.Reduced()) {
 					++g_reducedCount;
+				}
+				// Benoetigte Groesse immer lernen (Stufe 3 wendet sie beim Laden nur bei Druck an)
+				if (seen && st.eligible && (st.probe == Probe::kOk || st.probe == Probe::kNone)) {
+					const auto needed = NeededEdge(st, st.passNeed);
+					RememberEdge(st.path, needed < st.FullEdge() ? needed : 0);
+				}
+				if (wantRefill && seen && st.eligible && !st.busy && st.hold && st.probe == Probe::kOk && st.Reduced()) {
+					refill.push_back({ r, &st, st.passNeed / static_cast<float>(st.CurEdge()),
+						ChainBytes(st.fi, st.fullW, st.fullH, st.fullMips) - ChainBytes(st.fi, st.curW, st.curH, st.curMips) });
 				}
 				if (st.eligible && !st.busy) {
 					if (st.Reduced() && st.hold && st.probe == Probe::kOk && (!active || (seen && WantedEdge(st, st.passNeed / kUpMargin) > st.CurEdge()))) {
@@ -1125,6 +1260,28 @@ namespace TextureStream
 						}
 					}
 				}
+			}
+			// Auffuellen: so viel, wie bis zur Mitte zwischen Auffuell- und Verkleinerungsschwelle passt, hoechstens 64 pro Durchlauf
+			if (!refill.empty()) {
+				const double budget = static_cast<double>(g_vramBudget.load(std::memory_order_relaxed));
+				const double usage = static_cast<double>(g_vramUsage.load(std::memory_order_relaxed));
+				double       room = budget * (cfg.budgetStartPct - cfg.refillGapPct / 2.0) / 100.0 - usage;
+				std::ranges::sort(refill, [](const RefillCandidate& a, const RefillCandidate& b) { return a.priority > b.priority; });
+				int queued = 0;
+				for (const auto& c : refill) {
+					if (queued >= 64 || room < static_cast<double>(c.bytes)) {
+						break;
+					}
+					if (!c.st->busy) {
+						QueueReload(*c.st, c.r, c.st->FullEdge());
+						room -= static_cast<double>(c.bytes);
+						++queued;
+						++g_stats.refills;
+					}
+				}
+			}
+			for (auto it = g_tex.begin(); it != g_tex.end();) {
+				auto& st = it->second;
 				// Halten nur fuer laufende Auftraege; sonst nur fuer die Dauer eines Durchlaufs (OnSeen setzt es neu).
 				// Lange gehaltene Verweise ueberlebten den Abbau der Welt -> Heap-Beschaedigung (0.19.0).
 				if (st.hold && !st.busy) {
@@ -1277,8 +1434,8 @@ namespace TextureStream
 			const auto& s = g_stats;
 			logger::info("[TextureStream] {} | Texturen {} (verkleinerbar {}, Datei passt nicht {}) | verkleinert {} -> {:.0f} MB statt {:.0f} MB = {:.0f} MB gespart",
 				Active() ? "AN" : "AUS", managed, eligible, probeBad, reduced, curMB, fullMB, fullMB - curMB);
-			logger::info("[TextureStream]   10 s: verkleinert {} | neu geladen {} ({:.0f} MB, avg {:.0f} ms) | Ladefehler {} | Hin und Her {} | Warteschlange {} | Durchlaeufe {} (avg {:.0f} Frames, {:.0f} Knoten, {:.2f} ms gesamt)",
-				s.downs, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, s.pingPong, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
+			logger::info("[TextureStream]   10 s: verkleinert {} | neu geladen {} ({:.0f} MB, avg {:.0f} ms) | Ladefehler {} | Hin und Her {} | aufgefuellt {} | Warteschlange {} | Durchlaeufe {} (avg {:.0f} Frames, {:.0f} Knoten, {:.2f} ms gesamt)",
+				s.downs, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, s.pingPong, s.refills, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
 				s.passes ? double(s.passNodes) / s.passes : 0.0, s.passes ? s.passMs / s.passes : 0.0);
 			std::size_t remembered = 0;
 			{
@@ -1288,6 +1445,12 @@ namespace TextureStream
 			logger::info("[TextureStream]   VRAM {:.1f} / {:.1f} GB ({:.0f} %) | Budget-Modus {} ab {:.0f} % -> {}", g_vramUsage.load() / 1073741824.0,
 				g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), Config::textureStream.budgetMode ? "AN" : "AUS",
 				Config::textureStream.budgetStartPct, Pressure() ? "verkleinern" : "genug Platz");
+			{
+				std::scoped_lock lock(g_cacheLock);
+				CacheTrim(CacheLimit());  // Regler im Menue verkleinert
+				logger::info("[TextureStream]   RAM-Puffer {:.0f} / {:.0f} MB, {} Texturen | aus RAM {} | von Platte {}", g_cacheBytes / 1048576.0,
+					Config::textureStream.ramCacheMB, g_cache.size(), g_cacheHits.exchange(0), g_cacheMisses.exchange(0));
+			}
 			logger::info("[TextureStream]   Stufe 3: {} | gleich verkleinert geladen {} | gemerkte Groessen {}", Config::textureStream.loadReduced ? "AN" : "AUS",
 				g_loadedReduced.exchange(0), remembered);
 			logger::info("[TextureStream]   Stufe 3 Diagnose: Ladeaufrufe {} | DDS {} | ohne Textur {} | aus/kein Druck {} | Pfad unbekannt {} | maxsize von anderer Mod {} (zuletzt {})", g_diagCreate.exchange(0),
@@ -1461,11 +1624,9 @@ namespace TextureStream
 
 		// Durchlauf in Zeitscheiben
 		if (!g_passActive) {
-			if (now - g_passStart < 500ms) {
-				return;
-			}
-			// Budget-Modus mit genug VRAM und nichts verkleinert: Durchlauf sparen
-			if (cfg.budgetMode && !Pressure() && g_reducedCount == 0) {
+			// Budget-Modus mit genug VRAM und nichts verkleinert: nur alle 5 s (Groessen lernen), sonst alle 0,5 s
+			const bool idle = cfg.budgetMode && !Pressure() && g_reducedCount == 0;
+			if (now - g_passStart < (idle ? 5000ms : 500ms)) {
 				return;
 			}
 			const auto root = RE::Main::WorldRootNode();

@@ -115,6 +115,9 @@ namespace Config
 		bool        loadReduced = true;   // Stufe 3: gemerkte Groesse schon beim Laden anwenden
 		bool        budgetMode = true;    // nur verkleinern, wenn der VRAM knapp wird (Windows-Budget des Prozesses)
 		float       budgetStartPct = 85.0f;  // ab dieser Belegung (% des Budgets) wird verkleinert
+		bool        refill = true;        // Budget-Modus: VRAM wieder auffuellen (verkleinerte Texturen voll laden), wenn Platz ist
+		float       refillGapPct = 10.0f; // ... sobald die Belegung so viele %-Punkte unter der Schwelle liegt
+		float       ramCacheMB = 1024.0f; // RAM-Puffer fuer neu geladene Texturdaten (0 = aus)
 		float       safetyFactor = 2.0f;  // benoetigte Aufloesung = Bildschirmgroesse x Faktor
 		float       minEdge = 1024.0f;    // nie unter diese Kantenlaenge verkleinern (Zweierpotenz)
 		float       budgetMs = 0.4f;      // Zeit pro Frame fuer den Szenen-Durchlauf
