@@ -398,6 +398,8 @@ namespace TextureStream
 		std::uint64_t                               g_cacheBytes = 0;
 		std::atomic<std::uint32_t>                  g_cacheHits{ 0 }, g_cacheMisses{ 0 };
 
+		std::unordered_map<std::string, std::uint32_t> g_reloadCount;  // Neuladungen je Pfad in dieser Sitzung (unter g_cacheLock)
+
 		std::uint64_t CacheLimit() noexcept { return static_cast<std::uint64_t>(Config::textureStream.ramCacheMB) << 20; }
 
 		void CacheTrim(std::uint64_t a_limit)
@@ -445,6 +447,11 @@ namespace TextureStream
 				return;
 			}
 			std::scoped_lock lock(g_cacheLock);
+			// Nur Texturen, die in dieser Sitzung schon einmal neu geladen wurden (also hin und her wechseln) -
+			// einmalige Ladungen (z. B. Auffuellen) wuerden den Puffer sonst sofort mit Nutzlosem fuellen
+			if (++g_reloadCount[a_path] < 2) {
+				return;
+			}
 			if (const auto it = g_cache.find(a_path); it != g_cache.end()) {
 				if (it->second.skip <= a_skip) {
 					return;  // schon mit mindestens so viel Daten vorhanden
@@ -1261,17 +1268,20 @@ namespace TextureStream
 					}
 				}
 			}
-			// Auffuellen: so viel, wie bis zur Mitte zwischen Auffuell- und Verkleinerungsschwelle passt, hoechstens 64 pro Durchlauf
+			// Auffuellen: so viel, wie bis zur Mitte zwischen Auffuell- und Verkleinerungsschwelle passt, aber gemaechlich
+			// (hoechstens 48 MB pro Durchlauf, ~100 MB/s) - Auffuellen eilt nicht, die Platte soll nicht belastet werden
 			if (!refill.empty()) {
 				const double budget = static_cast<double>(g_vramBudget.load(std::memory_order_relaxed));
 				const double usage = static_cast<double>(g_vramUsage.load(std::memory_order_relaxed));
 				double       room = budget * (cfg.budgetStartPct - cfg.refillGapPct / 2.0) / 100.0 - usage;
 				std::ranges::sort(refill, [](const RefillCandidate& a, const RefillCandidate& b) { return a.priority > b.priority; });
-				int queued = 0;
+				int    queued = 0;
+				double rate = 48.0 * 1048576.0;
 				for (const auto& c : refill) {
-					if (queued >= 64 || room < static_cast<double>(c.bytes)) {
+					if (queued >= 64 || room < static_cast<double>(c.bytes) || (queued > 0 && rate < static_cast<double>(c.bytes))) {
 						break;
 					}
+					rate -= static_cast<double>(c.bytes);
 					if (!c.st->busy) {
 						QueueReload(*c.st, c.r, c.st->FullEdge());
 						room -= static_cast<double>(c.bytes);
