@@ -56,7 +56,6 @@ namespace Config
 			b("TextureStream", "bAnalysis", textureStream.analysis);
 			f("TextureStream", "fSafetyFactor", textureStream.safetyFactor);
 			b("SubtreePruning", "bSun", subtreePruning.sun);
-			b("SubtreePruning", "bPointLights", subtreePruning.point);
 			b("SubtreePruning", "bPrecipitation", subtreePruning.precip);
 			f("LightGatherThrottle", "fMinMove", lightGather.minMove);
 			f("LightGatherThrottle", "fMinRadiusChange", lightGather.minRadiusChange);
@@ -194,7 +193,9 @@ namespace Config
 		auto& sp = subtreePruning;
 		sp.enabled = ini.GetBoolValue("SubtreePruning", "bEnabled", sp.enabled);
 		sp.sun = ini.GetBoolValue("SubtreePruning", "bSun", sp.sun);
-		sp.point = ini.GetBoolValue("SubtreePruning", "bPointLights", sp.point);
+		// bPointLights wird bewusst ignoriert (0.17.5): liess Schatten von Feuerschalen/Fackeln verschwinden, Nutzen 1-3 Knoten/Frame.
+		// Alte SkyrimPerf_User.ini (aus 0.16.0, Vorgabe damals an) hatten den Schalter noch gespeichert.
+		sp.point = false;
 		sp.precip = ini.GetBoolValue("SubtreePruning", "bPrecipitation", sp.precip);
 		logger::info("SubtreePruning: {} | Sonne {} | Punktlicht {} | Regen/Sky {}", sp.enabled ? "AN" : "AUS", sp.sun, sp.point, sp.precip);
 

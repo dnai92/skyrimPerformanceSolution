@@ -124,7 +124,6 @@ namespace Menu
 			ImGuiMCP::SeparatorText("Subtree pruning");
 			Toggle("Enabled##prune", Config::subtreePruning.enabled, "Skips whole groups of objects in culling passes when the group as a whole already meets the culling rule.");
 			Toggle("Sun / moon shadows##prune", Config::subtreePruning.sun, "Apply in the sun (moon at night) shadow pass.");
-			Toggle("Torch / point light shadows##prune", Config::subtreePruning.point, "Apply in point light shadow passes. Default OFF: darkened lit surfaces in a test.");
 			Toggle("Rain / skylighting map##prune", Config::subtreePruning.precip, "Apply in the precipitation / skylighting occlusion pass.");
 
 			ImGuiMCP::SeparatorText("Texture streaming (stage 0: measuring only)");
