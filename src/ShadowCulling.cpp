@@ -439,6 +439,19 @@ namespace ShadowCulling
 			return std::sqrt(dx * dx + dy * dy + dz * dz) - a_bound.radius;
 		}
 
+		// Skinning allein reicht nicht: Baeume/Straeucher sind ebenfalls geskinnt (Wind) -> verloren ihre Schatten (0.18.1).
+		// Erster Vorfahr mit Referenz entscheidet: Figur ja, Baum/Objekt nein.
+		bool BelongsToActor(const RE::BSGeometry& a_geom) noexcept
+		{
+			const RE::NiAVObject* obj = &a_geom;
+			for (int depth = 0; obj && depth < 32; ++depth, obj = obj->parent) {
+				if (const auto ref = const_cast<RE::NiAVObject*>(obj)->GetUserData()) {
+					return ref->GetFormType() == RE::FormType::ActorCharacter;
+				}
+			}
+			return false;
+		}
+
 		bool CullActorShadow(const RE::BSGeometry& a_geom, bool a_pointLight) noexcept
 		{
 			const auto& cfg = Config::actorShadowCulling;
@@ -446,7 +459,7 @@ namespace ShadowCulling
 				!const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData().skinInstance) {
 				return false;
 			}
-			if (DistanceToCamera(a_geom.worldBound) > cfg.minDistance) {
+			if (DistanceToCamera(a_geom.worldBound) > cfg.minDistance && BelongsToActor(a_geom)) {
 				Stats::Count(Stats::Counter::ActorShadowCulled);
 				return true;
 			}
