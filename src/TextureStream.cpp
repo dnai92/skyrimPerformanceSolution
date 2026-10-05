@@ -196,6 +196,7 @@ namespace TextureStream
 			std::uint32_t                      lowPasses = 0;
 			std::uint32_t                      lowTarget = 0;
 			Clock::time_point                  lastSeen{};
+			Clock::time_point                  lastReload{};  // zuletzt groesser geladen (Abkuehlzeit gegen Hin und Her)
 
 			std::uint32_t FullEdge() const noexcept { return std::max(fullW, fullH); }
 			std::uint32_t CurEdge() const noexcept { return std::max(curW, curH); }
@@ -255,10 +256,17 @@ namespace TextureStream
 			return pct < 0.0f || pct >= cfg.budgetStartPct;
 		}
 
+		// Gegen Hin und Her (Plattenlast): groesser laden erst bei deutlich mehr Bedarf, verkleinern erst nach
+		// Abkuehlzeit seit dem letzten Neuladen und nach mehreren Durchlaeufen mit geringem Bedarf
+		constexpr float kUpMargin = 1.25f;
+		constexpr auto  kCooldown = 30s;
+		constexpr int   kLowPasses = 3;
+
 		// ---------------- Statistik ----------------
 		struct Counters
 		{
 			std::uint32_t downs = 0, ups = 0, upFails = 0, probesBad = 0;
+			std::uint32_t pingPong = 0;  // verkleinert, obwohl erst vor < 60 s neu geladen
 			double        upMs = 0, upMB = 0;
 			std::uint32_t passes = 0, passFrames = 0, passNodes = 0;
 			double        passMs = 0;
@@ -791,9 +799,8 @@ namespace TextureStream
 			}
 			// zu klein fuer diesen Abstand -> sofort groesser laden (mit einer Stufe Reserve)
 			if (st.Reduced() && !st.busy && st.probe == Probe::kOk) {
-				const auto want = WantedEdge(st, a_needPx);
-				if (want > st.CurEdge()) {
-					QueueReload(st, r, std::min(st.FullEdge(), want * 2));
+				if (WantedEdge(st, a_needPx / kUpMargin) > st.CurEdge()) {
+					QueueReload(st, r, std::min(st.FullEdge(), WantedEdge(st, a_needPx) * 2));
 				}
 			}
 		}
@@ -874,6 +881,9 @@ namespace TextureStream
 			st.curMips = desc.mipLevels;
 			st.hold = a_job.src;
 			RememberEdge(st.path, st.CurEdge());
+			if (st.lastReload.time_since_epoch().count() != 0 && Clock::now() - st.lastReload < 60s) {
+				++g_stats.pingPong;
+			}
 			++g_stats.downs;
 		}
 
@@ -958,6 +968,7 @@ namespace TextureStream
 				st.curH = std::max(1u, job.fullH >> job.skip);
 				st.curMips = job.fullMips - job.skip;
 				RememberEdge(st.path, st.Reduced() ? st.CurEdge() : 0);
+				st.lastReload = Clock::now();
 				++g_stats.ups;
 				g_stats.upMs += res.ms;
 				g_stats.upMB += res.mb;
@@ -1068,16 +1079,16 @@ namespace TextureStream
 					++g_reducedCount;
 				}
 				if (st.eligible && !st.busy) {
-					if (st.Reduced() && st.hold && st.probe == Probe::kOk && (!active || (seen && WantedEdge(st, st.passNeed) > st.CurEdge()))) {
+					if (st.Reduced() && st.hold && st.probe == Probe::kOk && (!active || (seen && WantedEdge(st, st.passNeed / kUpMargin) > st.CurEdge()))) {
 						QueueReload(st, r, active ? std::min(st.FullEdge(), WantedEdge(st, st.passNeed) * 2) : st.FullEdge());
 					} else if (active && seen && pressure) {
 						const auto want = WantedEdge(st, st.passNeed);
-						if (want * 2 <= st.CurEdge()) {
+						if (want * 2 <= st.CurEdge() && now - st.lastReload >= kCooldown) {
 							if (st.probe == Probe::kNone) {
 								QueueProbe(st, r);
 							} else if (st.probe == Probe::kOk && st.hold) {
 								st.lowTarget = st.lowPasses == 0 ? want : std::max(st.lowTarget, want);
-								if (++st.lowPasses >= 2) {
+								if (++st.lowPasses >= kLowPasses) {
 									st.lowPasses = 0;
 									st.busy = true;
 									const std::uint32_t edge = st.lowTarget;
@@ -1167,8 +1178,8 @@ namespace TextureStream
 			const auto& s = g_stats;
 			logger::info("[TextureStream] {} | Texturen {} (verkleinerbar {}, Datei passt nicht {}) | verkleinert {} -> {:.0f} MB statt {:.0f} MB = {:.0f} MB gespart",
 				Active() ? "AN" : "AUS", managed, eligible, probeBad, reduced, curMB, fullMB, fullMB - curMB);
-			logger::info("[TextureStream]   10 s: verkleinert {} | neu geladen {} ({:.0f} MB, avg {:.0f} ms) | Ladefehler {} | Warteschlange {} | Durchlaeufe {} (avg {:.0f} Frames, {:.0f} Knoten, {:.2f} ms gesamt)",
-				s.downs, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
+			logger::info("[TextureStream]   10 s: verkleinert {} | neu geladen {} ({:.0f} MB, avg {:.0f} ms) | Ladefehler {} | Hin und Her {} | Warteschlange {} | Durchlaeufe {} (avg {:.0f} Frames, {:.0f} Knoten, {:.2f} ms gesamt)",
+				s.downs, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, s.pingPong, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
 				s.passes ? double(s.passNodes) / s.passes : 0.0, s.passes ? s.passMs / s.passes : 0.0);
 			std::size_t remembered = 0;
 			{
