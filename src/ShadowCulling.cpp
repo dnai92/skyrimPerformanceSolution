@@ -1056,8 +1056,8 @@ namespace ShadowCulling
 		}
 		g_pointCameraCount.store(pointCount, std::memory_order_relaxed);
 
-		// Diagnose alle ~600 Frames ins Log
-		if (++g_frameCounter % 600 == 0) {
+		// Diagnose alle ~600 Frames ins Log - nur mit dem Analyse-Protokoll
+		if (++g_frameCounter % 600 == 0 && Config::analysis.load(std::memory_order_relaxed)) {
 			logger::info("[ShadowCulling-Diag] Sonnen-Deskriptoren: {} | Punktlicht-Kameras: {} | Sonnenhoehe sin={:.2f} (~{:.0f} Grad, Schattenfaktor {:.1f})",
 				g_descCount, pointCount, g_sunSin.load(), std::asin(g_sunSin.load()) * 57.2958f, 1.0f / g_sunSin.load());
 			// Kaskaden-Cache: Ziel-Textur und Slice aller Schattenkarten (Sonne + Punktlichter) - teilen sie sich etwas?

@@ -1,5 +1,7 @@
 #include "Stats.h"
 
+#include "Config.h"
+
 namespace Stats
 {
 	namespace
@@ -78,6 +80,20 @@ namespace Stats
 
 			logger::info("---- {} Frames | {:.1f} FPS | Frame avg {:.2f} ms, p99 {:.2f} ms, max {:.2f} ms | NPC-Updates/Frame {:.1f} | VM overstressed {} | Cell-Loads {}",
 				frames, fps, frame.avg, frame.p99, frame.max, npcPerFrame, overstressed, cellLoads);
+
+			// Ohne Analyse-Protokoll nur diese eine Zeile (pro Minute) - Zonen, Zaehler und CSV nur zur Fehlersuche
+			if (!Config::analysis.load(std::memory_order_relaxed)) {
+				for (auto& v : g_zoneMs) {
+					v.clear();
+				}
+				for (auto& v : g_counterValues) {
+					v.clear();
+				}
+				g_frameMs.clear();
+				g_npcUpdatesInWindow = 0;
+				g_windowStart = a_now;
+				return;
+			}
 
 			std::ofstream csv(g_csvPath, std::ios::app);
 			const auto    ts = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -181,7 +197,7 @@ namespace Stats
 		}
 		ResetFrameAccumulators();
 
-		if (now - g_windowStart >= kReportInterval) {
+		if (now - g_windowStart >= (Config::analysis.load(std::memory_order_relaxed) ? kReportInterval : 60s)) {
 			try {
 				WriteReport(now);
 			} catch (...) {

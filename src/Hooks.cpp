@@ -1,5 +1,7 @@
 #include "Hooks.h"
 
+#include "Config.h"
+
 #include "InstancingAnalysis.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
@@ -16,7 +18,7 @@ namespace Hooks
 		void ReportEngineWaits()
 		{
 			static std::uint32_t frames = 0;
-			if (++frames % 600 != 0) {
+			if (++frames % 600 != 0 || !Config::analysis.load(std::memory_order_relaxed)) {
 				return;
 			}
 			std::array<WaitProbe::CallerStat, WaitProbe::kMaxCallers> callers{};
