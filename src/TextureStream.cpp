@@ -1,6 +1,7 @@
 #include "TextureStream.h"
 
 #include "Config.h"
+#include "DetourHelper.h"
 
 #include <condition_variable>
 #include <deque>
@@ -242,6 +243,18 @@ namespace TextureStream
 				g_vramUsage.store(info.currentUsage, std::memory_order_relaxed);
 				g_vramBudget.store(info.budget, std::memory_order_relaxed);
 				g_vramPct.store(100.0f * static_cast<float>(info.currentUsage) / static_cast<float>(info.budget), std::memory_order_relaxed);
+			}
+		}
+
+		// Aus Lade-Threads: Belegung hoechstens alle 100 ms selbst abfragen (im Ladebildschirm laeuft OnFrame nicht)
+		std::atomic<std::int64_t> g_lastVramQuery{ 0 };
+
+		void RefreshVramThrottled()
+		{
+			const auto now = Clock::now().time_since_epoch().count();
+			auto       last = g_lastVramQuery.load(std::memory_order_relaxed);
+			if (now - last >= std::chrono::duration_cast<Clock::duration>(100ms).count() && g_lastVramQuery.compare_exchange_strong(last, now)) {
+				UpdateVram();
 			}
 		}
 
@@ -660,6 +673,9 @@ namespace TextureStream
 				g_diagNoSrc.fetch_add(1, std::memory_order_relaxed);
 				return 0;
 			}
+			if (Config::textureStream.budgetMode) {
+				RefreshVramThrottled();
+			}
 			if (!Config::textureStream.loadReduced || !Config::textureStream.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || !Pressure()) {
 				g_diagOff.fetch_add(1, std::memory_order_relaxed);
 				return 0;
@@ -683,21 +699,23 @@ namespace TextureStream
 			}
 		}
 
-		// ID 108531 +0x44 ruft ID 77301 (Renderer-Textur aus Stream anlegen); r9 = NiSourceTexture + 0x20
-		struct CreateRendererTexture
+		// ID 70716 (NiSourceTexture anlegen, Dateiname @0x20) ruft bei +0x198 per Renderer-vtable (call [rax+0xD0]) das
+		// Anlegen der Renderer-Textur auf. In Vanilla landet das bei ID 108531 -> 77301 -> 77533; mit Mods (gemessen 0.19.5)
+		// kann dort eine fremde Funktion sitzen, die 77533 direkt aufruft -> Textur hier merken, maxsize am Anfang von 77533.
+		struct CreateRenderData
 		{
-			static void* thunk(void* a_1, void* a_stream, std::uint64_t a_flag, std::byte* a_srcPlus20)
+			static void thunk(void* a_renderer, RE::NiSourceTexture* a_src)
 			{
 				g_diagCreate.fetch_add(1, std::memory_order_relaxed);
-				t_loadingSrc = a_srcPlus20 ? reinterpret_cast<RE::NiSourceTexture*>(a_srcPlus20 - 0x20) : nullptr;
-				const auto result = func(a_1, a_stream, a_flag, a_srcPlus20);
-				t_loadingSrc = nullptr;
-				return result;
+				const auto prev = t_loadingSrc;
+				t_loadingSrc = a_src;
+				func(a_renderer, a_src);
+				t_loadingSrc = prev;
 			}
-			static inline REL::Relocation<decltype(thunk)> func;
+			static inline void (*func)(void*, RE::NiSourceTexture*) = nullptr;
 		};
 
-		// ID 77301 +0x62 ruft ID 77533 (DDS laden, DirectXTK) mit maxsize = 0
+		// ID 77533 = DDS laden (DirectXTK-Variante), a5 = maxsize; Detour am Funktionsanfang (jeder Aufrufer)
 		struct LoadDDS
 		{
 			static std::int32_t thunk(void* a_device, void* a_stream, void** a_out, void* a_header, std::uint64_t a_maxSize, std::uint64_t a_6)
@@ -708,7 +726,7 @@ namespace TextureStream
 				}
 				return func(a_device, a_stream, a_out, a_header, a_maxSize, a_6);
 			}
-			static inline REL::Relocation<decltype(thunk)> func;
+			static inline std::int32_t (*func)(void*, void*, void**, void*, std::uint64_t, std::uint64_t) = nullptr;
 		};
 
 		void QueueReload(TexState& a_st, RE::BSGraphics::Texture* a_r, std::uint32_t a_targetEdge)
@@ -1298,11 +1316,45 @@ namespace TextureStream
 
 	void InstallLate()
 	{
+		// Renderer-vtable-Eintrag 0xD0 (von ID 70716+0x198 aufgerufen) umbiegen: Objekt = globaler Zeiger, den 70716 bei
+		// +0x18B laedt (48 8B 0D disp32 = mov rcx, [rip+disp32]). Nach anderen Mods (kDataLoaded) -> deren Funktion bleibt drin.
+		{
+			const auto site = REL::Relocation<std::uintptr_t>{ REL::ID(70716), 0x18B }.address();
+			const auto* code = reinterpret_cast<const std::uint8_t*>(site);
+			const auto* call = reinterpret_cast<const std::uint8_t*>(site + 0xD);
+			if (code[0] == 0x48 && code[1] == 0x8B && code[2] == 0x0D && call[0] == 0xFF && call[1] == 0x90 && call[2] == 0xD0) {
+				const auto global = site + 7 + *reinterpret_cast<const std::int32_t*>(site + 3);
+				const auto object = *reinterpret_cast<void**>(global);
+				if (object) {
+					auto**        vtbl = *reinterpret_cast<void***>(object);
+					std::uint32_t old = 0;
+					if (REX::W32::VirtualProtect(&vtbl[0xD0 / 8], sizeof(void*), 0x40, &old)) {
+						CreateRenderData::func = reinterpret_cast<decltype(CreateRenderData::func)>(vtbl[0xD0 / 8]);
+						vtbl[0xD0 / 8] = reinterpret_cast<void*>(&CreateRenderData::thunk);
+						REX::W32::VirtualProtect(&vtbl[0xD0 / 8], sizeof(void*), old, &old);
+						logger::info("Hook installiert: Renderer-Textur anlegen (vtable 0xD0, bisher 0x{:X}) - Textur fuer DDS-Lader merken",
+							reinterpret_cast<std::uintptr_t>(CreateRenderData::func));
+					}
+				} else {
+					logger::warn("TextureStream: Renderer-Objekt fuer Texturladen noch nicht da - Stufe 3 inaktiv");
+				}
+			} else {
+				logger::warn("TextureStream: Code in ID 70716 nicht wie erwartet - Stufe 3 inaktiv");
+			}
+		}
+
 		const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
 		const auto device = renderer ? renderer->GetRuntimeData().forwarder : nullptr;
 		if (!device) {
 			logger::warn("TextureStream: kein Device fuer Ladeweg-Diagnose");
 			return;
+		}
+		// VRAM-Abfrage schon vor dem ersten Spielstand bereit (Budget-Modus beim allerersten Laden)
+		if (!g_device) {
+			g_device = device;
+			g_context = renderer->GetRuntimeData().context;
+			InitAdapter();
+			UpdateVram();
 		}
 		auto**        vtbl = *reinterpret_cast<void***>(device);
 		std::uint32_t old = 0;
@@ -1323,16 +1375,12 @@ namespace TextureStream
 	void Install()
 	{
 		LoadSizes();
-		auto&                           trampoline = SKSE::GetTrampoline();
-		REL::Relocation<std::uintptr_t> createSite{ REL::ID(108531), 0x44 };
-		REL::Relocation<std::uintptr_t> loadSite{ REL::ID(77301), 0x62 };
-		if (*reinterpret_cast<const std::uint8_t*>(createSite.address()) != 0xE8 || *reinterpret_cast<const std::uint8_t*>(loadSite.address()) != 0xE8) {
-			logger::warn("TextureStream: Lade-Aufrufe nicht gefunden (andere Spielversion/Mod?) - Stufe 3 inaktiv");
+		LoadDDS::func = reinterpret_cast<decltype(LoadDDS::func)>(REL::Relocation<std::uintptr_t>{ REL::ID(77533) }.address());
+		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&LoadDDS::func), reinterpret_cast<void*>(&LoadDDS::thunk)); err != 0) {
+			logger::warn("TextureStream: Detours-Fehler {} an ID 77533 - Stufe 3 inaktiv", err);
 			return;
 		}
-		CreateRendererTexture::func = trampoline.write_call<5>(createSite.address(), CreateRendererTexture::thunk);
-		LoadDDS::func = trampoline.write_call<5>(loadSite.address(), LoadDDS::thunk);
-		logger::info("Hook installiert: Texturladen (ID 108531+0x44, ID 77301+0x62) - gleich verkleinert laden");
+		logger::info("Hook installiert: DDS-Lader (Detour ID 77533) - gleich verkleinert laden");
 	}
 
 	void OnFrame()
