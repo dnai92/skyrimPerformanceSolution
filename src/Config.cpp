@@ -80,7 +80,6 @@ namespace Config
 			b("TextureStream", "bRefill", textureStream.refill);
 			f("TextureStream", "fRefillGapPct", textureStream.refillGapPct);
 			f("TextureStream", "fRamCacheMB", textureStream.ramCacheMB);
-			f("TextureStream", "fRefillMBPerPass", textureStream.refillMBPerPass);
 			f("TextureStream", "fSafetyFactor", textureStream.safetyFactor);
 			f("TextureStream", "fMinEdge", textureStream.minEdge);
 			b("SubtreePruning", "bSun", subtreePruning.sun);
@@ -234,7 +233,6 @@ namespace Config
 		ts.budgetMode = ini.GetBoolValue("TextureStream", "bBudgetMode", ts.budgetMode);
 		ts.refill = ini.GetBoolValue("TextureStream", "bRefill", ts.refill);
 		ts.refillGapPct = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fRefillGapPct", ts.refillGapPct)), 2.0f, 50.0f);
-		ts.refillMBPerPass = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fRefillMBPerPass", ts.refillMBPerPass)), 16.0f, 4096.0f);
 		ts.ramCacheMB = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fRamCacheMB", ts.ramCacheMB)), 0.0f, 16384.0f);
 		ts.budgetStartPct = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetStartPct", ts.budgetStartPct)), 0.0f, 100.0f);
 		ts.safetyFactor = static_cast<float>(ini.GetDoubleValue("TextureStream", "fSafetyFactor", ts.safetyFactor));

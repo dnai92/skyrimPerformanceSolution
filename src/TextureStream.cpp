@@ -1268,24 +1268,20 @@ namespace TextureStream
 					}
 				}
 			}
-			// Auffuellen: so viel, wie bis zur Mitte zwischen Auffuell- und Verkleinerungsschwelle passt, aber gemaechlich
-			// (fRefillMBPerPass pro Durchlauf). Nur Lesen - nutzt eine SSD nicht ab; begrenzt nur die Konkurrenz zum Zellenladen.
+			// Auffuellen: so viel, wie bis zur Mitte zwischen Auffuell- und Verkleinerungsschwelle passt. Ohne Tempolimit -
+			// Streaming liest nur, das nutzt eine SSD nicht ab; der Hintergrund-Thread arbeitet die Auftraege nacheinander ab.
 			if (!refill.empty()) {
 				const double budget = static_cast<double>(g_vramBudget.load(std::memory_order_relaxed));
 				const double usage = static_cast<double>(g_vramUsage.load(std::memory_order_relaxed));
 				double       room = budget * (cfg.budgetStartPct - cfg.refillGapPct / 2.0) / 100.0 - usage;
 				std::ranges::sort(refill, [](const RefillCandidate& a, const RefillCandidate& b) { return a.priority > b.priority; });
-				int    queued = 0;
-				double rate = static_cast<double>(cfg.refillMBPerPass) * 1048576.0;
 				for (const auto& c : refill) {
-					if (queued >= 64 || room < static_cast<double>(c.bytes) || (queued > 0 && rate < static_cast<double>(c.bytes))) {
+					if (room < static_cast<double>(c.bytes)) {
 						break;
 					}
-					rate -= static_cast<double>(c.bytes);
 					if (!c.st->busy) {
 						QueueReload(*c.st, c.r, c.st->FullEdge());
 						room -= static_cast<double>(c.bytes);
-						++queued;
 						++g_stats.refills;
 					}
 				}
