@@ -53,8 +53,10 @@ namespace Config
 			b("ActorShadowCulling", "bPointLights", actorShadowCulling.pointLights);
 			b("LightGatherThrottle", "bEnabled", lightGather.enabled);
 			b("SubtreePruning", "bEnabled", subtreePruning.enabled);
+			b("TextureStream", "bEnabled", textureStream.enabled);
 			b("TextureStream", "bAnalysis", textureStream.analysis);
 			f("TextureStream", "fSafetyFactor", textureStream.safetyFactor);
+			f("TextureStream", "fMinEdge", textureStream.minEdge);
 			b("SubtreePruning", "bSun", subtreePruning.sun);
 			b("SubtreePruning", "bPrecipitation", subtreePruning.precip);
 			f("LightGatherThrottle", "fMinMove", lightGather.minMove);
@@ -199,9 +201,15 @@ namespace Config
 		sp.precip = ini.GetBoolValue("SubtreePruning", "bPrecipitation", sp.precip);
 		logger::info("SubtreePruning: {} | Sonne {} | Punktlicht {} | Regen/Sky {}", sp.enabled ? "AN" : "AUS", sp.sun, sp.point, sp.precip);
 
-		textureStream.analysis = ini.GetBoolValue("TextureStream", "bAnalysis", textureStream.analysis);
-		textureStream.safetyFactor = static_cast<float>(ini.GetDoubleValue("TextureStream", "fSafetyFactor", textureStream.safetyFactor));
-		logger::info("TextureStream: Messung {} | Sicherheitsfaktor {:.1f}", textureStream.analysis ? "AN" : "AUS", textureStream.safetyFactor);
+		auto& ts = textureStream;
+		ts.enabled = ini.GetBoolValue("TextureStream", "bEnabled", ts.enabled);
+		ts.analysis = ini.GetBoolValue("TextureStream", "bAnalysis", ts.analysis);
+		ts.safetyFactor = static_cast<float>(ini.GetDoubleValue("TextureStream", "fSafetyFactor", ts.safetyFactor));
+		ts.minEdge = static_cast<float>(ini.GetDoubleValue("TextureStream", "fMinEdge", ts.minEdge));
+		ts.budgetMs = static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetMs", ts.budgetMs));
+		ts.exclude = ini.GetValue("TextureStream", "sExclude", ts.exclude.c_str());
+		logger::info("TextureStream: {} | Bericht {} | Sicherheitsfaktor {:.1f} | min. {:.0f} px | Budget {:.2f} ms | ausgenommen: {}", ts.enabled ? "AN" : "AUS",
+			ts.analysis, ts.safetyFactor, ts.minEdge, ts.budgetMs, ts.exclude);
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);

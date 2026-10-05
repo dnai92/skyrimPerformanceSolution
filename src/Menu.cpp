@@ -126,9 +126,17 @@ namespace Menu
 			Toggle("Sun / moon shadows##prune", Config::subtreePruning.sun, "Apply in the sun (moon at night) shadow pass.");
 			Toggle("Rain / skylighting map##prune", Config::subtreePruning.precip, "Apply in the precipitation / skylighting occlusion pass.");
 
-			ImGuiMCP::SeparatorText("Texture streaming (stage 0: measuring only)");
-			Toggle("Measure texture needs##ts", Config::textureStream.analysis, "Once per second: how much VRAM the visible textures use and how much streaming could save. Results in SkyrimPerf.log.");
+			ImGuiMCP::SeparatorText("Texture streaming");
+			Toggle("Downscale distant textures##ts", Config::textureStream.enabled, "Textures of far objects (also behind you) are shrunk in VRAM and reloaded at full size from disk when you come closer. Files are never changed. Off = everything goes back to full size.");
+			Toggle("Report in log##ts", Config::textureStream.analysis, "Every 10 s: textures managed, downscaled, VRAM saved, reloads. Results in SkyrimPerf.log.");
 			Slider("Safety factor##ts", Config::textureStream.safetyFactor, 1.0f, 4.0f, "%.1f", "Needed texture size = size on screen x this factor. Higher = sharper, less saving.");
+			if (Slider("Min. size (px)##ts", Config::textureStream.minEdge, 256.0f, 4096.0f, "%.0f", "Textures are never shrunk below this edge length. Higher = safer, less saving.")) {
+				float p = 256.0f;
+				while (p * 1.5f < Config::textureStream.minEdge) {
+					p *= 2.0f;
+				}
+				Config::textureStream.minEdge = p;
+			}
 
 			ImGuiMCP::SeparatorText("Skylighting culling (Community Shaders)");
 			Toggle("Enabled##sky", Config::skylightingCulling.enabled, "Small objects are left out of the skylighting occlusion map.");

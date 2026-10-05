@@ -106,11 +106,15 @@ namespace Config
 	};
 	inline SubtreePruning subtreePruning;  // [SubtreePruning]
 
-	// Texture Streaming (siehe TextureStream.h); Stufe 0 = nur messen
+	// Texture Streaming (siehe TextureStream.h)
 	struct TextureStream
 	{
-		bool  analysis = true;     // Messung + Bericht im Log (1 Frame pro Sekunde)
-		float safetyFactor = 2.0f; // benoetigte Aufloesung = Bildschirmgroesse x Faktor
+		bool        enabled = true;       // Stufe 1: ferne Texturen im VRAM verkleinern / bei Annaeherung neu laden
+		bool        analysis = true;      // 10-s-Bericht im Log
+		float       safetyFactor = 2.0f;  // benoetigte Aufloesung = Bildschirmgroesse x Faktor
+		float       minEdge = 1024.0f;    // nie unter diese Kantenlaenge verkleinern (Zweierpotenz)
+		float       budgetMs = 0.4f;      // Zeit pro Frame fuer den Szenen-Durchlauf
+		std::string exclude = "interface\\,\\maps\\,mapmarker,\\lod\\,terrain\\,fonts\\,book,\\sky\\,effects\\,cubemaps\\";  // Pfadteile (kleingeschrieben), nie verkleinern
 	};
 	inline TextureStream textureStream;  // [TextureStream]
 

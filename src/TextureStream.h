@@ -1,17 +1,21 @@
 #pragma once
 
-// Texture Streaming - Stufe 0 (nur messen, keine Aenderung am Bild):
-// Einmal pro Sekunde wird ein Frame ausgewertet: fuer jede sichtbare Textur (alle Texturen der Materialien sichtbarer
-// Objekte) wird berechnet, wie gross sie beim naechsten Objekt auf dem Bildschirm erscheint und welche Mip-Stufe damit
-// wirklich gebraucht wird. Der 10-s-Bericht zeigt VRAM der sichtbaren Texturen und wie viel Streaming sparen wuerde.
+// Texture Streaming - Stufe 1: Texturen ferner Objekte im VRAM verkleinern, bei Annaeherung neu laden.
 //
-// Benoetigte Aufloesung ~ Bildschirm-Durchmesser des Objekts x Sicherheitsfaktor. Konservativ: Texturen, die sich auf
-// einem Objekt mehrfach wiederholen, brauchen in Wahrheit noch weniger.
+// Bedarf: In kleinen Zeitscheiben (fBudgetMs pro Frame) wird die ganze geladene Szene durchlaufen - auch was hinter
+// der Kamera liegt. Je Textur zaehlt das naechste Objekt, das sie benutzt: benoetigte Kantenlaenge ~ Bildschirm-
+// Durchmesser des Objekts x Sicherheitsfaktor (mindestens fMinEdge).
+//
+// Verkleinern (Main-Thread, Millisekunden): neue Textur ohne die oberen Mip-Stufen anlegen, die kleineren Stufen
+// per GPU-Kopie uebernehmen, im BSGraphics::Texture austauschen. Erst nach zwei Durchlaeufen mit geringem Bedarf.
+// Vergroessern (Hintergrund-Thread): DDS aus Datei/BSA lesen (BSResource), Textur mit den benoetigten Stufen anlegen,
+// Austausch im Main-Thread (SKSE-Task, laeuft auch in Menues). Vorher wird der Datei-Kopf geprueft (Groesse, Format,
+// Mip-Anzahl); nur Texturen, die sich garantiert wieder herstellen lassen, werden verkleinert.
+//
+// Nie veraendert: Dateien auf der Platte; Pfade aus sExclude (Oberflaeche, Karten, LOD, Schriften, Buecher ...).
+// Inventar-/Handels-/Schmiede-Vorschau: Texturen der gezeigten Modelle werden sofort in voller Groesse geladen.
 namespace TextureStream
 {
-	// Aus BSLightingShaderProperty::GetRenderPasses (Hauptszene), nur in Mess-Frames aktiv
-	void OnGeometry(RE::BSGeometry* a_geometry, RE::BSLightingShaderProperty* a_property) noexcept;
-
 	// Einmal pro Frame (Main-Thread)
 	void OnFrame();
 }

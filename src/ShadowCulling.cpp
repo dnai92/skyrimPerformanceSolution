@@ -581,8 +581,6 @@ namespace ShadowCulling
 				const auto passes = func(a_this, a_geometry, a_renderFlags, a_accumulator);
 				if (passes && passes->head && a_geometry && ShouldCullMain(*a_geometry)) {
 					passes->Clear();
-				} else if (passes && passes->head) {
-					TextureStream::OnGeometry(a_geometry, a_this);
 				}
 				return passes;
 			}
