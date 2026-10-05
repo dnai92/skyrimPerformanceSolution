@@ -7,6 +7,7 @@
 #include "Config.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
+#include "TextureStream.h"
 #include "WaitProbe.h"
 
 namespace
@@ -45,6 +46,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	ShadowCulling::Install();
 	InstancingAnalysis::Install();
 	LightGather::Install();
+	TextureStream::Install();
 
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
 	return true;

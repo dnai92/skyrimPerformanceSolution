@@ -516,6 +516,129 @@ namespace TextureStream
 			return p;
 		}
 
+		// ---------------- Stufe 3: gemerkte Groessen fuer das Laden (Lade-Threads lesen, Main-Thread schreibt) ----------------
+
+		std::mutex                                     g_sizeLock;
+		std::unordered_map<std::string, std::uint32_t> g_loadEdge;  // Pfad -> max. Kantenlaenge beim Laden
+		bool                                           g_sizesDirty = false;
+		std::atomic<std::uint32_t>                     g_loadedReduced{ 0 };
+		thread_local RE::NiSourceTexture*              t_loadingSrc = nullptr;
+
+		std::filesystem::path SizesFile()
+		{
+			auto dir = SKSE::log::log_directory();
+			return dir ? *dir / "SkyrimPerf_TextureSizes.txt" : std::filesystem::path{};
+		}
+
+		// a_edge 0 = vergessen (wird wieder voll geladen)
+		void RememberEdge(const std::string& a_path, std::uint32_t a_edge)
+		{
+			if (a_path.empty()) {
+				return;
+			}
+			std::scoped_lock lock(g_sizeLock);
+			if (a_edge == 0) {
+				g_sizesDirty |= g_loadEdge.erase(a_path) > 0;
+			} else if (auto& e = g_loadEdge[a_path]; e != a_edge) {
+				e = a_edge;
+				g_sizesDirty = true;
+			}
+		}
+
+		bool HasRememberedEdge(const std::string& a_path)
+		{
+			std::scoped_lock lock(g_sizeLock);
+			return g_loadEdge.contains(a_path);
+		}
+
+		void LoadSizes()
+		{
+			std::ifstream in(SizesFile());
+			std::string   line;
+			std::size_t   n = 0;
+			while (std::getline(in, line)) {
+				const auto bar = line.find('|');
+				if (bar == std::string::npos) {
+					continue;
+				}
+				const auto edge = static_cast<std::uint32_t>(std::strtoul(line.c_str(), nullptr, 10));
+				if (edge >= 64) {
+					g_loadEdge[line.substr(bar + 1)] = edge;
+					++n;
+				}
+			}
+			logger::info("TextureStream: {} gemerkte Texturgroessen geladen", n);
+		}
+
+		void SaveSizes()
+		{
+			std::vector<std::pair<std::string, std::uint32_t>> copy;
+			{
+				std::scoped_lock lock(g_sizeLock);
+				if (!g_sizesDirty) {
+					return;
+				}
+				g_sizesDirty = false;
+				copy.assign(g_loadEdge.begin(), g_loadEdge.end());
+			}
+			const auto    file = SizesFile();
+			const auto    tmp = std::filesystem::path(file).concat(".tmp");
+			std::ofstream out(tmp, std::ios::trunc);
+			for (const auto& [path, edge] : copy) {
+				out << edge << '|' << path << '\n';
+			}
+			out.close();
+			std::error_code ec;
+			std::filesystem::rename(tmp, file, ec);
+		}
+
+		// Lade-Thread: maxsize fuer die gerade geladene Textur (0 = unbegrenzt)
+		std::uint64_t LoadMaxSize() noexcept
+		{
+			const auto src = t_loadingSrc;
+			if (!src || !Config::textureStream.loadReduced || !Config::textureStream.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+				return 0;
+			}
+			try {
+				const auto path = NormalizePath(src->name.c_str());
+				std::scoped_lock lock(g_sizeLock);
+				const auto it = g_loadEdge.find(path);
+				if (it == g_loadEdge.end()) {
+					return 0;
+				}
+				g_loadedReduced.fetch_add(1, std::memory_order_relaxed);
+				return std::max<std::uint32_t>(it->second, static_cast<std::uint32_t>(Config::textureStream.minEdge));
+			} catch (...) {
+				return 0;
+			}
+		}
+
+		// ID 108531 +0x44 ruft ID 77301 (Renderer-Textur aus Stream anlegen); r9 = NiSourceTexture + 0x20
+		struct CreateRendererTexture
+		{
+			static void* thunk(void* a_1, void* a_stream, std::uint64_t a_flag, std::byte* a_srcPlus20)
+			{
+				t_loadingSrc = a_srcPlus20 ? reinterpret_cast<RE::NiSourceTexture*>(a_srcPlus20 - 0x20) : nullptr;
+				const auto result = func(a_1, a_stream, a_flag, a_srcPlus20);
+				t_loadingSrc = nullptr;
+				return result;
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// ID 77301 +0x62 ruft ID 77533 (DDS laden, DirectXTK) mit maxsize = 0
+		struct LoadDDS
+		{
+			static std::int32_t thunk(void* a_device, void* a_stream, void** a_out, void* a_header, std::uint64_t a_maxSize, std::uint64_t a_6)
+			{
+				if (a_maxSize == 0) {
+					a_maxSize = LoadMaxSize();
+				}
+				return func(a_device, a_stream, a_out, a_header, a_maxSize, a_6);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		void QueueReload(TexState& a_st, RE::BSGraphics::Texture* a_r, std::uint32_t a_targetEdge)
 		{
 			std::uint32_t skip = 0;
@@ -583,6 +706,11 @@ namespace TextureStream
 					st.path = NormalizePath(a_src->name.c_str());
 					st.eligible = d.arraySize == 1 && d.sampleDesc.count == 1 && !(d.miscFlags & 0x4) && d.mipLevels > 1 && st.fi.bytes > 0 &&
 					              st.path.starts_with("textures\\") && st.path.ends_with(".dds") && !Excluded(st.path);
+					// Evtl. schon verkleinert geladen (Stufe 3) -> Originalgroesse sofort aus der Datei holen, damit
+					// ein naheliegendes Objekt gleich wieder die volle Groesse bekommt
+					if (st.eligible && !st.busy && HasRememberedEdge(st.path)) {
+						QueueProbe(st, r);
+					}
 				}
 			}
 			st.lastSeen = Clock::now();
@@ -681,6 +809,7 @@ namespace TextureStream
 			st.curH = desc.height;
 			st.curMips = desc.mipLevels;
 			st.hold = a_job.src;
+			RememberEdge(st.path, st.CurEdge());
 			++g_stats.downs;
 		}
 
@@ -764,6 +893,7 @@ namespace TextureStream
 				st.curW = std::max(1u, job.fullW >> job.skip);
 				st.curH = std::max(1u, job.fullH >> job.skip);
 				st.curMips = job.fullMips - job.skip;
+				RememberEdge(st.path, st.Reduced() ? st.CurEdge() : 0);
 				++g_stats.ups;
 				g_stats.upMs += res.ms;
 				g_stats.upMB += res.mb;
@@ -957,12 +1087,39 @@ namespace TextureStream
 			logger::info("[TextureStream]   10 s: verkleinert {} | neu geladen {} ({:.0f} MB, avg {:.0f} ms) | Ladefehler {} | Warteschlange {} | Durchlaeufe {} (avg {:.0f} Frames, {:.0f} Knoten, {:.2f} ms gesamt)",
 				s.downs, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
 				s.passes ? double(s.passNodes) / s.passes : 0.0, s.passes ? s.passMs / s.passes : 0.0);
+			std::size_t remembered = 0;
+			{
+				std::scoped_lock lock(g_sizeLock);
+				remembered = g_loadEdge.size();
+			}
+			logger::info("[TextureStream]   Stufe 3: {} | gleich verkleinert geladen {} | gemerkte Groessen {}", Config::textureStream.loadReduced ? "AN" : "AUS",
+				g_loadedReduced.exchange(0), remembered);
 			g_stats = {};
 		}
 	}
 
+	void Install()
+	{
+		LoadSizes();
+		auto&                           trampoline = SKSE::GetTrampoline();
+		REL::Relocation<std::uintptr_t> createSite{ REL::ID(108531), 0x44 };
+		REL::Relocation<std::uintptr_t> loadSite{ REL::ID(77301), 0x62 };
+		if (*reinterpret_cast<const std::uint8_t*>(createSite.address()) != 0xE8 || *reinterpret_cast<const std::uint8_t*>(loadSite.address()) != 0xE8) {
+			logger::warn("TextureStream: Lade-Aufrufe nicht gefunden (andere Spielversion/Mod?) - Stufe 3 inaktiv");
+			return;
+		}
+		CreateRendererTexture::func = trampoline.write_call<5>(createSite.address(), CreateRendererTexture::thunk);
+		LoadDDS::func = trampoline.write_call<5>(loadSite.address(), LoadDDS::thunk);
+		logger::info("Hook installiert: Texturladen (ID 108531+0x44, ID 77301+0x62) - gleich verkleinert laden");
+	}
+
 	void OnFrame()
 	{
+		static Clock::time_point lastSave = Clock::now();
+		if (Clock::now() - lastSave >= 60s) {
+			lastSave = Clock::now();
+			SaveSizes();
+		}
 		static Clock::time_point lastReport = Clock::now();
 		const auto&              cfg = Config::textureStream;
 		const auto               now = Clock::now();

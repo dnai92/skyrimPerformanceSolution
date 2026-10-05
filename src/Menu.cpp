@@ -312,6 +312,9 @@ namespace Menu
 			Toggle(T("Downscale distant textures##ts", "Ferne Texturen verkleinern##ts"), Config::textureStream.enabled,
 				T("Textures of far objects (also behind you) are shrunk in VRAM and reloaded at full size from disk when you come closer. Files are never changed. Off = everything goes back to full size.",
 					"Texturen ferner Objekte (auch hinter dir) werden im VRAM verkleinert und bei Annäherung in voller Größe von der Platte neu geladen. Dateien werden nie verändert. Aus = alles wieder in voller Größe."));
+			Toggle(T("Load at remembered size##ts", "Gleich in gemerkter Größe laden##ts"), Config::textureStream.loadReduced,
+				T("The size a texture needed last time (also in earlier sessions) is used directly when the game loads it again. Less VRAM peak and loading when entering areas.",
+					"Die zuletzt benötigte Größe einer Textur (auch aus früheren Sitzungen) wird direkt beim Laden verwendet. Weniger VRAM-Spitze und Laden beim Betreten von Gebieten."));
 			Toggle(T("Report in log##ts", "Bericht im Log##ts"), Config::textureStream.analysis,
 				T("Every 10 s: textures managed, downscaled, VRAM saved, reloads. Results in SkyrimPerf.log.",
 					"Alle 10 s: verwaltete und verkleinerte Texturen, gesparter VRAM, Neuladungen. Ergebnisse in SkyrimPerf.log."));

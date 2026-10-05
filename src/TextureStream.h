@@ -14,8 +14,17 @@
 //
 // Nie veraendert: Dateien auf der Platte; Pfade aus sExclude (Oberflaeche, Karten, LOD, Schriften, Buecher ...).
 // Inventar-/Handels-/Schmiede-Vorschau: Texturen der gezeigten Modelle werden sofort in voller Groesse geladen.
+//
+// Stufe 3 - gleich verkleinert laden: Das Spiel laedt DDS-Dateien ueber eine DirectXTK-Variante (ID 77533 ->
+// 77539 CreateTextureFromDDS) mit Parameter maxsize, den es immer auf 0 (= unbegrenzt) setzt. Wir merken uns je Pfad
+// die zuletzt benoetigte Kantenlaenge (auch ueber Spielsitzungen, SkyrimPerf_TextureSizes.txt im SKSE-Log-Ordner)
+// und geben sie beim naechsten Laden als maxsize mit -> die oberen Mip-Stufen werden gar nicht erst gelesen/angelegt.
+// Kette: NiSourceTexture-Ladefunktion ID 108531 (+0x44) -> ID 77301 (+0x62) -> ID 77533.
 namespace TextureStream
 {
+	// Lade-Hooks + gemerkte Groessen (beim Laden des Plugins)
+	void Install();
+
 	// Einmal pro Frame (Main-Thread)
 	void OnFrame();
 }

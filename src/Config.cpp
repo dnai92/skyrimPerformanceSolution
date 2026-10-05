@@ -74,6 +74,7 @@ namespace Config
 			b("SubtreePruning", "bEnabled", subtreePruning.enabled);
 			b("TextureStream", "bEnabled", textureStream.enabled);
 			b("TextureStream", "bAnalysis", textureStream.analysis);
+			b("TextureStream", "bLoadReduced", textureStream.loadReduced);
 			f("TextureStream", "fSafetyFactor", textureStream.safetyFactor);
 			f("TextureStream", "fMinEdge", textureStream.minEdge);
 			b("SubtreePruning", "bSun", subtreePruning.sun);
@@ -223,6 +224,7 @@ namespace Config
 		auto& ts = textureStream;
 		ts.enabled = ini.GetBoolValue("TextureStream", "bEnabled", ts.enabled);
 		ts.analysis = ini.GetBoolValue("TextureStream", "bAnalysis", ts.analysis);
+		ts.loadReduced = ini.GetBoolValue("TextureStream", "bLoadReduced", ts.loadReduced);
 		ts.safetyFactor = static_cast<float>(ini.GetDoubleValue("TextureStream", "fSafetyFactor", ts.safetyFactor));
 		ts.minEdge = static_cast<float>(ini.GetDoubleValue("TextureStream", "fMinEdge", ts.minEdge));
 		ts.budgetMs = static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetMs", ts.budgetMs));
