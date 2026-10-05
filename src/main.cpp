@@ -1,6 +1,7 @@
 #include "Hooks.h"
 #include "Hotkey.h"
 #include "InstancingAnalysis.h"
+#include "EngineTimers.h"
 #include "LightGather.h"
 #include "Menu.h"
 #include "Config.h"
@@ -43,6 +44,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	ShadowCulling::Install();
 	InstancingAnalysis::Install();
 	LightGather::Install();
+	EngineTimers::Install();
 
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
 	return true;

@@ -16,6 +16,8 @@ namespace Stats
 		CbpcWaitMain,         // Main-Thread wartet in cbp.dll
 		GameWaitMain,         // Main-Thread wartet in SkyrimSE.exe selbst (Engine-Spin-Waits)
 		LightGather,          // Licht-Geometrie-Zuordnung dynamischer Punktlichter (tatsaechlich ausgefuehrt)
+		PrecipMask,           // Precipitation::SetupMask (Szenen-Durchlauf Regen-/Skylighting-Karte)
+		MainCull,             // Szenen-Durchlauf der Hauptkamera (ID 32174)
 
 		kTotal
 	};
@@ -31,6 +33,8 @@ namespace Stats
 		"CBPC Warten (Main)",
 		"Engine Warten (Main)",
 		"Licht-Zuordnung",
+		"Regen/Sky-Karte",
+		"Hauptkamera-Culling",
 	};
 
 	// Zaehler pro Frame (Meshes, die in Culling-Listen aufgenommen bzw. verworfen werden)
