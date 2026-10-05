@@ -570,6 +570,10 @@ namespace TextureStream
 		std::unordered_map<std::string, std::uint32_t> g_loadEdge;  // Pfad -> max. Kantenlaenge beim Laden
 		bool                                           g_sizesDirty = false;
 		std::atomic<std::uint32_t>                     g_loadedReduced{ 0 };
+		// Diagnose Stufe 3 (je Berichtszeitraum)
+		std::atomic<std::uint32_t> g_diagCreate{ 0 }, g_diagDDS{ 0 }, g_diagNoSrc{ 0 }, g_diagMiss{ 0 }, g_diagOff{ 0 };
+		std::mutex                 g_missLock;
+		std::vector<std::string>   g_missSamples;
 		thread_local RE::NiSourceTexture*              t_loadingSrc = nullptr;
 
 		std::filesystem::path SizesFile()
@@ -644,7 +648,12 @@ namespace TextureStream
 		std::uint64_t LoadMaxSize() noexcept
 		{
 			const auto src = t_loadingSrc;
-			if (!src || !Config::textureStream.loadReduced || !Config::textureStream.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || !Pressure()) {
+			if (!src) {
+				g_diagNoSrc.fetch_add(1, std::memory_order_relaxed);
+				return 0;
+			}
+			if (!Config::textureStream.loadReduced || !Config::textureStream.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || !Pressure()) {
+				g_diagOff.fetch_add(1, std::memory_order_relaxed);
 				return 0;
 			}
 			try {
@@ -652,6 +661,11 @@ namespace TextureStream
 				std::scoped_lock lock(g_sizeLock);
 				const auto it = g_loadEdge.find(path);
 				if (it == g_loadEdge.end()) {
+					g_diagMiss.fetch_add(1, std::memory_order_relaxed);
+					std::scoped_lock missLock(g_missLock);
+					if (g_missSamples.size() < 5) {
+						g_missSamples.push_back(path);
+					}
 					return 0;
 				}
 				g_loadedReduced.fetch_add(1, std::memory_order_relaxed);
@@ -666,6 +680,7 @@ namespace TextureStream
 		{
 			static void* thunk(void* a_1, void* a_stream, std::uint64_t a_flag, std::byte* a_srcPlus20)
 			{
+				g_diagCreate.fetch_add(1, std::memory_order_relaxed);
 				t_loadingSrc = a_srcPlus20 ? reinterpret_cast<RE::NiSourceTexture*>(a_srcPlus20 - 0x20) : nullptr;
 				const auto result = func(a_1, a_stream, a_flag, a_srcPlus20);
 				t_loadingSrc = nullptr;
@@ -679,6 +694,7 @@ namespace TextureStream
 		{
 			static std::int32_t thunk(void* a_device, void* a_stream, void** a_out, void* a_header, std::uint64_t a_maxSize, std::uint64_t a_6)
 			{
+				g_diagDDS.fetch_add(1, std::memory_order_relaxed);
 				if (a_maxSize == 0) {
 					a_maxSize = LoadMaxSize();
 				}
@@ -1164,6 +1180,15 @@ namespace TextureStream
 				Config::textureStream.budgetStartPct, Pressure() ? "verkleinern" : "genug Platz");
 			logger::info("[TextureStream]   Stufe 3: {} | gleich verkleinert geladen {} | gemerkte Groessen {}", Config::textureStream.loadReduced ? "AN" : "AUS",
 				g_loadedReduced.exchange(0), remembered);
+			logger::info("[TextureStream]   Stufe 3 Diagnose: Ladeaufrufe {} | DDS {} | ohne Textur {} | aus/kein Druck {} | Pfad unbekannt {}", g_diagCreate.exchange(0),
+				g_diagDDS.exchange(0), g_diagNoSrc.exchange(0), g_diagOff.exchange(0), g_diagMiss.exchange(0));
+			{
+				std::scoped_lock missLock(g_missLock);
+				for (const auto& m : g_missSamples) {
+					logger::info("[TextureStream]     unbekannt: {}", m);
+				}
+				g_missSamples.clear();
+			}
 			g_stats = {};
 		}
 	}
