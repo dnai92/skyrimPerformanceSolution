@@ -27,8 +27,21 @@ namespace Config
 		{
 			CSimpleIniA ini;
 			ini.SetUnicode();
-			const auto b = [&](const char* s, const char* k, bool v) { ini.SetBoolValue(s, k, v); };
-			const auto f = [&](const char* s, const char* k, float v) { ini.SetDoubleValue(s, k, v, nullptr, true); };
+			// Nur Abweichungen von SkyrimPerf.ini speichern - sonst ueberdecken alte Vorgaben spaeter geaenderte Standards
+			// (so blieben bPointLights=true und fMinDistance=2500 aus alten Versionen haengen).
+			CSimpleIniA base;
+			base.SetUnicode();
+			const bool haveBase = base.LoadFile(kPath) >= 0;
+			const auto b = [&](const char* s, const char* k, bool v) {
+				if (!haveBase || !base.GetValue(s, k) || base.GetBoolValue(s, k, v) != v) {
+					ini.SetBoolValue(s, k, v);
+				}
+			};
+			const auto f = [&](const char* s, const char* k, float v) {
+				if (!haveBase || !base.GetValue(s, k) || std::abs(base.GetDoubleValue(s, k, v) - v) > 1e-4 * std::max(1.0, std::abs(double(v)))) {
+					ini.SetDoubleValue(s, k, v, nullptr, true);
+				}
+			};
 			b("General", "bAnalysis", analysis.load());
 			const auto rule = [&](const char* s, const CullRule& r) {
 				b(s, "bEnabled", r.enabled);
