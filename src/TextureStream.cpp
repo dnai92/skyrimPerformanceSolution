@@ -26,15 +26,19 @@ namespace TextureStream
 			float         neededPx;  // benoetigte Kantenlaenge in Texeln
 		};
 
+		constexpr std::uint32_t kMaxTextures = 128;
+
 		// Texturen eines Materials lesen, ohne D3D-Objekte anzufassen. SEH-geschuetzt: ein ungueltiger Zeiger
 		// (Textur wird gerade geladen/entladen) fuehrt nur zum Ueberspringen, nicht zum Absturz.
 		int SafeGather(RE::BSLightingShaderMaterialBase* a_material, RawTex* a_out, int a_max) noexcept
 		{
 			__try {
-				RE::NiSourceTexture* textures[16]{};
+				// GetTextures schreibt ohne Groessenangabe: Landschaft (vanilla) bis 18 Texturen (4 + 6 Schichten x 2 + 2),
+				// Community Shaders (PBR) evtl. mehr. 0.17.0/0.17.1 hatten Platz fuer 16 -> Stack-Ueberlauf, Absturz beim Laden.
+				RE::NiSourceTexture* textures[kMaxTextures]{};
 				std::uint32_t        count = a_material->GetTextures(textures);
-				if (count > 16) {
-					count = 16;
+				if (count > kMaxTextures) {
+					count = kMaxTextures;
 				}
 				int n = 0;
 				for (std::uint32_t i = 0; i < count && n < a_max; ++i) {
@@ -183,8 +187,8 @@ namespace TextureStream
 		const float dist = std::sqrt(dx * dx + dy * dy + dz * dz) - b.radius;
 		const float neededPx = dist <= 1.0f ? 1.0e6f : 2.0f * b.radius / dist * g_pixelsPerUnitAtDistance1;
 
-		RawTex    raw[16];
-		const int count = SafeGather(material, raw, 16);
+		RawTex    raw[32];
+		const int count = SafeGather(material, raw, 32);
 		if (count <= 0) {
 			return;
 		}
