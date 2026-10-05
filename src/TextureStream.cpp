@@ -218,30 +218,42 @@ namespace TextureStream
 		std::uint32_t g_failLogged = 0;
 
 		// ---------------- verzoegerte Freigabe (Render-Jobs koennten den alten Zeiger noch halten) ----------------
-		std::vector<std::pair<Clock::time_point, W::IUnknown*>> g_deferred;
+		// Grosse Texturen gebuendelt freizugeben liess den Treiber haengen (0.18.3: 180-255-ms-Frames bei Wellen von
+		// >1000 Verkleinerungen) -> hoechstens kReleaseBytesPerCall pro Aufruf, aelteste zuerst.
+		struct Deferred
+		{
+			Clock::time_point time;
+			W::IUnknown*      obj;
+			std::uint64_t     bytes;
+		};
+		std::deque<Deferred>    g_deferred;
+		constexpr std::uint64_t kReleaseBytesPerCall = 64ull << 20;
 
-		void DeferRelease(W::IUnknown* a_obj)
+		void DeferRelease(W::IUnknown* a_obj, std::uint64_t a_bytes = 0)
 		{
 			if (a_obj) {
-				g_deferred.emplace_back(Clock::now(), a_obj);
+				g_deferred.push_back({ Clock::now(), a_obj, a_bytes });
 			}
 		}
 
 		void ProcessDeferred()
 		{
-			const auto now = Clock::now();
-			std::erase_if(g_deferred, [&](const auto& a_e) {
-				if (now - a_e.first < 500ms) {
-					return false;
+			const auto    now = Clock::now();
+			std::uint64_t released = 0;
+			while (!g_deferred.empty() && now - g_deferred.front().time >= 500ms) {
+				const auto& e = g_deferred.front();
+				if (released > 0 && released + e.bytes > kReleaseBytesPerCall) {
+					break;
 				}
-				a_e.second->Release();
-				return true;
-			});
+				released += e.bytes;
+				e.obj->Release();
+				g_deferred.pop_front();
+			}
 		}
 
-		void Swap(RE::BSGraphics::Texture* a_r, W::ID3D11Texture2D* a_tex, W::ID3D11ShaderResourceView* a_srv)
+		void Swap(RE::BSGraphics::Texture* a_r, W::ID3D11Texture2D* a_tex, W::ID3D11ShaderResourceView* a_srv, std::uint64_t a_oldBytes)
 		{
-			DeferRelease(a_r->texture);
+			DeferRelease(a_r->texture, a_oldBytes);
 			DeferRelease(a_r->resourceView);
 			a_r->texture = a_tex;
 			a_r->resourceView = a_srv;
@@ -604,8 +616,10 @@ namespace TextureStream
 		};
 		std::deque<DownJob> g_down;
 
-		void Downscale(const DownJob& a_job)
+		// a_freed: frei werdender Speicher (fuer das Budget pro Frame)
+		void Downscale(const DownJob& a_job, std::uint64_t& a_freed)
 		{
+			a_freed = 0;
 			const auto it = g_tex.find(a_job.r);
 			if (it == g_tex.end()) {
 				return;
@@ -659,7 +673,9 @@ namespace TextureStream
 			for (std::uint32_t i = 0; i < desc.mipLevels; ++i) {
 				g_context->CopySubresourceRegion(tex, i, 0, 0, 0, st.res, i + drop, nullptr);
 			}
-			Swap(r, tex, srv);
+			const auto oldBytes = ChainBytes(st.fi, st.curW, st.curH, st.curMips);
+			Swap(r, tex, srv, oldBytes);
+			a_freed = oldBytes - ChainBytes(st.fi, desc.width, desc.height, desc.mipLevels);
 			st.res = tex;
 			st.curW = desc.width;
 			st.curH = desc.height;
@@ -743,7 +759,7 @@ namespace TextureStream
 					continue;
 				}
 				auto& st = it->second;
-				Swap(job.r, res.tex, res.srv);
+				Swap(job.r, res.tex, res.srv, ChainBytes(st.fi, st.curW, st.curH, st.curMips));
 				st.res = res.tex;
 				st.curW = std::max(1u, job.fullW >> job.skip);
 				st.curH = std::max(1u, job.fullH >> job.skip);
@@ -982,11 +998,18 @@ namespace TextureStream
 			return;
 		}
 
-		// Verkleinern: wenige pro Frame (Anlegen + Kopie kostet je ~0,1 ms)
-		for (int i = 0; i < 4 && !g_down.empty(); ++i) {
+		// Verkleinern nach Datenmenge: hoechstens ~64 MB frei werdender Speicher pro Frame (mind. eine Textur),
+		// und nicht, solange noch viel alter Speicher auf Freigabe wartet
+		std::uint64_t freedThisFrame = 0;
+		for (int i = 0; i < 8 && !g_down.empty() && g_deferred.size() < 64; ++i) {
 			const auto job = std::move(g_down.front());
 			g_down.pop_front();
-			Downscale(job);
+			std::uint64_t freed = 0;
+			Downscale(job, freed);
+			freedThisFrame += freed;
+			if (freedThisFrame >= kReleaseBytesPerCall) {
+				break;
+			}
 		}
 
 		// Durchlauf in Zeitscheiben
