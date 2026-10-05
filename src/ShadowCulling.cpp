@@ -617,10 +617,12 @@ namespace ShadowCulling
 			return ref && (ref->GetFormType() == RE::FormType::ActorCharacter);
 		}
 
-		const RE::BSCullingProcess* PrecipCuller() noexcept
+		// Kamera der Niederschlags-/Skylighting-Verdeckungskarte. Erkennung ueber die Kamera, nicht ueber den Culler:
+		// das Spiel verteilt den Durchlauf auf Kopien des Cullers (Zeigervergleich traf nie).
+		const RE::NiCamera* PrecipCamera() noexcept
 		{
 			const auto sky = RE::Sky::GetSingleton();
-			return sky && sky->precip ? sky->precip->occlusionData.cullingProcess : nullptr;
+			return sky && sky->precip ? sky->precip->occlusionData.camera.get() : nullptr;
 		}
 
 		// true = Knoten samt Inhalt ueberspringen
@@ -641,7 +643,7 @@ namespace ShadowCulling
 				}
 				return false;
 			}
-			if (a_this == PrecipCuller()) {
+			if (a_this->camera && a_this->camera == PrecipCamera()) {
 				const auto& sky = Config::skylightingCulling;
 				if (sky.enabled && bound.radius < sky.minRadius) {
 					Stats::Count(Stats::Counter::PrunedPrecip);
