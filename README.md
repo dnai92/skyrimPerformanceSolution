@@ -1,43 +1,122 @@
 # SkyrimPerf
 
-SKSE-Profiling-Plugin für Skyrim AE (getestet gegen 1.6.1170). Misst die CPU-Seite des Main-Threads,
-um Performance-Engpässe gezielt zu finden, statt zu raten.
+SKSE plugin that makes **Skyrim Special Edition / Anniversary Edition** run smoother on heavily modded setups —
+without touching a single game file. It cuts draw calls in the shadow passes, removes redundant per-frame engine work
+and **streams textures by distance**, so a 12 GB GPU no longer runs out of VRAM in cities.
 
-## Was gemessen wird
+Everything can be toggled live in an in-game menu (English / German, follows the game language) and with one hotkey,
+so you can compare with and without the plugin at any time.
 
-| Messpunkt | Hook (vtable, Address Library) | Bedeutung |
+> 🇩🇪 Deutsche Kurzbeschreibung weiter unten.
+
+---
+
+## Features
+
+| Feature | What it does | Default |
 |---|---|---|
-| Frame | `PlayerCharacter::Update` (0xAD) | 1× pro Spiel-Frame → Frame-Grenze |
-| Player Update | `PlayerCharacter::Update` (0xAD) | Update des Spielers |
-| NPC Actor::Update | `Character::Update` (0xAD) | Summe aller aktiven NPCs pro Frame (in Tracy mit Namen) |
-| Papyrus VM Update | `VirtualMachine::Update` (0x04) | Skriptausführung pro Frame |
-| Papyrus Tasklets | `VirtualMachine::UpdateTasklets` (0x05) | Latente Native-Calls |
-| VM overstressed | `VirtualMachine::SetOverstressed` (0x06) | Papyrus-Überlast-Ereignisse |
-| Cell-Loads, Menüs | Event-Sinks | Markierungen in der Tracy-Zeitleiste |
+| **Texture streaming** | Textures of far objects (also behind the camera) are shrunk in VRAM by dropping their top mip levels on the GPU, and reloaded at full size from disk/BSA in the background when you come closer. Files on disk are never changed. UI, maps, LOD, fonts and books are excluded; items in inventory/barter/crafting previews are always shown at full size. | ON, min. 512–1024 px |
+| **Sun shadow culling** | Small, far objects do not cast sun shadows. Shadow length is taken into account (no culling below 25° sun elevation). | ON |
+| **Torch / point light shadow culling** | Small, far objects do not cast shadows from torches and fires. | ON |
+| **Character shadow culling** | Characters and creatures far away (default 50 m, min. 30 m) do not cast shadows. | ON |
+| **Skylighting culling** | Small objects are left out of the Community Shaders skylighting / precipitation occlusion map. | ON |
+| **Decal culling** | Small decals (footprints, blood, dirt) far away are not drawn. | ON |
+| **Shadow instancing** | Identical simple meshes in the sun shadow pass are drawn with one instanced draw call. | ON |
+| **Light assignment throttle** | Moving lights (torches, flickering lights) only re-search the geometry they light when they actually moved — the engine does this for every dynamic light every frame. | ON |
+| **Subtree pruning** | Whole scene-graph branches are skipped in the sun shadow and skylighting passes when the branch as a whole already meets the culling rule. Same result, less traversal. | ON |
+| **In-game menu** | All switches and sliders via SKSE Menu Framework, English and German, saved automatically. | — |
+| **Hotkey** | One key toggles every optimization (default *Page Up*, freely assignable in the menu). | — |
+| **Profiling** | 10-second report in `SkyrimPerf.log` (FPS, frame p99/max, counters per optimization), optional Tracy timeline. | — |
 
-Keine festen Offsets, nur vtable-Einträge aus CommonLibSSE-NG → robust gegenüber Spielupdates.
+Experimental and **off** by default (known side effects): depth pre-pass culling, main view micro culling, far shadow
+cascade cache.
 
-## Ausgaben
+## Numbers and facts
 
-1. **Log** – `Documents\My Games\Skyrim Special Edition\SKSE\SkyrimPerf.log`: alle 10 s eine Zusammenfassung
-   (FPS, Frame avg/p99/max, Anteil jeder Zone an der Frame-Zeit).
-2. **CSV** – `...\SKSE\SkyrimPerf.csv`: dieselben Werte maschinenlesbar (wird bei jedem Spielstart neu angelegt).
-3. **Tracy** (optional) – Live-Zeitleiste. Tracy-Profiler **v0.14.x** starten
-   (https://github.com/wolfpld/tracy/releases), Spiel starten, im Profiler auf *Connect* (localhost).
-   Solange kein Profiler verbunden ist, sammelt das Plugin keine Tracy-Daten (`TRACY_ON_DEMAND`).
+Measured on the author's setup: Ryzen 7 5700X, RTX 4070 12 GB, 1920×1200, Skyrim AE 1.6.1170, ~380 plugins,
+Community Shaders with DLSS + frame generation, Skyrim 202X 4K textures. Location: Whiterun market.
 
-**Nicht erfasst:** GPU-Zeiten, Render-Submission, FSMP/CBPC-Physik. Deren Anteil steckt in
-„Frame-Zeit minus gemessene Zonen“. Für CPU vs. GPU: Intel PresentMon („GPU Busy“).
+### Texture streaming
 
-## Bauen
+| | Streaming OFF | Streaming ON |
+|---|---|---|
+| Skyrim dedicated VRAM (outside a town) | 9.9 GB | **5.4 GB** |
+| Skyrim dedicated VRAM (Whiterun market) | ~10.5 GB + up to 600 MB swapped to system RAM | **5.4 GB**, ~45 MB swapped |
+| Downscaled textures (market) | — | ~1,300 textures: **0.33 GB instead of 7.0–7.9 GB** |
+| Visible quality difference | — | none noticed in A/B screenshots |
+| Reload to full size | — | ~10 ms per texture, 4–4.5 GB in ~8 s, **0 errors in > 30 GB reloaded** |
+| Cost of the scene scan | — | ~0.4 ms per frame (time-sliced) |
 
-Voraussetzungen: VS 2022 Build Tools (C++), vcpkg unter `C:\dev\vcpkg`.
+### Engine work and draw calls
+
+| Optimization | Before | After |
+|---|---|---|
+| Light assignment (dynamic lights, market) | 2.45 ms / frame | **0.13–0.18 ms / frame** |
+| Subtree pruning, sun shadow accumulation | — | **−0.7 to −0.8 ms / frame** (~950 nodes skipped) |
+| Subtree pruning, skylighting / precipitation map | 1.51 ms | **1.28–1.39 ms** (~1,700 nodes skipped) |
+| Sun shadow culling (midday, market) | 11,210 draws | **8,578 draws** |
+| Skylighting culling (radius 128) | ~1,100 objects | **~40 % fewer** |
+| All draw-call optimizations together | — | **−26 % draw calls** |
+
+Why shadows matter: in the Whiterun market roughly two thirds of all ~15,000–20,000 draw calls per frame are shadow
+and depth passes, and sun shadows alone cost ~12–14 ms of CPU time per frame.
+
+## Requirements
+
+| Dependency | Required | Notes |
+|---|---|---|
+| Skyrim SE/AE **1.6.1170** | yes | Built and tested only against this version. |
+| [SKSE64](https://skse.silverlock.org/) | yes | Matching your game version. |
+| [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444) | yes | |
+| [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352) | optional | In-game menu. Without it, everything is configured in `SkyrimPerf.ini`. |
+| [Community Shaders](https://www.nexusmods.com/skyrimspecialedition/mods/86492) | optional | Skylighting culling only has an effect with CS skylighting. |
+
+## Installation
+
+1. Download `SkyrimPerf-<version>.zip` from [Releases](../../releases).
+2. Install it with your mod manager (Vortex / MO2) like any other mod.
+3. In game: open the SKSE Menu Framework menu → *SkyrimPerf*. The log is written to
+   `Documents\My Games\Skyrim Special Edition\SKSE\SkyrimPerf.log`.
+
+Settings: `Data\SKSE\Plugins\SkyrimPerf.ini` holds the defaults; changes made in the menu go to
+`SkyrimPerf_User.ini` (only values that differ from the defaults). *Reset to defaults* in the menu deletes that file.
+
+## Building from source
+
+Requirements: Visual Studio 2022 Build Tools (C++), [vcpkg](https://github.com/microsoft/vcpkg) in `C:\dev\vcpkg`.
 
 ```bat
-git submodule update --init --recursive
+git clone --recursive https://github.com/dnai92/skyrimPerformanceSolution.git
+cd skyrimPerformanceSolution
 build.cmd
 powershell -File package.ps1
 ```
 
-Ergebnis: `dist\SkyrimPerf-<version>.zip` → in Vortex per Drag & Drop als Mod installieren.
-Zum Deaktivieren die Mod in Vortex ausschalten.
+Result: `dist\SkyrimPerf-<version>.zip`.
+
+| Build dependency | Source |
+|---|---|
+| CommonLibSSE-NG | git submodule (`extern/CommonLibSSE-NG`) |
+| Tracy 0.14.1 | git submodule (`extern/tracy`), on-demand profiling |
+| SKSE Menu Framework header | `src/third_party` (GPL-3.0) |
+| Detours, DirectXMath, DirectXTK, fmt, spdlog, SimpleIni, xbyak, nlohmann-json, rapidcsv, toml11 | vcpkg (`vcpkg.json`) |
+
+## License
+
+GPL-3.0 (required by the bundled SKSE Menu Framework header). See [LICENSE](LICENSE).
+
+---
+
+## 🇩🇪 Kurzbeschreibung
+
+SKSE-Plugin für Skyrim SE/AE, das stark gemoddete Spiele flüssiger macht, ohne eine einzige Spieldatei zu verändern:
+
+- **Texture-Streaming:** Texturen ferner Objekte (auch hinter der Kamera) werden im VRAM verkleinert und bei
+  Annäherung im Hintergrund in voller Größe neu geladen. Am Weißlauf-Markt: 0,33 GB statt 7–8 GB für diese
+  Texturen, Skyrim braucht 5,4 statt ~10,5 GB VRAM, kein sichtbarer Unterschied.
+- **Schatten-Culling** für Sonne, Fackeln und Figuren, **Skylighting- und Decal-Culling**, **Schatten-Instancing**:
+  rund 26 % weniger Draw-Calls.
+- **Licht-Zuordnung drosseln** (2,45 → 0,15 ms pro Frame) und **Teilbäume überspringen** (−0,7 ms Sonnenschatten).
+- **Menü** auf Deutsch/Englisch (folgt der Spielsprache), **Hotkey** frei belegbar (Standard *Bild auf*).
+
+Voraussetzungen: Skyrim 1.6.1170, SKSE64, Address Library; optional SKSE Menu Framework und Community Shaders.
