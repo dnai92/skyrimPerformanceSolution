@@ -1713,9 +1713,11 @@ namespace TextureStream
 
 		ApplyResults();
 
-		if (now - lastReport >= (cfg.analysis ? 10s : 60s)) {
+		// Ausfuehrlicher Bericht (und alle Diagnose) nur mit dem Analyse-Protokoll im Menue, sonst eine Zeile pro Minute
+		const bool detailed = Config::analysis.load(std::memory_order_relaxed) || cfg.analysis;
+		if (now - lastReport >= (detailed ? 10s : 60s)) {
 			lastReport = now;
-			if (cfg.analysis) {
+			if (detailed) {
 				Report();
 			} else {
 				ReportCompact();

@@ -251,8 +251,8 @@ namespace Menu
 			Tip(T("Deletes SkyrimPerf_User.ini and reloads the defaults from SkyrimPerf.ini (takes up to 2 s).",
 				"Löscht SkyrimPerf_User.ini und lädt die Standardwerte aus SkyrimPerf.ini (dauert bis zu 2 s)."));
 			AtomicToggle(T("Analysis logging (costs performance)", "Analyse-Protokoll (kostet Leistung)"), Config::analysis,
-				T("Extra diagnostics in SkyrimPerf.log. Costs 2-4 ms per frame - only for troubleshooting.",
-					"Zusätzliche Diagnose in SkyrimPerf.log. Kostet 2-4 ms pro Frame - nur zur Fehlersuche."));
+				T("Extra diagnostics in SkyrimPerf.log (incl. detailed texture streaming report every 10 s). Costs 2-4 ms per frame - only for troubleshooting.",
+					"Zusätzliche Diagnose in SkyrimPerf.log (inkl. ausführlichem Texture-Streaming-Bericht alle 10 s). Kostet 2-4 ms pro Frame - nur zur Fehlersuche."));
 		}
 
 		void __stdcall RenderShadows()
@@ -336,9 +336,6 @@ namespace Menu
 			Toggle(T("Load at remembered size##ts", "Gleich in gemerkter Größe laden##ts"), Config::textureStream.loadReduced,
 				T("The size a texture needed last time (also in earlier sessions) is used directly when the game loads it again. Less VRAM peak and loading when entering areas.",
 					"Die zuletzt benötigte Größe einer Textur (auch aus früheren Sitzungen) wird direkt beim Laden verwendet. Weniger VRAM-Spitze und Laden beim Betreten von Gebieten."));
-			Toggle(T("Report in log##ts", "Bericht im Log##ts"), Config::textureStream.analysis,
-				T("Detailed report every 10 s in SkyrimPerf.log. Off = one summary line per minute.",
-					"Ausführlicher Bericht alle 10 s in SkyrimPerf.log. Aus = eine Zusammenfassung pro Minute."));
 			Slider(T("Safety factor##ts", "Sicherheitsfaktor##ts"), Config::textureStream.safetyFactor, 1.0f, 4.0f, "%.1f",
 				T("Needed texture size = size on screen x this factor. Higher = sharper, less saving.",
 					"Benötigte Texturgröße = Größe auf dem Bildschirm x Faktor. Höher = schärfer, weniger Ersparnis."));
