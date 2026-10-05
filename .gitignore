@@ -9,3 +9,4 @@ tools/renderdoc/analyze_passes.cfg
 reference/
 tools/renderdoc/inspect_clears.cfg
 tools/renderdoc/inspect_cache.cfg
+backups/
