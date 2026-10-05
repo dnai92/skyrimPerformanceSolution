@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SkyrimPerf
-	VERSION 0.14.0
+	VERSION 0.15.0
 	LANGUAGES CXX
 )
 
@@ -26,6 +26,7 @@ add_commonlibsse_plugin(
 		src/Hotkey.cpp
 		src/InstancingAnalysis.cpp
 		src/LightGather.cpp
+		src/Menu.cpp
 		src/Config.cpp
 		src/DetourHelper.cpp
 		src/WaitProbe.cpp

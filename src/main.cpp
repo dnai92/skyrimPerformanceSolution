@@ -2,6 +2,7 @@
 #include "Hotkey.h"
 #include "InstancingAnalysis.h"
 #include "LightGather.h"
+#include "Menu.h"
 #include "Config.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
@@ -20,6 +21,7 @@ namespace
 			Hooks::RegisterEvents();
 			ShadowCulling::InstallLate();
 			Hotkey::Register();
+			Menu::Register();
 		}
 	}
 }

@@ -6,41 +6,100 @@ namespace Config
 {
 	namespace
 	{
-		constexpr auto kPath = L"Data/SKSE/Plugins/SkyrimPerf.ini";
+		constexpr auto kPath = L"Data/SKSE/Plugins/SkyrimPerf.ini";            // Vorgaben (Mod-Paket, von Vortex verwaltet)
+		constexpr auto kUserPath = L"Data/SKSE/Plugins/SkyrimPerf_User.ini";   // Menue-Einstellungen (vom Plugin geschrieben)
 
 		std::filesystem::file_time_type g_lastWrite{};
+		std::filesystem::file_time_type g_lastWriteUser{};
 		std::chrono::steady_clock::time_point g_lastCheck{};
+		std::atomic<bool> g_dirty{ false };
+		std::atomic<bool> g_reset{ false };
 
-		std::filesystem::file_time_type LastWrite() noexcept
+		std::filesystem::file_time_type LastWrite(const wchar_t* a_path) noexcept
 		{
 			std::error_code ec;
-			const auto t = std::filesystem::last_write_time(kPath, ec);
+			const auto t = std::filesystem::last_write_time(a_path, ec);
 			return ec ? std::filesystem::file_time_type{} : t;
+		}
+
+		// Nur die im Menue einstellbaren Werte; alles andere kommt weiter aus SkyrimPerf.ini
+		void SaveUser()
+		{
+			CSimpleIniA ini;
+			ini.SetUnicode();
+			const auto b = [&](const char* s, const char* k, bool v) { ini.SetBoolValue(s, k, v); };
+			const auto f = [&](const char* s, const char* k, float v) { ini.SetDoubleValue(s, k, v, nullptr, true); };
+			b("General", "bAnalysis", analysis.load());
+			const auto rule = [&](const char* s, const CullRule& r) {
+				b(s, "bEnabled", r.enabled);
+				f(s, "fMinDistance", r.minDistance);
+				f(s, "fMaxRadius", r.maxRadius);
+				f(s, "fMinAngularSize", r.minAngularSize);
+			};
+			rule("ShadowCulling", shadowCulling);
+			f("ShadowCulling", "fMinSunElevation", sunMinElevation.load());
+			rule("PointLightShadowCulling", pointLightCulling);
+			b("DepthPrepassCulling", "bEnabled", depthPrepassCulling.enabled);
+			b("MainViewCulling", "bEnabled", mainViewCulling.enabled);
+			b("SkylightingCulling", "bEnabled", skylightingCulling.enabled);
+			f("SkylightingCulling", "fMinRadius", skylightingCulling.minRadius);
+			b("DecalCulling", "bEnabled", decalCulling.enabled);
+			f("DecalCulling", "fMaxDistance", decalCulling.maxDistance);
+			f("DecalCulling", "fMaxRadius", decalCulling.maxRadius);
+			b("ShadowCascadeCache", "bEnabled", cascadeCache.enabled);
+			b("ShadowInstancing", "bEnabled", shadowInstancing.enabled);
+			b("ActorShadowCulling", "bEnabled", actorShadowCulling.enabled);
+			f("ActorShadowCulling", "fMinDistance", actorShadowCulling.minDistance);
+			b("ActorShadowCulling", "bPointLights", actorShadowCulling.pointLights);
+			b("LightGatherThrottle", "bEnabled", lightGather.enabled);
+			f("LightGatherThrottle", "fMinMove", lightGather.minMove);
+			f("LightGatherThrottle", "fMinRadiusChange", lightGather.minRadiusChange);
+			f("LightGatherThrottle", "fMaxAgeMs", lightGather.maxAgeMs);
+			ini.SaveFile(kUserPath);
+			g_lastWriteUser = LastWrite(kUserPath);  // eigene Aenderung nicht erneut laden
 		}
 	}
 
+	void MarkDirty() noexcept { g_dirty.store(true); }
+	void RequestReset() noexcept { g_reset.store(true); }
+
 	void ReloadIfChanged()
 	{
+		if (g_reset.exchange(false)) {
+			g_dirty.store(false);
+			std::error_code ec;
+			std::filesystem::remove(kUserPath, ec);
+			logger::info("Menue: SkyrimPerf_User.ini geloescht - Vorgaben aus SkyrimPerf.ini");
+			Load();
+		}
 		const auto now = std::chrono::steady_clock::now();
 		if (now - g_lastCheck < 2s) {
 			return;
 		}
 		g_lastCheck = now;
-		if (LastWrite() != g_lastWrite) {
-			logger::info("SkyrimPerf.ini geaendert - lade neu");
+		if (g_dirty.exchange(false)) {
+			SaveUser();
+			logger::info("Menue-Einstellungen in SkyrimPerf_User.ini gespeichert");
+		}
+		if (LastWrite(kPath) != g_lastWrite || LastWrite(kUserPath) != g_lastWriteUser) {
+			logger::info("SkyrimPerf.ini / SkyrimPerf_User.ini geaendert - lade neu");
 			Load();
 		}
 	}
 
 	void Load()
 	{
-		constexpr auto path = kPath;
-		g_lastWrite = LastWrite();
+		g_lastWrite = LastWrite(kPath);
+		g_lastWriteUser = LastWrite(kUserPath);
 
 		CSimpleIniA ini;
 		ini.SetUnicode();
-		if (ini.LoadFile(path) < 0) {
+		if (ini.LoadFile(kPath) < 0) {
 			logger::warn("SkyrimPerf.ini nicht gefunden - Defaults aktiv");
+		}
+		// Menue-Werte darueber laden (gleiche Schluessel ersetzen die Vorgaben)
+		if (ini.LoadFile(kUserPath) >= 0) {
+			logger::info("SkyrimPerf_User.ini (Menue-Einstellungen) geladen");
 		}
 
 		// Werte einzeln setzen; die Culling-Jobs lesen parallel (einzelne Felder, kein Absturz-Risiko)

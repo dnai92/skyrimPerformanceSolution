@@ -95,8 +95,16 @@ namespace Config
 	};
 	inline LightGather lightGather;  // [LightGatherThrottle]
 
+	// Laedt SkyrimPerf.ini (Vorgaben aus dem Mod-Paket) und darueber SkyrimPerf_User.ini (Werte aus dem Menue im Spiel)
 	void Load();
 
-	// Prueft (alle ~2 s, Main-Thread) ob die INI geaendert wurde und laedt sie dann neu
+	// Prueft (alle ~2 s, Main-Thread) ob eine der INIs geaendert wurde und laedt sie dann neu.
+	// Schreibt ausserdem vorgemerkte Menue-Aenderungen in SkyrimPerf_User.ini.
 	void ReloadIfChanged();
+
+	// Menue: Werte wurden direkt geaendert -> beim naechsten ReloadIfChanged in SkyrimPerf_User.ini speichern
+	void MarkDirty() noexcept;
+
+	// Menue: SkyrimPerf_User.ini loeschen und die Vorgaben aus SkyrimPerf.ini neu laden (beim naechsten ReloadIfChanged)
+	void RequestReset() noexcept;
 }
