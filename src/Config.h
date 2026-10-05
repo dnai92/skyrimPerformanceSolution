@@ -100,6 +100,9 @@ namespace Config
 	struct SubtreePruning
 	{
 		bool enabled = true;
+		bool sun = true;      // Sonnen-/Mondschatten
+		bool point = false;   // Punktlicht-Schatten: verdunkelte im Test beleuchtete Flaechen (Durchlauf sammelt wohl auch Beleuchtete)
+		bool precip = true;   // Niederschlags-/Skylighting-Verdeckungskarte
 	};
 	inline SubtreePruning subtreePruning;  // [SubtreePruning]
 

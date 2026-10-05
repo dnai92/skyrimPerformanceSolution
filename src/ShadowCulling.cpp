@@ -636,8 +636,9 @@ namespace ShadowCulling
 			if (bound.radius <= 0.0f) {
 				return false;
 			}
+			const auto& sp = Config::subtreePruning;
 			if (a_parabolic) {
-				if (ShouldCullBound(Config::pointLightCulling, bound, UINT32_MAX, 1.0f)) {
+				if (sp.point && ShouldCullBound(Config::pointLightCulling, bound, UINT32_MAX, 1.0f)) {
 					Stats::Count(Stats::Counter::PrunedPoint);
 					return true;
 				}
@@ -645,7 +646,7 @@ namespace ShadowCulling
 			}
 			if (a_this->camera && a_this->camera == PrecipCamera()) {
 				const auto& sky = Config::skylightingCulling;
-				if (sky.enabled && bound.radius < sky.minRadius) {
+				if (sp.precip && sky.enabled && bound.radius < sky.minRadius) {
 					Stats::Count(Stats::Counter::PrunedPrecip);
 					return true;
 				}
@@ -657,14 +658,14 @@ namespace ShadowCulling
 				if (g_cacheSkip.load(std::memory_order_relaxed) && Config::cascadeCache.skipDraws && cascade >= Config::cascadeCache.cascade) {
 					return false;  // Kaskaden-Cache entscheidet selbst
 				}
-				if (g_sunCullAllowed.load(std::memory_order_relaxed) &&
+				if (sp.sun && g_sunCullAllowed.load(std::memory_order_relaxed) &&
 					ShouldCullBound(Config::shadowCulling, bound, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
 					Stats::Count(Stats::Counter::PrunedSun);
 					return true;
 				}
 				return false;
 			case Kind::kPoint:
-				if (ShouldCullBound(Config::pointLightCulling, bound, UINT32_MAX, 1.0f)) {
+				if (sp.point && ShouldCullBound(Config::pointLightCulling, bound, UINT32_MAX, 1.0f)) {
 					Stats::Count(Stats::Counter::PrunedPoint);
 					return true;
 				}

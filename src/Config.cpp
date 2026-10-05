@@ -53,6 +53,9 @@ namespace Config
 			b("ActorShadowCulling", "bPointLights", actorShadowCulling.pointLights);
 			b("LightGatherThrottle", "bEnabled", lightGather.enabled);
 			b("SubtreePruning", "bEnabled", subtreePruning.enabled);
+			b("SubtreePruning", "bSun", subtreePruning.sun);
+			b("SubtreePruning", "bPointLights", subtreePruning.point);
+			b("SubtreePruning", "bPrecipitation", subtreePruning.precip);
 			f("LightGatherThrottle", "fMinMove", lightGather.minMove);
 			f("LightGatherThrottle", "fMinRadiusChange", lightGather.minRadiusChange);
 			f("LightGatherThrottle", "fMaxAgeMs", lightGather.maxAgeMs);
@@ -186,8 +189,12 @@ namespace Config
 		lg.maxAgeMs = static_cast<float>(ini.GetDoubleValue("LightGatherThrottle", "fMaxAgeMs", lg.maxAgeMs));
 		logger::info("LightGatherThrottle: {} | Bewegung >= {:.0f} | Radius +-{:.0f} | spaetestens nach {:.0f} ms", lg.enabled ? "AN" : "AUS", lg.minMove, lg.minRadiusChange, lg.maxAgeMs);
 
-		subtreePruning.enabled = ini.GetBoolValue("SubtreePruning", "bEnabled", subtreePruning.enabled);
-		logger::info("SubtreePruning: {}", subtreePruning.enabled ? "AN" : "AUS");
+		auto& sp = subtreePruning;
+		sp.enabled = ini.GetBoolValue("SubtreePruning", "bEnabled", sp.enabled);
+		sp.sun = ini.GetBoolValue("SubtreePruning", "bSun", sp.sun);
+		sp.point = ini.GetBoolValue("SubtreePruning", "bPointLights", sp.point);
+		sp.precip = ini.GetBoolValue("SubtreePruning", "bPrecipitation", sp.precip);
+		logger::info("SubtreePruning: {} | Sonne {} | Punktlicht {} | Regen/Sky {}", sp.enabled ? "AN" : "AUS", sp.sun, sp.point, sp.precip);
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
