@@ -91,7 +91,7 @@ namespace Config
 		bool  enabled = true;
 		float minMove = 8.0f;           // Licht muss sich mindestens so weit bewegt haben (Spielereinheiten) ...
 		float minRadiusChange = 16.0f;  // ... oder der Radius sich so stark geaendert haben ...
-		float maxAgeMs = 150.0f;        // ... oder die letzte Suche so lange her sein
+		float maxAgeMs = 500.0f;        // ... oder die letzte Suche so lange her sein (500 im Test unauffaellig)
 	};
 	inline LightGather lightGather;  // [LightGatherThrottle]
 
