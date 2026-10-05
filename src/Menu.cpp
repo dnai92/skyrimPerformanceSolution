@@ -337,8 +337,8 @@ namespace Menu
 				T("The size a texture needed last time (also in earlier sessions) is used directly when the game loads it again. Less VRAM peak and loading when entering areas.",
 					"Die zuletzt benötigte Größe einer Textur (auch aus früheren Sitzungen) wird direkt beim Laden verwendet. Weniger VRAM-Spitze und Laden beim Betreten von Gebieten."));
 			Toggle(T("Report in log##ts", "Bericht im Log##ts"), Config::textureStream.analysis,
-				T("Every 10 s: textures managed, downscaled, VRAM saved, reloads. Results in SkyrimPerf.log.",
-					"Alle 10 s: verwaltete und verkleinerte Texturen, gesparter VRAM, Neuladungen. Ergebnisse in SkyrimPerf.log."));
+				T("Detailed report every 10 s in SkyrimPerf.log. Off = one summary line per minute.",
+					"Ausführlicher Bericht alle 10 s in SkyrimPerf.log. Aus = eine Zusammenfassung pro Minute."));
 			Slider(T("Safety factor##ts", "Sicherheitsfaktor##ts"), Config::textureStream.safetyFactor, 1.0f, 4.0f, "%.1f",
 				T("Needed texture size = size on screen x this factor. Higher = sharper, less saving.",
 					"Benötigte Texturgröße = Größe auf dem Bildschirm x Faktor. Höher = schärfer, weniger Ersparnis."));

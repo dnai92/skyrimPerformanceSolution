@@ -111,7 +111,7 @@ namespace Config
 	struct TextureStream
 	{
 		bool        enabled = true;       // Stufe 1: ferne Texturen im VRAM verkleinern / bei Annaeherung neu laden
-		bool        analysis = true;      // 10-s-Bericht im Log
+		bool        analysis = false;     // ausfuehrlicher 10-s-Bericht im Log (sonst eine Zeile pro Minute)
 		bool        loadReduced = true;   // Stufe 3: gemerkte Groesse schon beim Laden anwenden
 		bool        budgetMode = true;    // nur verkleinern, wenn der VRAM knapp wird (Windows-Budget des Prozesses)
 		float       budgetStartPct = 85.0f;  // ab dieser Belegung (% des Budgets) wird verkleinert

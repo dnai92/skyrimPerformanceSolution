@@ -1244,6 +1244,7 @@ namespace TextureStream
 			{
 				DownJob       job;
 				std::uint64_t saving;
+				float         ratio;  // benoetigt / aktuell - kleiner = weiter weg / weniger sichtbar
 			};
 			std::vector<Candidate> candidates;
 			// VRAM wieder auffuellen (Budget-Modus, deutlich unter der Schwelle): verkleinerte, gerade gesehene Texturen
@@ -1294,7 +1295,8 @@ namespace TextureStream
 									st.busy = true;
 									const std::uint32_t edge = st.lowTarget;
 									const std::uint32_t w = std::max(1u, st.curW * edge / st.CurEdge()), h = std::max(1u, st.curH * edge / st.CurEdge());
-									candidates.push_back({ { r, st.hold, edge }, ChainBytes(st.fi, st.curW, st.curH, st.curMips) - ChainBytes(st.fi, w, h, st.curMips) });
+									candidates.push_back({ { r, st.hold, edge }, ChainBytes(st.fi, st.curW, st.curH, st.curMips) - ChainBytes(st.fi, w, h, st.curMips),
+										st.passNeed / static_cast<float>(st.CurEdge()) });
 								}
 							}
 						} else {
@@ -1334,7 +1336,14 @@ namespace TextureStream
 					++it;
 				}
 			}
-			std::ranges::sort(candidates, [](const Candidate& a, const Candidate& b) { return a.saving > b.saving; });
+			// Zuerst, was am wenigsten gebraucht wird (weit weg / hinter der Kamera), bei Gleichstand die groessere Ersparnis -
+			// gleiche Ersparnis, aber sichtbare Stellen bleiben laenger scharf
+			std::ranges::sort(candidates, [](const Candidate& a, const Candidate& b) {
+				if (std::abs(a.ratio - b.ratio) > 0.01f) {
+					return a.ratio < b.ratio;
+				}
+				return a.saving > b.saving;
+			});
 			for (auto& c : candidates) {
 				g_down.push_back(std::move(c.job));
 			}
@@ -1448,6 +1457,35 @@ namespace TextureStream
 			}
 		}
 
+		void ReportCompact()
+		{
+			std::uint32_t reduced = 0;
+			double        savedMB = 0;
+			for (const auto& [r, st] : g_tex) {
+				if (st.Reduced()) {
+					++reduced;
+					savedMB += (ChainBytes(st.fi, st.fullW, st.fullH, st.fullMips) - ChainBytes(st.fi, st.curW, st.curH, st.curMips)) / 1048576.0;
+				}
+			}
+			const auto& s = g_stats;
+			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, ausgelagert {:.0f} MB) | verkleinert {} Texturen, {:.0f} MB gespart | letzte Minute: "
+						 "verkleinert {}, neu geladen {} ({:.0f} MB), aufgefuellt {}, gleich verkleinert geladen {}, aus RAM {}, Ladefehler {}",
+				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_procShared.load() / 1048576.0, reduced,
+				savedMB, s.downs, s.ups, s.upMB, s.refills, g_loadedReduced.exchange(0), g_cacheHits.exchange(0), s.upFails);
+			g_cacheMisses.exchange(0);
+			g_diagCreate.exchange(0);
+			g_diagDDS.exchange(0);
+			g_diagNoSrc.exchange(0);
+			g_diagOff.exchange(0);
+			g_diagMiss.exchange(0);
+			g_diagPreset.exchange(0);
+			{
+				std::scoped_lock missLock(g_missLock);
+				g_missSamples.clear();
+			}
+			g_stats = {};
+		}
+
 		void Report()
 		{
 			ReportChains();
@@ -1495,6 +1533,7 @@ namespace TextureStream
 			}
 			logger::info("[TextureStream]   Stufe 3: {} | gleich verkleinert geladen {} | gemerkte Groessen {}", Config::textureStream.loadReduced ? "AN" : "AUS",
 				g_loadedReduced.exchange(0), remembered);
+			if (Config::analysis.load(std::memory_order_relaxed))
 			logger::info("[TextureStream]   Stufe 3 Diagnose: Ladeaufrufe {} | DDS {} | ohne Textur {} | aus/kein Druck {} | Pfad unbekannt {} | maxsize von anderer Mod {} (zuletzt {})", g_diagCreate.exchange(0),
 				g_diagDDS.exchange(0), g_diagNoSrc.exchange(0), g_diagOff.exchange(0), g_diagMiss.exchange(0), g_diagPreset.exchange(0), g_diagPresetValue.load());
 			{
@@ -1569,6 +1608,10 @@ namespace TextureStream
 			UpdateVram();
 		}
 		EnsureWorker();  // misst ab jetzt 1x/s den Grafikspeicher des Prozesses
+		// Ladeweg-Diagnose (Aufrufstapel bei jeder Texturerstellung) nur mit [General] bAnalysis - kostet beim Laden Zeit
+		if (!Config::analysis.load(std::memory_order_relaxed)) {
+			return;
+		}
 		auto**        vtbl = *reinterpret_cast<void***>(device);
 		std::uint32_t old = 0;
 		if (REX::W32::VirtualProtect(&vtbl[5], sizeof(void*), 0x40, &old)) {
@@ -1625,9 +1668,13 @@ namespace TextureStream
 
 		ApplyResults();
 
-		if (cfg.analysis && now - lastReport >= 10s) {
+		if (now - lastReport >= (cfg.analysis ? 10s : 60s)) {
 			lastReport = now;
-			Report();
+			if (cfg.analysis) {
+				Report();
+			} else {
+				ReportCompact();
+			}
 		}
 
 		const auto ui = RE::UI::GetSingleton();
