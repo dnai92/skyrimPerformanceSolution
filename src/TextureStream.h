@@ -27,4 +27,7 @@ namespace TextureStream
 
 	// Einmal pro Frame (Main-Thread)
 	void OnFrame();
+
+	// VRAM-Belegung des Spiels und Budget laut Windows (Bytes; 0 = unbekannt)
+	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget);
 }

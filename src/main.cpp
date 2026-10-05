@@ -40,6 +40,19 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	logger::info("SkyrimPerf {} geladen (Tracy on-demand, Report alle 10 s)", SKSE::GetPluginVersion().string());
 	logger::info("Skyrim-Basisadresse 0x{:X} (fuer tools/resolve_rva.py)", REL::Module::get().base());
 
+	// Alle Engine-Eingriffe benutzen AE-Adressen (Address-Library-IDs + Offsets innerhalb von Funktionen), getestet nur
+	// gegen 1.6.1170. Auf anderen Versionen (z. B. SE 1.5.97) wuerden sie falsche Stellen treffen -> gar nichts installieren.
+	if (const auto version = REL::Module::get().version(); version != REL::Version{ 1, 6, 1170, 0 }) {
+		logger::warn("Spielversion {} wird nicht unterstuetzt (nur 1.6.1170) - SkyrimPerf bleibt inaktiv", version.string());
+		SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
+			if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
+				RE::DebugMessageBox(std::format("SkyrimPerf: game version {} is not supported (only 1.6.1170). The plugin stays inactive.",
+					REL::Module::get().version().string()).c_str());
+			}
+		});
+		return true;
+	}
+
 	Stats::Init();
 	Config::Load();
 	Hooks::Install();

@@ -113,6 +113,8 @@ namespace Config
 		bool        enabled = true;       // Stufe 1: ferne Texturen im VRAM verkleinern / bei Annaeherung neu laden
 		bool        analysis = true;      // 10-s-Bericht im Log
 		bool        loadReduced = true;   // Stufe 3: gemerkte Groesse schon beim Laden anwenden
+		bool        budgetMode = true;    // nur verkleinern, wenn der VRAM knapp wird (Windows-Budget des Prozesses)
+		float       budgetStartPct = 85.0f;  // ab dieser Belegung (% des Budgets) wird verkleinert
 		float       safetyFactor = 2.0f;  // benoetigte Aufloesung = Bildschirmgroesse x Faktor
 		float       minEdge = 1024.0f;    // nie unter diese Kantenlaenge verkleinern (Zweierpotenz)
 		float       budgetMs = 0.4f;      // Zeit pro Frame fuer den Szenen-Durchlauf

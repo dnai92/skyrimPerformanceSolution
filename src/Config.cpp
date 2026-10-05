@@ -75,6 +75,8 @@ namespace Config
 			b("TextureStream", "bEnabled", textureStream.enabled);
 			b("TextureStream", "bAnalysis", textureStream.analysis);
 			b("TextureStream", "bLoadReduced", textureStream.loadReduced);
+			b("TextureStream", "bBudgetMode", textureStream.budgetMode);
+			f("TextureStream", "fBudgetStartPct", textureStream.budgetStartPct);
 			f("TextureStream", "fSafetyFactor", textureStream.safetyFactor);
 			f("TextureStream", "fMinEdge", textureStream.minEdge);
 			b("SubtreePruning", "bSun", subtreePruning.sun);
@@ -225,6 +227,8 @@ namespace Config
 		ts.enabled = ini.GetBoolValue("TextureStream", "bEnabled", ts.enabled);
 		ts.analysis = ini.GetBoolValue("TextureStream", "bAnalysis", ts.analysis);
 		ts.loadReduced = ini.GetBoolValue("TextureStream", "bLoadReduced", ts.loadReduced);
+		ts.budgetMode = ini.GetBoolValue("TextureStream", "bBudgetMode", ts.budgetMode);
+		ts.budgetStartPct = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetStartPct", ts.budgetStartPct)), 0.0f, 100.0f);
 		ts.safetyFactor = static_cast<float>(ini.GetDoubleValue("TextureStream", "fSafetyFactor", ts.safetyFactor));
 		ts.minEdge = static_cast<float>(ini.GetDoubleValue("TextureStream", "fMinEdge", ts.minEdge));
 		ts.budgetMs = static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetMs", ts.budgetMs));

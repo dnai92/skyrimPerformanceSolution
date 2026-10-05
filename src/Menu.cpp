@@ -1,6 +1,7 @@
 #include "Menu.h"
 
 #include "Config.h"
+#include "TextureStream.h"
 
 #include "third_party/SKSEMenuFramework.h"
 
@@ -312,6 +313,18 @@ namespace Menu
 			Toggle(T("Downscale distant textures##ts", "Ferne Texturen verkleinern##ts"), Config::textureStream.enabled,
 				T("Textures of far objects (also behind you) are shrunk in VRAM and reloaded at full size from disk when you come closer. Files are never changed. Off = everything goes back to full size.",
 					"Texturen ferner Objekte (auch hinter dir) werden im VRAM verkleinert und bei Annäherung in voller Größe von der Platte neu geladen. Dateien werden nie verändert. Aus = alles wieder in voller Größe."));
+			{
+				std::uint64_t usage = 0, budget = 0;
+				TextureStream::GetVram(usage, budget);
+				if (budget > 0) {
+					ImGuiMCP::Text(T("VRAM: %.1f of %.1f GB (%.0f %%)", "VRAM: %.1f von %.1f GB (%.0f %%)"), usage / 1073741824.0, budget / 1073741824.0, 100.0 * usage / budget);
+				}
+			}
+			Toggle(T("Only when VRAM gets full##ts", "Nur wenn der VRAM knapp wird##ts"), Config::textureStream.budgetMode,
+				T("Textures are only shrunk when the game uses more than the threshold below of the video memory Windows grants it. With enough VRAM nothing happens and nothing is spent.",
+					"Texturen werden nur verkleinert, wenn das Spiel mehr als die Schwelle unten vom Grafikspeicher belegt, den Windows ihm zuteilt. Mit genug VRAM passiert nichts und es kostet nichts."));
+			Slider(T("Start at (%)##ts", "Ab Belegung (%)##ts"), Config::textureStream.budgetStartPct, 50.0f, 100.0f, "%.0f",
+				T("VRAM usage (percent of the budget) at which downscaling starts.", "VRAM-Belegung (Prozent des Budgets), ab der verkleinert wird."));
 			Toggle(T("Load at remembered size##ts", "Gleich in gemerkter Größe laden##ts"), Config::textureStream.loadReduced,
 				T("The size a texture needed last time (also in earlier sessions) is used directly when the game loads it again. Less VRAM peak and loading when entering areas.",
 					"Die zuletzt benötigte Größe einer Textur (auch aus früheren Sitzungen) wird direkt beim Laden verwendet. Weniger VRAM-Spitze und Laden beim Betreten von Gebieten."));

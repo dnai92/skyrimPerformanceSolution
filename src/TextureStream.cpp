@@ -207,6 +207,54 @@ namespace TextureStream
 		W::ID3D11Device*        g_device = nullptr;
 		W::ID3D11DeviceContext* g_context = nullptr;
 
+		// ---------------- VRAM-Belegung (Budget-Modus) ----------------
+		W::IDXGIAdapter3*          g_adapter = nullptr;
+		std::atomic<std::uint64_t> g_vramUsage{ 0 }, g_vramBudget{ 0 };
+		std::atomic<float>         g_vramPct{ -1.0f };  // -1 = unbekannt
+		std::uint32_t              g_reducedCount = 0;   // verkleinerte Texturen (Stand letzter Durchlauf)
+
+		void InitAdapter()
+		{
+			W::IDXGIDevice* dxgiDevice = nullptr;
+			if (g_device->QueryInterface(W::IID_IDXGIDevice, reinterpret_cast<void**>(&dxgiDevice)) < 0 || !dxgiDevice) {
+				logger::warn("TextureStream: kein IDXGIDevice - Budget-Modus nicht moeglich, verkleinere immer");
+				return;
+			}
+			W::IDXGIAdapter* adapter = nullptr;
+			if (dxgiDevice->GetAdapter(&adapter) >= 0 && adapter) {
+				adapter->QueryInterface(W::IID_IDXGIAdapter3, reinterpret_cast<void**>(&g_adapter));
+				adapter->Release();
+			}
+			dxgiDevice->Release();
+			if (!g_adapter) {
+				logger::warn("TextureStream: kein IDXGIAdapter3 - Budget-Modus nicht moeglich, verkleinere immer");
+			}
+		}
+
+		void UpdateVram()
+		{
+			if (!g_adapter) {
+				return;
+			}
+			W::DXGI_QUERY_VIDEO_MEMORY_INFO info{};
+			if (g_adapter->QueryVideoMemoryInfo(0, W::DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info) >= 0 && info.budget > 0) {
+				g_vramUsage.store(info.currentUsage, std::memory_order_relaxed);
+				g_vramBudget.store(info.budget, std::memory_order_relaxed);
+				g_vramPct.store(100.0f * static_cast<float>(info.currentUsage) / static_cast<float>(info.budget), std::memory_order_relaxed);
+			}
+		}
+
+		// Darf verkleinert werden? Im Budget-Modus nur, wenn der VRAM knapp wird (unbekannt = ja)
+		bool Pressure() noexcept
+		{
+			const auto& cfg = Config::textureStream;
+			if (!cfg.budgetMode) {
+				return true;
+			}
+			const float pct = g_vramPct.load(std::memory_order_relaxed);
+			return pct < 0.0f || pct >= cfg.budgetStartPct;
+		}
+
 		// ---------------- Statistik ----------------
 		struct Counters
 		{
@@ -596,7 +644,7 @@ namespace TextureStream
 		std::uint64_t LoadMaxSize() noexcept
 		{
 			const auto src = t_loadingSrc;
-			if (!src || !Config::textureStream.loadReduced || !Config::textureStream.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+			if (!src || !Config::textureStream.loadReduced || !Config::textureStream.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || !Pressure()) {
 				return 0;
 			}
 			try {
@@ -987,14 +1035,26 @@ namespace TextureStream
 		{
 			const auto now = Clock::now();
 			const bool active = Active();
+			const bool pressure = Pressure();
+			// Kandidaten erst sammeln: im Budget-Modus die mit der groessten Ersparnis zuerst verkleinern
+			struct Candidate
+			{
+				DownJob       job;
+				std::uint64_t saving;
+			};
+			std::vector<Candidate> candidates;
+			g_reducedCount = 0;
 			for (auto it = g_tex.begin(); it != g_tex.end();) {
 				auto&      st = it->second;
 				const auto r = it->first;
 				const bool seen = st.passId == g_passId;
+				if (st.Reduced()) {
+					++g_reducedCount;
+				}
 				if (st.eligible && !st.busy) {
 					if (st.Reduced() && st.hold && st.probe == Probe::kOk && (!active || (seen && WantedEdge(st, st.passNeed) > st.CurEdge()))) {
 						QueueReload(st, r, active ? std::min(st.FullEdge(), WantedEdge(st, st.passNeed) * 2) : st.FullEdge());
-					} else if (active && seen) {
+					} else if (active && seen && pressure) {
 						const auto want = WantedEdge(st, st.passNeed);
 						if (want * 2 <= st.CurEdge()) {
 							if (st.probe == Probe::kNone) {
@@ -1004,7 +1064,9 @@ namespace TextureStream
 								if (++st.lowPasses >= 2) {
 									st.lowPasses = 0;
 									st.busy = true;
-									g_down.push_back({ r, st.hold, st.lowTarget });
+									const std::uint32_t edge = st.lowTarget;
+									const std::uint32_t w = std::max(1u, st.curW * edge / st.CurEdge()), h = std::max(1u, st.curH * edge / st.CurEdge());
+									candidates.push_back({ { r, st.hold, edge }, ChainBytes(st.fi, st.curW, st.curH, st.curMips) - ChainBytes(st.fi, w, h, st.curMips) });
 								}
 							}
 						} else {
@@ -1021,6 +1083,10 @@ namespace TextureStream
 				} else {
 					++it;
 				}
+			}
+			std::ranges::sort(candidates, [](const Candidate& a, const Candidate& b) { return a.saving > b.saving; });
+			for (auto& c : candidates) {
+				g_down.push_back(std::move(c.job));
 			}
 		}
 
@@ -1092,10 +1158,19 @@ namespace TextureStream
 				std::scoped_lock lock(g_sizeLock);
 				remembered = g_loadEdge.size();
 			}
+			logger::info("[TextureStream]   VRAM {:.1f} / {:.1f} GB ({:.0f} %) | Budget-Modus {} ab {:.0f} % -> {}", g_vramUsage.load() / 1073741824.0,
+				g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), Config::textureStream.budgetMode ? "AN" : "AUS",
+				Config::textureStream.budgetStartPct, Pressure() ? "verkleinern" : "genug Platz");
 			logger::info("[TextureStream]   Stufe 3: {} | gleich verkleinert geladen {} | gemerkte Groessen {}", Config::textureStream.loadReduced ? "AN" : "AUS",
 				g_loadedReduced.exchange(0), remembered);
 			g_stats = {};
 		}
+	}
+
+	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget)
+	{
+		a_usage = g_vramUsage.load(std::memory_order_relaxed);
+		a_budget = g_vramBudget.load(std::memory_order_relaxed);
 	}
 
 	void Install()
@@ -1132,6 +1207,12 @@ namespace TextureStream
 			if (!g_device || !g_context) {
 				return;
 			}
+			InitAdapter();
+		}
+		static Clock::time_point lastVram{};
+		if (now - lastVram >= 250ms) {
+			lastVram = now;
+			UpdateVram();
 		}
 
 		ApplyResults();
@@ -1157,6 +1238,14 @@ namespace TextureStream
 
 		// Verkleinern nach Datenmenge: hoechstens ~64 MB frei werdender Speicher pro Frame (mind. eine Textur),
 		// und nicht, solange noch viel alter Speicher auf Freigabe wartet
+		if (!Pressure() && !g_down.empty()) {
+			for (const auto& job : g_down) {
+				if (const auto it = g_tex.find(job.r); it != g_tex.end()) {
+					it->second.busy = false;
+				}
+			}
+			g_down.clear();
+		}
 		std::uint64_t freedThisFrame = 0;
 		for (int i = 0; i < 8 && !g_down.empty() && g_deferred.size() < 64; ++i) {
 			const auto job = std::move(g_down.front());
@@ -1172,6 +1261,10 @@ namespace TextureStream
 		// Durchlauf in Zeitscheiben
 		if (!g_passActive) {
 			if (now - g_passStart < 500ms) {
+				return;
+			}
+			// Budget-Modus mit genug VRAM und nichts verkleinert: Durchlauf sparen
+			if (cfg.budgetMode && !Pressure() && g_reducedCount == 0) {
 				return;
 			}
 			const auto root = RE::Main::WorldRootNode();
