@@ -91,7 +91,19 @@ namespace Menu
 			if (!sc) {
 				return 0;
 			}
-			const bool extended = (sc & 0xFF00) == 0xE000 || (sc & 0xFF00) == 0xE100;
+			// MapVirtualKey meldet "erweitert" (E0) nicht zuverlaessig: Bild auf kam als 0x49 = Ziffernblock 9 zurueck.
+			// Diese Tasten teilen sich den Scancode mit dem Ziffernblock und sind immer erweitert.
+			bool extended = (sc & 0xFF00) == 0xE000 || (sc & 0xFF00) == 0xE100;
+			switch (vk) {
+			case 0x21: case 0x22: case 0x23: case 0x24:  // Bild auf/ab, Ende, Pos1
+			case 0x25: case 0x26: case 0x27: case 0x28:  // Pfeile
+			case 0x2D: case 0x2E:                        // Einfg, Entf
+			case 0xA3: case 0xA5:                        // Strg rechts, AltGr
+				extended = true;
+				break;
+			default:
+				break;
+			}
 			return (sc & 0x7F) | (extended ? 0x80u : 0u);
 		}
 
