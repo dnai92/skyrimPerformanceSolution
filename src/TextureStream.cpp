@@ -11,18 +11,18 @@ namespace TextureStream
 		{
 			void*          texture;  // BSGraphics::Texture* (nur als Schluessel)
 			const char*    name;
-			std::uint16_t  width;
-			std::uint16_t  height;
-			std::uint8_t   mips;
-			std::uint8_t   format;
+			std::uint32_t  width;
+			std::uint32_t  height;
+			std::uint32_t  mips;
+			std::uint32_t  format;
 		};
 
 		struct Sample
 		{
 			void*         texture;
 			std::string   name;
-			std::uint16_t width, height;
-			std::uint8_t  mips, format;
+			std::uint32_t width, height;
+			std::uint32_t mips, format;
 			float         neededPx;  // benoetigte Kantenlaenge in Texeln
 		};
 
@@ -46,13 +46,26 @@ namespace TextureStream
 					if (!src || !src->rendererTexture) {
 						continue;
 					}
+					// Groesse/Format aus der D3D-Textur (die Felder in BSGraphics::Texture sind bei normal geladenen Texturen 0).
+					// Hier im Render-Durchlauf wird die Textur gerade benutzt, ist also gueltig.
 					const auto r = src->rendererTexture;
+					const auto res = r->texture;
+					if (!res) {
+						continue;
+					}
+					REX::W32::D3D11_RESOURCE_DIMENSION dim{};
+					res->GetType(&dim);
+					if (dim != REX::W32::D3D11_RESOURCE_DIMENSION_TEXTURE2D) {
+						continue;
+					}
+					REX::W32::D3D11_TEXTURE2D_DESC desc{};
+					static_cast<REX::W32::ID3D11Texture2D*>(res)->GetDesc(&desc);
 					a_out[n].texture = r;
 					a_out[n].name = src->name.data();
-					a_out[n].width = r->width;
-					a_out[n].height = r->height;
-					a_out[n].mips = r->mips;
-					a_out[n].format = r->format;
+					a_out[n].width = desc.width;
+					a_out[n].height = desc.height;
+					a_out[n].mips = desc.mipLevels;
+					a_out[n].format = static_cast<std::uint32_t>(desc.format);
 					++n;
 				}
 				return n;
@@ -62,6 +75,7 @@ namespace TextureStream
 		}
 
 		std::atomic<bool>   g_sampling{ false };  // dieser Frame wird ausgewertet
+		std::atomic<std::uint32_t> g_geomSeen{ 0 }, g_gatherFailed{ 0 };  // Diagnose je Berichtszeitraum
 		std::mutex          g_lock;
 		std::vector<Sample> g_samples;
 		float               g_camX = 0, g_camY = 0, g_camZ = 0;
@@ -160,6 +174,7 @@ namespace TextureStream
 				rows.push_back({ &t, f - n, needEdge });
 			}
 			std::ranges::sort(rows, [](const Row& a, const Row& b) { return a.saving > b.saving; });
+			logger::info("[TextureStream] Objekte {} | Lesefehler {}", g_geomSeen.exchange(0), g_gatherFailed.exchange(0));
 			logger::info("[TextureStream] {} Mess-Frames | sichtbare Texturen {} (davon 4K+ {}) | VRAM voll {:.0f} MB | benoetigt (Sicherheit x{:.1f}) {:.0f} MB | Ersparnis {:.0f} MB ({:.0f} %)",
 				g_frames, g_window.size(), big, full / 1048576.0, safety, needed / 1048576.0, (full - needed) / 1048576.0, full > 0 ? 100.0 * (full - needed) / full : 0.0);
 			if (noMips) {
@@ -189,7 +204,12 @@ namespace TextureStream
 
 		RawTex    raw[32];
 		const int count = SafeGather(material, raw, 32);
-		if (count <= 0) {
+		g_geomSeen.fetch_add(1, std::memory_order_relaxed);
+		if (count < 0) {
+			g_gatherFailed.fetch_add(1, std::memory_order_relaxed);
+			return;
+		}
+		if (count == 0) {
 			return;
 		}
 		std::scoped_lock lock(g_lock);
