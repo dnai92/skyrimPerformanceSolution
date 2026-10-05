@@ -25,6 +25,9 @@ namespace TextureStream
 	// Lade-Hooks + gemerkte Groessen (beim Laden des Plugins)
 	void Install();
 
+	// Diagnose des echten Ladewegs (kDataLoaded, Device existiert dann)
+	void InstallLate();
+
 	// Einmal pro Frame (Main-Thread)
 	void OnFrame();
 

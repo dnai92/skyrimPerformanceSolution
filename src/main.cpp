@@ -29,6 +29,7 @@ namespace
 			EngineTimers::Install();  // nach Community Shaders (Detours verkettet sich dahinter)
 			Hotkey::Register();
 			Menu::Register();
+			TextureStream::InstallLate();
 		}
 	}
 }

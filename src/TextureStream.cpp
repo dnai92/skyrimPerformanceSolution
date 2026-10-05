@@ -1152,8 +1152,83 @@ namespace TextureStream
 			}
 		}
 
+
+		// ---------------- Diagnose: wer legt Dateitexturen an? (ID3D11Device::CreateTexture2D, vtable-Index 5) ----------------
+		// Stufe 3 griff nie (unsere Lade-Hooks liefen 0x) -> echten Ladeweg im Spiel messen: Aufrufkette in SkyrimSE.exe
+		// fuer Texturen mit Mip-Kette und Anfangsdaten (= aus Dateien) zaehlen.
+		extern "C" __declspec(dllimport) unsigned short __stdcall RtlCaptureStackBackTrace(unsigned long, unsigned long, void**, unsigned long*);
+
+		using CreateTex2DFn = std::int32_t (*)(W::ID3D11Device*, const W::D3D11_TEXTURE2D_DESC*, const W::D3D11_SUBRESOURCE_DATA*, W::ID3D11Texture2D**);
+		CreateTex2DFn                                  g_origCreateTex2D = nullptr;
+		std::mutex                                     g_chainLock;
+		std::unordered_map<std::string, std::uint32_t> g_chains;
+
+		std::int32_t ProbeCreateTex2D(W::ID3D11Device* a_self, const W::D3D11_TEXTURE2D_DESC* a_desc, const W::D3D11_SUBRESOURCE_DATA* a_init, W::ID3D11Texture2D** a_out)
+		{
+			if (a_desc && a_init && a_desc->mipLevels > 1 && a_desc->width >= 256) {
+				void*               frames[32]{};
+				const auto          n = RtlCaptureStackBackTrace(1, 32, frames, nullptr);
+				const std::uintptr_t base = REL::Module::get().base();
+				std::string          key;
+				int                  found = 0;
+				for (unsigned i = 0; i < n && found < 5; ++i) {
+					const auto a = reinterpret_cast<std::uintptr_t>(frames[i]);
+					if (a >= base && a - base < 0x4000000) {
+						key += std::format("{}{:X}", found ? ">" : "", a - base);
+						++found;
+					}
+				}
+				if (key.empty()) {
+					key = "(nicht aus SkyrimSE.exe)";
+				}
+				std::scoped_lock lock(g_chainLock);
+				++g_chains[key];
+			}
+			return g_origCreateTex2D(a_self, a_desc, a_init, a_out);
+		}
+
+		void ReportChains()
+		{
+			std::vector<std::pair<std::string, std::uint32_t>> list;
+			{
+				std::scoped_lock lock(g_chainLock);
+				list.assign(g_chains.begin(), g_chains.end());
+				g_chains.clear();
+			}
+			if (list.empty()) {
+				return;
+			}
+			std::ranges::sort(list, [](const auto& a, const auto& b) { return a.second > b.second; });
+			static const REL::Offset2ID offset2id;
+			const auto                  name = [&](std::uintptr_t a_rva) {
+				auto it = std::upper_bound(offset2id.begin(), offset2id.end(), a_rva, [](std::uintptr_t a_off, const auto& a_map) { return a_off < a_map.offset; });
+				if (it == offset2id.begin()) {
+					return std::format("0x{:X}", a_rva);
+				}
+				--it;
+				return std::format("{}+0x{:X}", it->id, a_rva - it->offset);
+			};
+			logger::info("[TextureStream] Ladeweg-Diagnose: Dateitexturen nach Aufrufkette (SkyrimSE.exe, ID+Offset):");
+			for (std::size_t i = 0; i < list.size() && i < 8; ++i) {
+				std::string chain;
+				std::size_t pos = 0;
+				const auto& k = list[i].first;
+				while (pos < k.size() && k[0] != '(') {
+					const auto end = k.find('>', pos);
+					const auto rva = std::strtoull(k.substr(pos, end - pos).c_str(), nullptr, 16);
+					chain += (chain.empty() ? "" : " <- ") + name(rva);
+					if (end == std::string::npos) {
+						break;
+					}
+					pos = end + 1;
+				}
+				logger::info("[TextureStream]   {:5}x  {}", list[i].second, chain.empty() ? k : chain);
+			}
+		}
+
 		void Report()
 		{
+			ReportChains();
 			std::uint32_t managed = 0, eligible = 0, reduced = 0, probeBad = 0;
 			double        fullMB = 0, curMB = 0;
 			for (const auto& [r, st] : g_tex) {
@@ -1219,6 +1294,24 @@ namespace TextureStream
 		g_tex.clear();
 		g_reducedCount = 0;
 		logger::info("[TextureStream] Reset ({}): {} gehaltene Texturen und Durchlauf freigegeben, {} Auftraege verworfen", a_reason, held, jobs);
+	}
+
+	void InstallLate()
+	{
+		const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
+		const auto device = renderer ? renderer->GetRuntimeData().forwarder : nullptr;
+		if (!device) {
+			logger::warn("TextureStream: kein Device fuer Ladeweg-Diagnose");
+			return;
+		}
+		auto**        vtbl = *reinterpret_cast<void***>(device);
+		std::uint32_t old = 0;
+		if (REX::W32::VirtualProtect(&vtbl[5], sizeof(void*), 0x40, &old)) {
+			g_origCreateTex2D = reinterpret_cast<CreateTex2DFn>(vtbl[5]);
+			vtbl[5] = reinterpret_cast<void*>(&ProbeCreateTex2D);
+			REX::W32::VirtualProtect(&vtbl[5], sizeof(void*), old, &old);
+			logger::info("TextureStream: Ladeweg-Diagnose aktiv (CreateTexture2D)");
+		}
 	}
 
 	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget)
