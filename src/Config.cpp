@@ -119,6 +119,13 @@ namespace Config
 		ac.pointLights = ini.GetBoolValue("ActorShadowCulling", "bPointLights", ac.pointLights);
 		logger::info("ActorShadowCulling: {} | ab Distanz {:.0f} | Punktlichter {}", ac.enabled ? "AN" : "AUS", ac.minDistance, ac.pointLights);
 
+		auto& lg = lightGather;
+		lg.enabled = ini.GetBoolValue("LightGatherThrottle", "bEnabled", lg.enabled);
+		lg.minMove = static_cast<float>(ini.GetDoubleValue("LightGatherThrottle", "fMinMove", lg.minMove));
+		lg.minRadiusChange = static_cast<float>(ini.GetDoubleValue("LightGatherThrottle", "fMinRadiusChange", lg.minRadiusChange));
+		lg.maxAgeMs = static_cast<float>(ini.GetDoubleValue("LightGatherThrottle", "fMaxAgeMs", lg.maxAgeMs));
+		logger::info("LightGatherThrottle: {} | Bewegung >= {:.0f} | Radius +-{:.0f} | spaetestens nach {:.0f} ms", lg.enabled ? "AN" : "AUS", lg.minMove, lg.minRadiusChange, lg.maxAgeMs);
+
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
 		sky.minRadius = static_cast<float>(ini.GetDoubleValue("SkylightingCulling", "fMinRadius", sky.minRadius));

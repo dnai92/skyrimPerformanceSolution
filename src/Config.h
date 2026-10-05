@@ -85,6 +85,16 @@ namespace Config
 	};
 	inline ActorShadowCulling actorShadowCulling;  // [ActorShadowCulling]
 
+	// Licht-Geometrie-Zuordnung dynamischer Punktlichter nicht in jedem Frame neu berechnen (siehe LightGather.h)
+	struct LightGather
+	{
+		bool  enabled = true;
+		float minMove = 8.0f;           // Licht muss sich mindestens so weit bewegt haben (Spielereinheiten) ...
+		float minRadiusChange = 16.0f;  // ... oder der Radius sich so stark geaendert haben ...
+		float maxAgeMs = 150.0f;        // ... oder die letzte Suche so lange her sein
+	};
+	inline LightGather lightGather;  // [LightGatherThrottle]
+
 	void Load();
 
 	// Prueft (alle ~2 s, Main-Thread) ob die INI geaendert wurde und laedt sie dann neu

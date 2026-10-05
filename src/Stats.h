@@ -15,6 +15,7 @@ namespace Stats
 		FsmpWaitMain,         // Main-Thread wartet in hdtsmp64.dll (SwitchToThread/Sleep/Wait/Locks)
 		CbpcWaitMain,         // Main-Thread wartet in cbp.dll
 		GameWaitMain,         // Main-Thread wartet in SkyrimSE.exe selbst (Engine-Spin-Waits)
+		LightGather,          // Licht-Geometrie-Zuordnung dynamischer Punktlichter (tatsaechlich ausgefuehrt)
 
 		kTotal
 	};
@@ -29,6 +30,7 @@ namespace Stats
 		"FSMP Warten (Main)",
 		"CBPC Warten (Main)",
 		"Engine Warten (Main)",
+		"Licht-Zuordnung",
 	};
 
 	// Zaehler pro Frame (Meshes, die in Culling-Listen aufgenommen bzw. verworfen werden)
@@ -62,6 +64,8 @@ namespace Stats
 		InstancedCalls,   // dafuer abgesetzte Instanced-Draw-Calls
 		ActorShadowKept,  // geskinnte Meshes in Schattenkarten (Sonne + Punktlicht)
 		ActorShadowCulled,// davon wegen Entfernung verworfen
+		LightGatherCalls,   // Licht-Zuordnungen dynamischer Punktlichter (ausgefuehrt)
+		LightGatherSkipped, // davon uebersprungen (Licht kaum bewegt)
 
 		kTotal
 	};
@@ -95,6 +99,8 @@ namespace Stats
 		"Instancing Draw-Calls",
 		"Charakter-Schatten behalten",
 		"Charakter-Schatten gecullt",
+		"Licht-Zuordnung ausgefuehrt",
+		"Licht-Zuordnung gespart",
 	};
 
 	void Init();
