@@ -66,6 +66,9 @@ namespace Stats
 		ActorShadowCulled,// davon wegen Entfernung verworfen
 		LightGatherCalls,   // Licht-Zuordnungen dynamischer Punktlichter (ausgefuehrt)
 		LightGatherSkipped, // davon uebersprungen (Licht kaum bewegt)
+		PrunedSun,          // im Sonnenschatten-Durchlauf uebersprungene Knoten (samt Inhalt)
+		PrunedPoint,        // im Punktlicht-Durchlauf uebersprungene Knoten
+		PrunedPrecip,       // im Niederschlags-/Skylighting-Durchlauf uebersprungene Knoten
 
 		kTotal
 	};
@@ -101,6 +104,9 @@ namespace Stats
 		"Charakter-Schatten gecullt",
 		"Licht-Zuordnung ausgefuehrt",
 		"Licht-Zuordnung gespart",
+		"Knoten uebersprungen Sonne",
+		"Knoten uebersprungen Punktlicht",
+		"Knoten uebersprungen Regen/Sky",
 	};
 
 	void Init();

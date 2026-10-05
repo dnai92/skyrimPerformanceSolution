@@ -95,6 +95,14 @@ namespace Config
 	};
 	inline LightGather lightGather;  // [LightGatherThrottle]
 
+	// Ganze Teilbaeume (Knoten samt Inhalt) im Culling-Durchlauf ueberspringen, wenn schon die Huelle des Knotens
+	// die jeweilige Culling-Regel erfuellt - Ergebnis identisch, spart den Besuch aller Kinder.
+	struct SubtreePruning
+	{
+		bool enabled = true;
+	};
+	inline SubtreePruning subtreePruning;  // [SubtreePruning]
+
 	// Laedt SkyrimPerf.ini (Vorgaben aus dem Mod-Paket) und darueber SkyrimPerf_User.ini (Werte aus dem Menue im Spiel)
 	void Load();
 

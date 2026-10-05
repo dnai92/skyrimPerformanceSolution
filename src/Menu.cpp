@@ -75,6 +75,7 @@ namespace Menu
 			Toggle("Decal culling", Config::decalCulling.enabled, "Small decals (footprints, blood, dirt) far away are not drawn.");
 			Toggle("Shadow instancing", Config::shadowInstancing.enabled, "Draws identical simple meshes in sun shadows with one draw call.");
 			Toggle("Light assignment throttle", Config::lightGather.enabled, "Moving lights (torches, flickering lights) only search for the objects they light when they really moved.");
+			Toggle("Subtree pruning", Config::subtreePruning.enabled, "Skips whole groups of objects in the shadow and skylighting passes when the group as a whole is already small and far enough to be culled. Same result, less work.");
 
 			ImGuiMCP::SeparatorText("Experimental (known side effects)");
 			Toggle("Depth pre-pass culling", Config::depthPrepassCulling.enabled, "Can make whole objects disappear. Default OFF.");

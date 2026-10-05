@@ -119,7 +119,7 @@ def main():
         block = sec[i:].split("\n-- ")[0].splitlines()[1:]
         return block
 
-    for title in ("-- Top 40 Funktionen exklusiv", "-- Top 40 Funktionen inklusiv"):
+    for title in [m for m in re.findall(r"-- Top \d+ Funktionen (?:exklusiv|inklusiv)", sec)][:2]:
         print("==", title.strip("- "))
         n = 0
         for line in parts(title):

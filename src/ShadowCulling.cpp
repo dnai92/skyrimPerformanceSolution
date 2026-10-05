@@ -270,6 +270,28 @@ namespace ShadowCulling
 			return Kind::kOther;
 		}
 
+		// Regel nur auf die Huelle (Kugel) angewendet. Fuer einen Knoten gilt: jedes Kind liegt innerhalb der Huelle,
+		// ist also hoechstens so gross und mindestens so weit entfernt -> trifft die Regel auf den Knoten zu, dann auf
+		// jedes Kind (Grundlage fuer das Ueberspringen ganzer Teilbaeume).
+		bool ShouldCullBound(const Config::CullRule& a_rule, const RE::NiBound& a_bound, std::uint32_t a_cascade, float a_radiusScale) noexcept
+		{
+			if (!a_rule.enabled || a_cascade < a_rule.minCascade || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+				return false;
+			}
+			const float radius = a_bound.radius * a_radiusScale;
+			if (a_bound.radius <= 0.0f || radius >= a_rule.maxRadius) {
+				return false;
+			}
+			const float dx = a_bound.center.x - g_camX.load(std::memory_order_relaxed);
+			const float dy = a_bound.center.y - g_camY.load(std::memory_order_relaxed);
+			const float dz = a_bound.center.z - g_camZ.load(std::memory_order_relaxed);
+			const float distance = std::sqrt(dx * dx + dy * dy + dz * dz) - a_bound.radius;
+			if (distance <= a_rule.minDistance) {
+				return false;
+			}
+			return radius / distance < a_rule.minAngularSize;
+		}
+
 		bool ShouldCull(const Config::CullRule& a_rule, const RE::BSGeometry& a_geom, std::uint32_t a_cascade, float a_radiusScale = 1.0f) noexcept
 		{
 			if (!a_rule.enabled || a_cascade < a_rule.minCascade || !Config::masterEnabled.load(std::memory_order_relaxed)) {
@@ -585,6 +607,89 @@ namespace ShadowCulling
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
+
+		// ---- Teilbaeume ueberspringen (Process = vfunc 0x16, wird fuer jeden Knoten/jedes Objekt im Durchlauf aufgerufen) ----
+		thread_local int g_insideActor = 0;  // Figuren nie ueberspringen (ihre Schatten haben eigene Regeln)
+
+		bool IsActorRoot(RE::NiAVObject* a_obj) noexcept
+		{
+			const auto ref = a_obj->GetUserData();
+			return ref && (ref->GetFormType() == RE::FormType::ActorCharacter);
+		}
+
+		const RE::BSCullingProcess* PrecipCuller() noexcept
+		{
+			const auto sky = RE::Sky::GetSingleton();
+			return sky && sky->precip ? sky->precip->occlusionData.cullingProcess : nullptr;
+		}
+
+		// true = Knoten samt Inhalt ueberspringen
+		bool ShouldPrune(RE::BSCullingProcess* a_this, RE::NiAVObject* a_obj, bool a_parabolic) noexcept
+		{
+			const auto node = a_obj ? a_obj->AsNode() : nullptr;
+			if (!node || g_insideActor > 0 || !Config::subtreePruning.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+				return false;
+			}
+			const auto& bound = node->worldBound;
+			if (bound.radius <= 0.0f) {
+				return false;
+			}
+			if (a_parabolic) {
+				if (ShouldCullBound(Config::pointLightCulling, bound, UINT32_MAX, 1.0f)) {
+					Stats::Count(Stats::Counter::PrunedPoint);
+					return true;
+				}
+				return false;
+			}
+			if (a_this == PrecipCuller()) {
+				const auto& sky = Config::skylightingCulling;
+				if (sky.enabled && bound.radius < sky.minRadius) {
+					Stats::Count(Stats::Counter::PrunedPrecip);
+					return true;
+				}
+				return false;
+			}
+			std::uint32_t cascade = 0;
+			switch (Classify(a_this, cascade)) {
+			case Kind::kSun:
+				if (g_cacheSkip.load(std::memory_order_relaxed) && Config::cascadeCache.skipDraws && cascade >= Config::cascadeCache.cascade) {
+					return false;  // Kaskaden-Cache entscheidet selbst
+				}
+				if (g_sunCullAllowed.load(std::memory_order_relaxed) &&
+					ShouldCullBound(Config::shadowCulling, bound, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
+					Stats::Count(Stats::Counter::PrunedSun);
+					return true;
+				}
+				return false;
+			case Kind::kPoint:
+				if (ShouldCullBound(Config::pointLightCulling, bound, UINT32_MAX, 1.0f)) {
+					Stats::Count(Stats::Counter::PrunedPoint);
+					return true;
+				}
+				return false;
+			default:
+				return false;
+			}
+		}
+
+		template <int N, bool Parabolic>
+		struct Process
+		{
+			static void thunk(RE::BSCullingProcess* a_this, RE::NiAVObject* a_obj, std::uint32_t a_arg)
+			{
+				if (a_obj && IsActorRoot(a_obj)) {
+					++g_insideActor;
+					func(a_this, a_obj, a_arg);
+					--g_insideActor;
+					return;
+				}
+				if (ShouldPrune(a_this, a_obj, Parabolic)) {
+					return;
+				}
+				func(a_this, a_obj, a_arg);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
 	}
 
 	void Install()
@@ -596,6 +701,13 @@ namespace ShadowCulling
 		REL::Relocation<std::uintptr_t> parabolicVtbl{ RE::VTABLE_BSParabolicCullingProcess[0] };
 		AppendVirtualParabolic::func = parabolicVtbl.write_vfunc(0x18, AppendVirtualParabolic::thunk);
 		logger::info("Hook installiert: BSParabolicCullingProcess::AppendVirtual (vfunc 0x18)");
+
+		// Teilbaeume ueberspringen: Process (vfunc 0x16) der drei Culler-Arten
+		REL::Relocation<std::uintptr_t> geomListVtbl{ RE::VTABLE_BSGeometryListCullingProcess[0] };
+		Process<0, false>::func = vtbl.write_vfunc(0x16, Process<0, false>::thunk);
+		Process<1, true>::func = parabolicVtbl.write_vfunc(0x16, Process<1, true>::thunk);
+		Process<2, false>::func = geomListVtbl.write_vfunc(0x16, Process<2, false>::thunk);
+		logger::info("Hook installiert: Process (vfunc 0x16) fuer BSCullingProcess, BSParabolicCullingProcess, BSGeometryListCullingProcess");
 	}
 
 	void InstallLate()

@@ -52,6 +52,7 @@ namespace Config
 			f("ActorShadowCulling", "fMinDistance", actorShadowCulling.minDistance);
 			b("ActorShadowCulling", "bPointLights", actorShadowCulling.pointLights);
 			b("LightGatherThrottle", "bEnabled", lightGather.enabled);
+			b("SubtreePruning", "bEnabled", subtreePruning.enabled);
 			f("LightGatherThrottle", "fMinMove", lightGather.minMove);
 			f("LightGatherThrottle", "fMinRadiusChange", lightGather.minRadiusChange);
 			f("LightGatherThrottle", "fMaxAgeMs", lightGather.maxAgeMs);
@@ -184,6 +185,9 @@ namespace Config
 		lg.minRadiusChange = static_cast<float>(ini.GetDoubleValue("LightGatherThrottle", "fMinRadiusChange", lg.minRadiusChange));
 		lg.maxAgeMs = static_cast<float>(ini.GetDoubleValue("LightGatherThrottle", "fMaxAgeMs", lg.maxAgeMs));
 		logger::info("LightGatherThrottle: {} | Bewegung >= {:.0f} | Radius +-{:.0f} | spaetestens nach {:.0f} ms", lg.enabled ? "AN" : "AUS", lg.minMove, lg.minRadiusChange, lg.maxAgeMs);
+
+		subtreePruning.enabled = ini.GetBoolValue("SubtreePruning", "bEnabled", subtreePruning.enabled);
+		logger::info("SubtreePruning: {}", subtreePruning.enabled ? "AN" : "AUS");
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);
