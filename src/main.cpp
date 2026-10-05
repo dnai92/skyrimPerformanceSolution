@@ -51,8 +51,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 		logger::warn("Spielversion {} wird nicht unterstuetzt (nur 1.6.1170) - SkyrimPerf bleibt inaktiv", version.string());
 		SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
 			if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
-				RE::DebugMessageBox(std::format("SkyrimPerf: game version {} is not supported (only 1.6.1170). The plugin stays inactive.",
-					REL::Module::get().version().string()).c_str());
+				const auto v = REL::Module::get().version().string();
+				RE::DebugMessageBox((Menu::IsGerman() ? std::format("SkyrimPerf: Spielversion {} wird nicht unterstützt (nur 1.6.1170). Das Plugin bleibt inaktiv.", v) :
+				                                        std::format("SkyrimPerf: game version {} is not supported (only 1.6.1170). The plugin stays inactive.", v)).c_str());
 			}
 		});
 		return true;

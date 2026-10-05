@@ -198,7 +198,7 @@ namespace Menu
 				T("Bigger objects always keep their shadow.", "Größere Objekte behalten immer ihren Schatten."));
 			Slider(T("Min. apparent size", "Min. scheinbare Größe"), a_rule.minAngularSize, 0.001f, 0.1f, "%.3f",
 				T("Radius / distance. Objects that appear smaller than this lose their shadow. Higher = more culling.",
-					"Radius / Entfernung. Objekte, die kleiner erscheinen, verlieren ihren Schatten. Höher = mehr Culling."));
+					"Radius / Entfernung. Objekte, die kleiner erscheinen, verlieren ihren Schatten. Höher = mehr wird weggelassen."));
 			ImGuiMCP::PopID();
 		}
 
@@ -214,32 +214,32 @@ namespace Menu
 											"Mit diesem Schalter (oder der Taste) FPS und Bild mit und ohne SkyrimPerf vergleichen. Der 10-Sekunden-Bericht in SkyrimPerf.log zeigt die Zahlen."));
 
 			ImGuiMCP::SeparatorText(T("Optimizations", "Optimierungen"));
-			Toggle(T("Sun shadow culling", "Sonnenschatten-Culling"), Config::shadowCulling.enabled,
+			Toggle(T("Sun shadow culling", "Sonnenschatten kleiner Objekte weglassen"), Config::shadowCulling.enabled,
 				T("Small, far objects do not cast sun shadows.", "Kleine, ferne Objekte werfen keinen Sonnenschatten."));
-			Toggle(T("Torch / point light shadow culling", "Fackel-/Punktlichtschatten-Culling"), Config::pointLightCulling.enabled,
+			Toggle(T("Torch / point light shadow culling", "Fackelschatten kleiner Objekte weglassen"), Config::pointLightCulling.enabled,
 				T("Small, far objects do not cast shadows from torches and fires.", "Kleine, ferne Objekte werfen keinen Schatten von Fackeln und Feuern."));
-			Toggle(T("Character shadow culling", "Figurenschatten-Culling"), Config::actorShadowCulling.enabled,
+			Toggle(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"), Config::actorShadowCulling.enabled,
 				T("Characters far away do not cast shadows.", "Weit entfernte Figuren werfen keinen Schatten."));
-			Toggle(T("Skylighting culling (Community Shaders)", "Skylighting-Culling (Community Shaders)"), Config::skylightingCulling.enabled,
-				T("Small objects are left out of the skylighting occlusion map.", "Kleine Objekte werden in der Skylighting-Verdeckungskarte weggelassen."));
-			Toggle(T("Decal culling", "Decal-Culling"), Config::decalCulling.enabled,
-				T("Small decals (footprints, blood, dirt) far away are not drawn.", "Kleine Decals (Fußspuren, Blut, Schmutz) in der Ferne werden nicht gezeichnet."));
-			Toggle(T("Shadow instancing", "Schatten-Instancing"), Config::shadowInstancing.enabled,
-				T("Draws identical simple meshes in sun shadows with one draw call.", "Zeichnet gleiche einfache Meshes im Sonnenschatten mit einem Draw-Call."));
+			Toggle(T("Skylighting culling (Community Shaders)", "Himmelslicht: kleine Objekte weglassen (Community Shaders)"), Config::skylightingCulling.enabled,
+				T("Small objects are left out of the skylighting occlusion map.", "Kleine Objekte werden in der Himmelslicht-Karte weggelassen."));
+			Toggle(T("Decal culling", "Ferne Bodendetails weglassen"), Config::decalCulling.enabled,
+				T("Small decals (footprints, blood, dirt) far away are not drawn.", "Kleine Bodendetails (Fußspuren, Blut, Schmutz) in der Ferne werden nicht gezeichnet."));
+			Toggle(T("Shadow instancing", "Gleiche Schatten bündeln"), Config::shadowInstancing.enabled,
+				T("Draws identical simple meshes in sun shadows with one draw call.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang."));
 			Toggle(T("Light assignment throttle", "Licht-Zuordnung drosseln"), Config::lightGather.enabled,
 				T("Moving lights (torches, flickering lights) only search for the objects they light when they really moved.",
 					"Bewegte Lichter (Fackeln, flackernde Lichter) suchen die beleuchteten Objekte nur neu, wenn sie sich wirklich bewegt haben."));
 			Toggle(T("Subtree pruning", "Teilbäume überspringen"), Config::subtreePruning.enabled,
 				T("Skips whole groups of objects in the shadow and skylighting passes when the group as a whole is already small and far enough to be culled. Same result, less work.",
-					"Überspringt ganze Objektgruppen im Schatten- und Skylighting-Durchlauf, wenn schon die Gruppe als Ganzes klein und weit genug ist. Gleiches Ergebnis, weniger Arbeit."));
-			Toggle(T("Texture streaming", "Texture-Streaming"), Config::textureStream.enabled,
+					"Überspringt ganze Objektgruppen im Schatten- und Himmelslicht-Durchlauf, wenn schon die Gruppe als Ganzes klein und weit genug ist. Gleiches Ergebnis, weniger Arbeit."));
+			Toggle(T("Texture streaming", "Textur-Streaming"), Config::textureStream.enabled,
 				T("Textures of far objects are shrunk in VRAM and reloaded at full size when you come closer.",
 					"Texturen ferner Objekte werden im VRAM verkleinert und bei Annäherung in voller Größe neu geladen."));
 
 			ImGuiMCP::SeparatorText(T("Experimental (known side effects)", "Experimentell (bekannte Nebenwirkungen)"));
-			Toggle(T("Depth pre-pass culling", "Tiefenvorpass-Culling"), Config::depthPrepassCulling.enabled,
+			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
 				T("Can make whole objects disappear. Default OFF.", "Kann ganze Objekte verschwinden lassen. Standard AUS."));
-			Toggle(T("Main view micro culling", "Mikro-Culling Hauptansicht"), Config::mainViewCulling.enabled,
+			Toggle(T("Main view micro culling", "Winzige Objekte im Bild weglassen"), Config::mainViewCulling.enabled,
 				T("Tiny far objects are not drawn at all - can pop in. Default OFF.", "Winzige ferne Objekte werden gar nicht gezeichnet - können aufploppen. Standard AUS."));
 			Toggle(T("Far shadow cascade cache", "Cache ferne Schattenkaskade"), Config::cascadeCache.enabled,
 				T("Far sun shadows only every 2nd frame - flickers with a low sun. Default OFF.", "Ferne Sonnenschatten nur jeden 2. Frame - flackert bei tiefer Sonne. Standard AUS."));
@@ -252,12 +252,12 @@ namespace Menu
 				"Löscht SkyrimPerf_User.ini und lädt die Standardwerte aus SkyrimPerf.ini (dauert bis zu 2 s)."));
 			AtomicToggle(T("Analysis logging (costs performance)", "Analyse-Protokoll (kostet Leistung)"), Config::analysis,
 				T("Extra diagnostics in SkyrimPerf.log (incl. detailed texture streaming report every 10 s). Costs 2-4 ms per frame - only for troubleshooting.",
-					"Zusätzliche Diagnose in SkyrimPerf.log (inkl. ausführlichem Texture-Streaming-Bericht alle 10 s). Kostet 2-4 ms pro Frame - nur zur Fehlersuche."));
+					"Zusätzliche Diagnose in SkyrimPerf.log (inkl. ausführlichem Textur-Streaming-Bericht alle 10 s). Kostet 2-4 ms pro Frame - nur zur Fehlersuche."));
 		}
 
 		void __stdcall RenderShadows()
 		{
-			ImGuiMCP::SeparatorText(T("Sun shadow culling", "Sonnenschatten-Culling"));
+			ImGuiMCP::SeparatorText(T("Sun shadow culling", "Sonnenschatten kleiner Objekte weglassen"));
 			Toggle(T("Enabled##sun", "Aktiv##sun"), Config::shadowCulling.enabled,
 				T("Small, far objects do not cast sun shadows.", "Kleine, ferne Objekte werfen keinen Sonnenschatten."));
 			RuleControls("sun", Config::shadowCulling, 5000.0f);
@@ -267,12 +267,12 @@ namespace Menu
 				Config::sunMinElevation.store(elevation);
 			}
 
-			ImGuiMCP::SeparatorText(T("Torch / point light shadow culling", "Fackel-/Punktlichtschatten-Culling"));
+			ImGuiMCP::SeparatorText(T("Torch / point light shadow culling", "Fackelschatten kleiner Objekte weglassen"));
 			Toggle(T("Enabled##point", "Aktiv##point"), Config::pointLightCulling.enabled,
 				T("Small, far objects do not cast shadows from torches and fires.", "Kleine, ferne Objekte werfen keinen Schatten von Fackeln und Feuern."));
 			RuleControls("point", Config::pointLightCulling, 5000.0f);
 
-			ImGuiMCP::SeparatorText(T("Character shadow culling", "Figurenschatten-Culling"));
+			ImGuiMCP::SeparatorText(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"));
 			Toggle(T("Enabled##actor", "Aktiv##actor"), Config::actorShadowCulling.enabled,
 				T("Characters far away do not cast shadows.", "Weit entfernte Figuren werfen keinen Schatten."));
 			Slider(T("From distance##actor", "Ab Entfernung##actor"), Config::actorShadowCulling.minDistance, Config::ActorShadowCulling::kMinAllowed, 8000.0f, "%.0f",
@@ -281,9 +281,9 @@ namespace Menu
 			Toggle(T("Also torch shadows##actor", "Auch Fackelschatten##actor"), Config::actorShadowCulling.pointLights,
 				T("Also leave out character shadows cast by torches and fires.", "Auch Figurenschatten von Fackeln und Feuern weglassen."));
 
-			ImGuiMCP::SeparatorText(T("Shadow instancing", "Schatten-Instancing"));
+			ImGuiMCP::SeparatorText(T("Shadow instancing", "Gleiche Schatten bündeln"));
 			Toggle(T("Enabled##inst", "Aktiv##inst"), Config::shadowInstancing.enabled,
-				T("Draws identical simple meshes in sun shadows with one draw call.", "Zeichnet gleiche einfache Meshes im Sonnenschatten mit einem Draw-Call."));
+				T("Draws identical simple meshes in sun shadows with one draw call.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang."));
 		}
 
 		void __stdcall RenderScene()
@@ -303,13 +303,13 @@ namespace Menu
 			ImGuiMCP::SeparatorText(T("Subtree pruning", "Teilbäume überspringen"));
 			Toggle(T("Enabled##prune", "Aktiv##prune"), Config::subtreePruning.enabled,
 				T("Skips whole groups of objects in culling passes when the group as a whole already meets the culling rule.",
-					"Überspringt ganze Objektgruppen, wenn schon die Gruppe als Ganzes die Culling-Regel erfüllt."));
+					"Überspringt ganze Objektgruppen, wenn schon die Gruppe als Ganzes die Regel erfüllt."));
 			Toggle(T("Sun / moon shadows##prune", "Sonnen-/Mondschatten##prune"), Config::subtreePruning.sun,
 				T("Apply in the sun (moon at night) shadow pass.", "Im Schattendurchlauf der Sonne (nachts Mond) anwenden."));
-			Toggle(T("Rain / skylighting map##prune", "Regen-/Skylighting-Karte##prune"), Config::subtreePruning.precip,
-				T("Apply in the precipitation / skylighting occlusion pass.", "Im Niederschlags-/Skylighting-Verdeckungsdurchlauf anwenden."));
+			Toggle(T("Rain / skylighting map##prune", "Regen-/Himmelslicht-Karte##prune"), Config::subtreePruning.precip,
+				T("Apply in the precipitation / skylighting occlusion pass.", "Im Durchlauf für Regen und Himmelslicht anwenden."));
 
-			ImGuiMCP::SeparatorText(T("Texture streaming", "Texture-Streaming"));
+			ImGuiMCP::SeparatorText(T("Texture streaming", "Textur-Streaming"));
 			Toggle(T("Downscale distant textures##ts", "Ferne Texturen verkleinern##ts"), Config::textureStream.enabled,
 				T("Textures of far objects (also behind you) are shrunk in VRAM and reloaded at full size from disk when you come closer. Files are never changed. Off = everything goes back to full size.",
 					"Texturen ferner Objekte (auch hinter dir) werden im VRAM verkleinert und bei Annäherung in voller Größe von der Platte neu geladen. Dateien werden nie verändert. Aus = alles wieder in voller Größe."));
@@ -349,21 +349,27 @@ namespace Menu
 				Config::textureStream.minEdge = p;
 			}
 
-			ImGuiMCP::SeparatorText(T("Skylighting culling (Community Shaders)", "Skylighting-Culling (Community Shaders)"));
+			ImGuiMCP::SeparatorText(T("Skylighting culling (Community Shaders)", "Himmelslicht: kleine Objekte weglassen (Community Shaders)"));
 			Toggle(T("Enabled##sky", "Aktiv##sky"), Config::skylightingCulling.enabled,
-				T("Small objects are left out of the skylighting occlusion map.", "Kleine Objekte werden in der Skylighting-Verdeckungskarte weggelassen."));
+				T("Small objects are left out of the skylighting occlusion map.", "Kleine Objekte werden in der Himmelslicht-Karte weggelassen."));
 			Slider(T("Min. object radius##sky", "Min. Objektradius##sky"), Config::skylightingCulling.minRadius, 32.0f, 512.0f, "%.0f",
 				T("Objects smaller than this are left out.", "Kleinere Objekte werden weggelassen."));
 
-			ImGuiMCP::SeparatorText(T("Decal culling", "Decal-Culling"));
+			ImGuiMCP::SeparatorText(T("Decal culling", "Ferne Bodendetails weglassen"));
 			Toggle(T("Enabled##decal", "Aktiv##decal"), Config::decalCulling.enabled,
-				T("Small decals far away are not drawn.", "Kleine Decals in der Ferne werden nicht gezeichnet."));
+				T("Small decals far away are not drawn.", "Kleine Bodendetails in der Ferne werden nicht gezeichnet."));
 			Slider(T("From distance##decal", "Ab Entfernung##decal"), Config::decalCulling.maxDistance, 500.0f, 5000.0f, "%.0f",
 				T("Decals farther away than this are not drawn. Below 1500 leaves can disappear.",
-					"Weiter entfernte Decals werden nicht gezeichnet. Unter 1500 können Blätter verschwinden."));
-			Slider(T("Max. decal radius##decal", "Max. Decal-Radius##decal"), Config::decalCulling.maxRadius, 10.0f, 500.0f, "%.0f",
-				T("Only decals smaller than this are affected.", "Nur kleinere Decals sind betroffen."));
+					"Weiter entfernte Decals werden nicht gezeichnet. Unter 1500 können Blätter auf dem Boden verschwinden."));
+			Slider(T("Max. decal radius##decal", "Max. Radius##decal"), Config::decalCulling.maxRadius, 10.0f, 500.0f, "%.0f",
+				T("Only decals smaller than this are affected.", "Nur kleinere Bodendetails sind betroffen."));
 		}
+	}
+
+	bool IsGerman()
+	{
+		static const bool german = DetectGerman();
+		return german;
 	}
 
 	void Register()
@@ -372,7 +378,7 @@ namespace Menu
 			logger::warn("SKSE Menu Framework nicht installiert - kein Menue, Einstellungen nur ueber die INI");
 			return;
 		}
-		g_german = DetectGerman();
+		g_german = IsGerman();
 		SKSEMenuFramework::SetSection("SkyrimPerf");
 		SKSEMenuFramework::AddSectionItem(T("Overview", "Übersicht"), RenderOverview);
 		SKSEMenuFramework::AddSectionItem(T("Shadows", "Schatten"), RenderShadows);
