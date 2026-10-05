@@ -10,6 +10,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace TextureStream
 {
@@ -743,6 +744,8 @@ namespace TextureStream
 
 		std::mutex                                     g_sizeLock;
 		std::unordered_map<std::string, std::uint32_t> g_loadEdge;  // Pfad -> max. Kantenlaenge beim Laden
+		std::unordered_set<std::string>                g_neverReduce;  // Laden mit unserer Groesse schlug fehl -> nie wieder
+		thread_local std::string                       t_loadPath;     // Pfad der Textur, fuer die LoadMaxSize einen Wert lieferte
 		bool                                           g_sizesDirty = false;
 		std::atomic<std::uint32_t>                     g_loadedReduced{ 0 };
 		// Diagnose Stufe 3 (je Berichtszeitraum)
@@ -755,7 +758,7 @@ namespace TextureStream
 		std::filesystem::path SizesFile()
 		{
 			auto dir = SKSE::log::log_directory();
-			return dir ? *dir / "SkyrimPerf_TextureSizes.txt" : std::filesystem::path{};
+			return dir ? *dir / "SkyrimPerf_TextureSizes2.txt" : std::filesystem::path{};
 		}
 
 		// a_edge 0 = vergessen (wird wieder voll geladen)
@@ -765,6 +768,9 @@ namespace TextureStream
 				return;
 			}
 			std::scoped_lock lock(g_sizeLock);
+			if (a_edge != 0 && g_neverReduce.contains(a_path)) {
+				a_edge = 0;
+			}
 			if (a_edge == 0) {
 				g_sizesDirty |= g_loadEdge.erase(a_path) > 0;
 			} else if (auto& e = g_loadEdge[a_path]; e != a_edge) {
@@ -848,7 +854,8 @@ namespace TextureStream
 					return 0;
 				}
 				g_loadedReduced.fetch_add(1, std::memory_order_relaxed);
-				return std::max<std::uint32_t>(it->second, static_cast<std::uint32_t>(Config::textureStream.minEdge));
+				t_loadPath = path;
+				return it->second;  // beim Lernen schon auf Gueltigkeit geprueft (SafeLoadEdge)
 			} catch (...) {
 				return 0;
 			}
@@ -881,19 +888,58 @@ namespace TextureStream
 					g_diagPreset.fetch_add(1, std::memory_order_relaxed);
 					g_diagPresetValue.store(static_cast<std::uint32_t>(std::min<std::uint64_t>(a_maxSize, UINT32_MAX)), std::memory_order_relaxed);
 				}
+				t_loadPath.clear();
+				bool changed = false;
 				if (const auto ours = LoadMaxSize(); ours != 0 && (a_maxSize == 0 || ours < a_maxSize)) {
 					a_maxSize = ours;
+					changed = true;
 				}
-				return func(a_device, a_stream, a_out, a_header, a_maxSize, a_6);
+				const auto result = func(a_device, a_stream, a_out, a_header, a_maxSize, a_6);
+				// Sicherheitsnetz: schlaegt das Laden mit unserer Groesse fehl, diese Textur nie wieder verkleinert laden
+				// (0.20.5: zwei Ladenschilder mit krummen Massen -> nicht durch 4 teilbar -> ohne Textur)
+				if (changed && result < 0 && !t_loadPath.empty()) {
+					{
+						std::scoped_lock lock(g_sizeLock);
+						g_neverReduce.insert(t_loadPath);
+						g_loadEdge.erase(t_loadPath);
+						g_sizesDirty = true;
+					}
+					logger::warn("[TextureStream] Laden mit maxsize {} fehlgeschlagen (0x{:X}) - wird nie mehr verkleinert geladen: {}", a_maxSize,
+						static_cast<std::uint32_t>(result), t_loadPath);
+				}
+				return result;
 			}
 			static inline std::int32_t (*func)(void*, void*, void**, void*, std::uint64_t, std::uint64_t) = nullptr;
 		};
+
+		// maxsize fuer den DDS-Lader, der beim Laden garantiert eine gueltige Textur ergibt (0 = voll laden).
+		// Bildet DirectXTK nach: oberste Stufen weglassen, solange Breite oder Hoehe > maxsize. Blockformate brauchen
+		// durch 4 teilbare Masse der neuen obersten Stufe - bei krummen Originalmassen sonst Ladefehler.
+		std::uint32_t SafeLoadEdge(const TexState& a_st, std::uint32_t a_edge) noexcept
+		{
+			if (a_edge == 0 || a_edge >= a_st.FullEdge() || a_st.fullMips <= 1) {
+				return 0;
+			}
+			std::uint32_t skip = 0;
+			while (skip + 1 < a_st.fullMips && (std::max(1u, a_st.fullW >> skip) > a_edge || std::max(1u, a_st.fullH >> skip) > a_edge)) {
+				++skip;
+			}
+			const std::uint32_t w = std::max(1u, a_st.fullW >> skip), h = std::max(1u, a_st.fullH >> skip);
+			if (skip == 0 || w > a_edge || h > a_edge || (a_st.fi.bc && (w % 4 != 0 || h % 4 != 0))) {
+				return 0;
+			}
+			return a_edge;
+		}
 
 		void QueueReload(TexState& a_st, RE::BSGraphics::Texture* a_r, std::uint32_t a_targetEdge)
 		{
 			std::uint32_t skip = 0;
 			while ((a_st.FullEdge() >> (skip + 1)) >= a_targetEdge && skip + 1 < a_st.fullMips) {
 				++skip;
+			}
+			// Blockformate: neue oberste Stufe muss durch 4 teilbar sein (krumme Originalmasse) - sonst lieber groesser
+			while (skip > 0 && a_st.fi.bc && ((std::max(1u, a_st.fullW >> skip) % 4) != 0 || (std::max(1u, a_st.fullH >> skip) % 4) != 0)) {
+				--skip;
 			}
 			Job job;
 			job.reload = true;
@@ -1273,8 +1319,7 @@ namespace TextureStream
 				}
 				// Benoetigte Groesse immer lernen (Stufe 3 wendet sie beim Laden nur bei Druck an)
 				if (seen && st.eligible && (st.probe == Probe::kOk || st.probe == Probe::kNone)) {
-					const auto needed = NeededEdge(st, st.passNeed);
-					RememberEdge(st.path, needed < st.FullEdge() ? needed : 0);
+					RememberEdge(st.path, SafeLoadEdge(st, NeededEdge(st, st.passNeed)));
 				}
 				if (wantRefill && seen && st.eligible && !st.busy && st.hold && st.probe == Probe::kOk && st.Reduced()) {
 					refill.push_back({ r, &st, st.passNeed / static_cast<float>(st.CurEdge()),
