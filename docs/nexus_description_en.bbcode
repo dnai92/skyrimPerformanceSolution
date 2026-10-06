@@ -1,0 +1,69 @@
+[size=5][b]SkyrimPerf[/b][/size]
+[i]Smoother Skyrim on heavily modded setups – without changing a single game file.[/i]
+
+SKSE plugin for [b]Skyrim SE 1.5.97 and AE 1.6.x / 1.7.x[/b]. It streams textures by distance so your GPU no longer runs out of VRAM in cities, cuts draw calls in the shadow passes and removes redundant per-frame engine work. Everything can be toggled live in an in-game menu (English / German, follows the game language) and with a single hotkey, so you can compare with and without the plugin at any time.
+
+[size=4][b]Features[/b][/size]
+[list]
+[*][b]Texture streaming[/b] – Textures of far objects (also behind you) are shrunk in VRAM and reloaded at full size in the background when you come closer. Files on disk are never touched. UI, maps, LOD, fonts and books are excluded.
+[*][b]VRAM budget mode[/b] – Streaming only kicks in when the game uses more than 85 % of the VRAM Windows grants it. With enough VRAM it does nothing and costs nothing.
+[*][b]VRAM refill[/b] – When there is room again, downscaled textures are reloaded at full size, most needed first.
+[*][b]Load at remembered size[/b] – Textures are loaded directly at the size they needed last time (also across sessions and during loading screens), so the VRAM no longer peaks after doors.
+[*][b]RAM buffer[/b] – Textures that are reloaded repeatedly stay in RAM (default 1 GB, adjustable, 0 = off). Mostly useful with 8K texture packs.
+[*][b]Sun shadow culling[/b] – Small, far objects do not cast sun shadows (depends on sun elevation).
+[*][b]Torch shadow culling[/b] – Small, far objects do not cast torch/fire shadows. Objects close to the light keep theirs; off in interiors by default.
+[*][b]Character shadow culling[/b] – Characters far away (default 50 m) do not cast shadows.
+[*][b]Skylighting culling[/b] – Small objects are left out of the Community Shaders skylighting map.
+[*][b]Decal culling[/b] – Footprint-sized decals farther than ~21 m are not drawn.
+[*][b]Shadow instancing[/b] – Identical simple meshes in the sun shadow pass are drawn with one call (AE only).
+[*][b]Light assignment throttle[/b] – Moving lights only re-search the geometry they light when they actually moved.
+[*][b]Subtree pruning[/b] – Whole scene branches are skipped in the sun shadow and skylighting passes when they meet the culling rule.
+[/list]
+
+[size=4][b]Numbers[/b][/size]
+Ryzen 7 5700X, RTX 4070 12 GB, 1920x1200, ~380 plugins, Community Shaders with DLSS + frame generation, 4K textures.
+
+[b]Dragonsreach, VRAM full (hotkey OFF vs ON):[/b]
+[list]
+[*]VRAM usage: 95–98 % → [b]72 %[/b]
+[*]Swapped to system RAM: up to 1.2 GB → [b]~50 MB[/b]
+[*]FPS: 27–33 → [b]41–42[/b]
+[*]Longest frame: 190–280 ms stutters → [b]~35 ms[/b]
+[/list]
+
+[b]Whiterun market:[/b]
+[list]
+[*]Skyrim VRAM: ~10.5 GB (+600 MB swapped) → [b]5.4 GB[/b]
+[*]~1,300 distant textures: [b]0.33 GB instead of 7–8 GB[/b], no visible difference in A/B screenshots
+[*]Light assignment: 2.45 ms → [b]0.15 ms[/b] per frame
+[*]All draw-call optimizations together: [b]−26 % draw calls[/b]
+[/list]
+
+[b]40-minute session:[/b] 0 texture load errors, VRAM 70–82 % during normal play.
+
+[size=4][b]Requirements[/b][/size]
+[list]
+[*]Skyrim SE 1.5.97 or AE 1.6.x / 1.7.x (tested in game on 1.6.1170; patch sites verified against 1.5.97, 1.6.640 and 1.7.104)
+[*][url=https://skse.silverlock.org/]SKSE64[/url]
+[*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url]
+[*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/120352]SKSE Menu Framework[/url] (in-game menu; without it use SkyrimPerf.ini)
+[*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/86492]Community Shaders[/url] (skylighting culling only has an effect with CS)
+[/list]
+Every engine patch checks the game code at startup. If it does not match (unknown game version or another mod patching the same spot), only that feature is switched off – it is listed in the menu and the log.
+
+[size=4][b]SE 1.5.97 users wanted![/b][/size]
+The SE version is verified against the game code but not yet tested in game. Feedback is very welcome – please attach [i]Documents\My Games\Skyrim Special Edition\SKSE\SkyrimPerf.log[/i].
+
+[size=4][b]Tips[/b][/size]
+[list]
+[*][b]Short hitch when walking through doors?[/b] That is usually the autosave on travel together with RaceMenu, whose co-save can take ~1 s to write. Turn off [i]Save on Travel[/i] in the gameplay settings.
+[*]Press [b]Page Up[/b] (assignable in the menu) to compare with and without the plugin. Switching off reloads all textures at full size, which takes a few seconds.
+[*]Something looks different? Open the menu, point the crosshair at it and click [i]Log textures under crosshair[/i], then switch single features off to find the culprit. Please report it with the log.
+[/list]
+
+[size=4][b]Installation[/b][/size]
+Install with Vortex or MO2 like any other mod. Settings: [i]Data\SKSE\Plugins\SkyrimPerf.ini[/i] (defaults); changes from the menu go to [i]SkyrimPerf_User.ini[/i].
+Uninstall: simply remove the mod. Nothing is stored in your save.
+
+[size=4][b]Source[/b][/size]
+GPL-3.0, source code on [url=https://github.com/dnai92/skyrimPerformanceSolution]GitHub[/url].

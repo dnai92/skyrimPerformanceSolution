@@ -18,19 +18,19 @@ so you can compare with and without the plugin at any time.
 | **Texture streaming** | Textures of far objects (also behind the camera) are shrunk in VRAM by dropping their top mip levels on the GPU, and reloaded at full size from disk/BSA in the background when you come closer. Files on disk are never changed. UI, maps, LOD, fonts and books are excluded; items in inventory/barter/crafting previews are always shown at full size. | ON, min. 512–1024 px |
 | **VRAM budget mode** | Streaming only kicks in when the game uses more than 85 % of the video memory Windows grants it, largest savings first. With enough VRAM (or no high-res texture packs) it does nothing and costs nothing. | ON |
 | **VRAM refill** | When usage drops clearly below the threshold (default 10 points), downscaled textures are reloaded at full size again, most needed first, so the VRAM stays as full as useful. | ON |
-| **RAM buffer** | Texture data that had to be reloaded stays in RAM up to a set size (default 1 GB, slider in the menu). Textures that go back and forth then come from RAM instead of disk. Least recently used is dropped first. | 1024 MB |
-| **Load at remembered size** | The size a texture needed last time (also in earlier sessions) is passed to the game's DDS loader, so the top mip levels are never read or uploaded. Lowers the VRAM peak when entering areas. | ON |
+| **RAM buffer** | Texture data that had to be reloaded more than once stays in RAM up to a set size (default 1 GB, slider in the menu). Textures that go back and forth then come from RAM instead of disk — mostly useful with 8K texture packs. Least recently used is dropped first. 0 = off. | 1024 MB |
+| **Load at remembered size** | The size a texture needed last time (also in earlier sessions) is passed to the game's DDS loader, so the top mip levels are never read or uploaded. Also applied during loading screens when VRAM was tight shortly before, so the VRAM no longer peaks at ~97 % after a door. | ON |
 | **Sun shadow culling** | Small, far objects do not cast sun shadows. Shadow length is taken into account (no culling below 25° sun elevation). | ON |
-| **Torch / point light shadow culling** | Small, far objects do not cast shadows from torches and fires. | ON |
+| **Torch / point light shadow culling** | Small, far objects do not cast shadows from torches and fires. Objects close to the light always keep their shadow; not applied in interiors by default (switch in the menu). | ON (exteriors) |
 | **Character shadow culling** | Characters and creatures far away (default 50 m, min. 30 m) do not cast shadows. | ON |
 | **Skylighting culling** | Small objects are left out of the Community Shaders skylighting / precipitation occlusion map. | ON |
-| **Decal culling** | Small decals (footprints, blood, dirt) far away are not drawn. | ON |
+| **Decal culling** | Footprint-sized decals (radius < 32, e.g. Dynamic Footprints) farther than ~21 m are not drawn. Larger decals such as plaster patches on walls stay. | ON |
 | **Shadow instancing** | Identical simple meshes in the sun shadow pass are drawn with one instanced draw call. | ON |
 | **Light assignment throttle** | Moving lights (torches, flickering lights) only re-search the geometry they light when they actually moved — the engine does this for every dynamic light every frame. | ON |
 | **Subtree pruning** | Whole scene-graph branches are skipped in the sun shadow and skylighting passes when the branch as a whole already meets the culling rule. Same result, less traversal. | ON |
 | **In-game menu** | All switches and sliders via SKSE Menu Framework, English and German, saved automatically. | — |
 | **Hotkey** | One key toggles every optimization (default *Page Up*, freely assignable in the menu). | — |
-| **Profiling** | 10-second report in `SkyrimPerf.log` (FPS, frame p99/max, counters per optimization), optional Tracy timeline. | — |
+| **Logging & diagnostics** | One summary line per minute in `SkyrimPerf.log`. The *Analysis logging* switch adds a detailed 10-second report (counters per optimization, VRAM, streaming), and *Log textures under crosshair* writes path and current size of every texture you look at — handy for bug reports. Optional Tracy timeline. | analysis off |
 
 Experimental and **off** by default (known side effects): depth pre-pass culling, main view micro culling, far shadow
 cascade cache.
@@ -50,6 +50,27 @@ Community Shaders with DLSS + frame generation, Skyrim 202X 4K textures. Locatio
 | Visible quality difference | — | none noticed in A/B screenshots |
 | Reload to full size | — | ~10 ms per texture, 4–4.5 GB in ~8 s, **0 errors in > 30 GB reloaded** |
 | Cost of the scene scan | — | ~0.4 ms per frame (time-sliced) |
+
+### Dragonsreach (interior, VRAM full)
+
+Same spot, optimizations toggled with the hotkey, 10-second windows:
+
+| | Optimizations OFF | Optimizations ON |
+|---|---|---|
+| VRAM usage | 95–98 % | **72–73 %** |
+| Swapped to system RAM | up to **1.2 GB** | ~50 MB (after Windows reclaims it) |
+| FPS | 27–33 | **41–42** |
+| Longest frame | **190–280 ms** stutters | ~35 ms |
+
+### Long session (40 min, 0.22.10 / 0.23.0)
+
+| | |
+|---|---|
+| Texture load errors | **0** |
+| VRAM during normal play | 70–82 % (threshold 85 %) |
+| Swapped to system RAM | ~50 MB baseline |
+| VRAM right after a loading screen | 69–82 % (before 0.23.0: up to 97 %) |
+| Textures loaded directly at reduced size per loading screen | 800–900 |
 
 ### Engine work and draw calls
 
@@ -74,6 +95,14 @@ and depth passes, and sun shadows alone cost ~12–14 ms of CPU time per frame.
 | [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444) | yes | |
 | [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352) | optional | In-game menu. Without it, everything is configured in `SkyrimPerf.ini`. |
 | [Community Shaders](https://www.nexusmods.com/skyrimspecialedition/mods/86492) | optional | Skylighting culling only has an effect with CS skylighting. |
+
+## Tips
+
+- **Short hitches when walking through doors** are usually the autosave on travel together with RaceMenu, whose
+  co-save serialization can take ~1 s with many presets/morphs. Turning off *Save on travel* in the game settings
+  removes them. SkyrimPerf does not change this.
+- To compare, press the hotkey: a message top left shows *optimizations ON/OFF*. Switching streaming off reloads all
+  textures at full size, which takes a few seconds and briefly raises VRAM.
 
 ## Installation
 
@@ -121,6 +150,11 @@ SKSE-Plugin für Skyrim SE/AE, das stark gemoddete Spiele flüssiger macht, ohne
 - **Schatten-Culling** für Sonne, Fackeln und Figuren, **Skylighting- und Decal-Culling**, **Schatten-Instancing**:
   rund 26 % weniger Draw-Calls.
 - **Licht-Zuordnung drosseln** (2,45 → 0,15 ms pro Frame) und **Teilbäume überspringen** (−0,7 ms Sonnenschatten).
+- **Drachenfeste mit vollem VRAM:** 72 statt 98 % VRAM, 41 statt 27–33 FPS, keine Ruckler mehr (vorher bis 280 ms).
 - **Menü** auf Deutsch/Englisch (folgt der Spielsprache), **Hotkey** frei belegbar (Standard *Bild auf*).
 
-Voraussetzungen: Skyrim 1.6.1170, SKSE64, Address Library; optional SKSE Menu Framework und Community Shaders.
+Voraussetzungen: Skyrim SE 1.5.97 oder AE 1.6.x/1.7.x (getestet auf 1.6.1170), SKSE64, Address Library;
+optional SKSE Menu Framework und Community Shaders.
+
+**Tipp:** Hängt das Spiel kurz beim Durchschreiten von Türen, ist das meist das automatische Speichern beim
+Gebietswechsel zusammen mit RaceMenu (große Co-Save-Datei). Abhilfe: in den Spieleinstellungen (Gameplay) *Beim Reisen speichern* ausschalten.

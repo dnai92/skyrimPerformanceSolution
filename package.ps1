@@ -9,7 +9,17 @@ New-Item -ItemType Directory -Force "$stage\SKSE\Plugins" | Out-Null
 Copy-Item "$root\build\release\SkyrimPerf.dll", "$root\package\SkyrimPerf.ini" "$stage\SKSE\Plugins"
 $zip = Join-Path $root "dist\SkyrimPerf-$version.zip"
 Remove-Item $zip -ErrorAction SilentlyContinue
-Compress-Archive -Path "$stage\*" -DestinationPath $zip
+# Eintraege mit "/" (Compress-Archive in PowerShell 5.1 schreibt "\" - manche Mod-Manager/Tools stolpern darueber)
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+$archive = [System.IO.Compression.ZipFile]::Open($zip, 'Create')
+try {
+    Get-ChildItem $stage -Recurse -File | ForEach-Object {
+        $entry = $_.FullName.Substring($stage.Length + 1).Replace([char]92, [char]47)
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $_.FullName, $entry, 'Optimal') | Out-Null
+    }
+} finally {
+    $archive.Dispose()
+}
 Remove-Item $stage -Recurse -Force
 Write-Host "Paket: $zip"
 $pdbZip = Join-Path $root "dist\SkyrimPerf-$version-pdb.zip"
