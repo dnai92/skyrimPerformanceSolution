@@ -4,7 +4,7 @@
 
 SKSE plugin that makes **Skyrim Special Edition / Anniversary Edition** run smoother on heavily modded setups —
 without touching a single game file. It cuts draw calls in the shadow passes, removes redundant per-frame engine work
-and **streams textures by distance**, so a 12 GB GPU no longer runs out of VRAM in cities.
+and **streams textures by distance**, so a GPU no longer runs out of VRAM.
 
 Everything can be toggled live in an in-game menu (English / German, follows the game language) and with one hotkey,
 so you can compare with and without the plugin at any time.
