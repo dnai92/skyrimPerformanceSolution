@@ -1343,17 +1343,16 @@ namespace TextureStream
 				const float dx = b.center.x - px, dy = b.center.y - py, dz = b.center.z - pz;
 				const float t = dx * fx + dy * fy + dz * fz;
 				const float centerDist2 = dx * dx + dy * dy + dz * dz;
-				if (b.radius > 0.0f && (t < -b.radius || centerDist2 - t * t > b.radius * b.radius)) {
-					continue;  // Huelle liegt nicht auf dem Sichtstrahl
-				}
+				const bool  onRay = b.radius > 0.0f && t >= -b.radius && centerDist2 - t * t <= b.radius * b.radius;
 				const float centerDist = std::sqrt(centerDist2);
+				// Knoten-Huellen sind nicht immer aktuell (Wurzel) -> alle Knoten durchgehen, nur Geometrie pruefen
 				if (const auto node = obj->AsNode()) {
 					for (const auto& child : node->GetChildren()) {
 						if (child) {
 							stack.push_back(child.get());
 						}
 					}
-				} else if (const auto geom = obj->AsGeometry()) {
+				} else if (const auto geom = obj->AsGeometry(); geom && onRay) {
 					const float dist = std::max(0.0f, centerDist - b.radius);
 					hits.push_back({ geom, dist, dist <= 1.0f ? 1.0e6f : 2.0f * b.radius / dist * g_pixelsPerUnit });
 				}
