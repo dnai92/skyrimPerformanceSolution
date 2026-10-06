@@ -1,5 +1,7 @@
 # Skyrim Performance Solution (SPS)
 
+![Skyrim Performance Solution (SPS)](docs/sps_banner.webp)
+
 SKSE plugin that makes **Skyrim Special Edition / Anniversary Edition** run smoother on heavily modded setups —
 without touching a single game file. It cuts draw calls in the shadow passes, removes redundant per-frame engine work
 and **streams textures by distance**, so a 12 GB GPU no longer runs out of VRAM in cities.
