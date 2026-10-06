@@ -1,73 +1,104 @@
-[size=5][b]Skyrim Performance Solution (SPS)[/b][/size]
-[i]Flüssigeres Skyrim bei stark gemoddeten Spielen – ohne eine einzige Spieldatei zu verändern.[/i]
+[center][size=6][b]Skyrim Performance Solution (SPS)[/b][/size]
+[i]Flüssigeres Skyrim bei stark gemoddeten Spielen – ohne eine einzige Spieldatei zu verändern.[/i][/center]
 
-SKSE-Plugin für [b]Skyrim SE 1.5.97 und AE 1.6.x / 1.7.x[/b]. Es verkleinert Texturen je nach Entfernung, damit der Grafikspeicher in Städten nicht mehr überläuft, spart Draw-Calls in den Schattendurchläufen und streicht überflüssige Arbeit der Engine. Alles lässt sich im Spiel über ein Menü (Deutsch / Englisch, folgt der Spielsprache) und mit einer Taste umschalten – so kannst du jederzeit mit und ohne Plugin vergleichen.
+[size=5][b]Beschreibung[/b][/size]
+SPS ist ein SKSE-Plugin für [b]Skyrim SE 1.5.97 und AE 1.6.x / 1.7.x[/b], das dem Spiel unnötige Arbeit abnimmt.
 
-[size=4][b]Funktionen[/b][/size]
-[list]
-[*][b]Textur-Streaming[/b] – Texturen ferner Objekte (auch hinter dir) werden im VRAM verkleinert und bei Annäherung im Hintergrund in voller Größe neu geladen. Dateien werden nie verändert. Menüs, Karten, LOD, Schriften und Bücher sind ausgenommen.
-[*][b]VRAM-Budget[/b] – Verkleinert wird nur, wenn das Spiel mehr als 85 % des Grafikspeichers belegt, den Windows ihm zuteilt. Mit genug VRAM passiert nichts und es kostet nichts.
-[*][b]VRAM auffüllen[/b] – Ist wieder Platz, werden verkleinerte Texturen wieder voll geladen, die meistgebrauchten zuerst.
-[*][b]Gleich in gemerkter Größe laden[/b] – Texturen werden direkt in der zuletzt benötigten Größe geladen (auch über Spielsitzungen und Ladebildschirme hinweg), dadurch keine VRAM-Spitze mehr nach Türen.
-[*][b]RAM-Puffer[/b] – Texturen, die mehrfach neu geladen werden, bleiben im Arbeitsspeicher (Standard 1 GB, einstellbar, 0 = aus). Vor allem mit 8K-Texturen nützlich.
-[*][b]Sonnenschatten kleiner Objekte weglassen[/b] – kleine, ferne Objekte werfen keinen Sonnenschatten (abhängig vom Sonnenstand).
-[*][b]Fackelschatten kleiner Objekte weglassen[/b] – kleine, ferne Objekte werfen keinen Fackel-/Feuerschatten. Objekte nahe am Licht behalten ihn; in Innenräumen standardmäßig aus.
-[*][b]Figurenschatten in der Ferne weglassen[/b] – Figuren werfen ab 50 m (einstellbar) keinen Schatten.
-[*][b]Himmelslicht[/b] – kleine Objekte werden in der Himmelslicht-Karte von Community Shaders weggelassen.
-[*][b]Ferne Bodendetails weglassen[/b] – Decals in Fußabdruck-Größe werden ab ~21 m nicht gezeichnet.
-[*][b]Gleiche Schatten bündeln[/b] – gleiche einfache Objekte im Sonnenschatten werden mit einem Aufruf gezeichnet (nur AE).
-[*][b]Licht-Zuordnung drosseln[/b] – bewegte Lichter suchen ihre Objekte nur neu, wenn sie sich wirklich bewegt haben.
-[*][b]Teilbäume überspringen[/b] – ganze Szenen-Zweige werden im Sonnenschatten und Himmelslicht übersprungen, wenn sie die Regel erfüllen.
-[/list]
+Stark gemoddete Spiele mit 4K-/8K-Texturen haben in Städten und Innenräumen oft zu wenig Grafikspeicher. Läuft der VRAM über, lagert Windows Daten in den Arbeitsspeicher aus, und das Spiel ruckelt. SPS [b]passt die Texturgröße an die Entfernung an[/b]: Ferne und verdeckte Objekte bekommen kleinere Texturen, nahe Objekte immer volle Qualität. Dazu [b]spart es Draw-Calls in den Schattendurchläufen[/b] und [b]streicht überflüssige Arbeit der Engine[/b].
 
-[size=4][b]Zahlen[/b][/size]
-Ryzen 7 5700X, RTX 4070 12 GB, 1920x1200, ~380 Plugins, Community Shaders mit DLSS + Frame Generation, 4K-Texturen.
+Auf der Platte wird nichts verändert, im Spielstand wird nichts gespeichert. Alles lässt sich im Spiel über ein Menü (Deutsch / Englisch, folgt der Spielsprache) und mit einer Taste umschalten – so kannst du jederzeit mit und ohne SPS vergleichen.
 
-[b]Drachenfeste, VRAM voll (Taste AUS gegen AN):[/b]
+[b]Messwerte[/b] (Ryzen 7 5700X, RTX 4070 12 GB, 1920x1200, ~380 Plugins, Community Shaders mit DLSS + Frame Generation, 4K-Texturen)
+
+[i]Drachenfeste, VRAM voll (Taste AUS gegen AN):[/i]
 [list]
 [*]VRAM-Belegung: 95–98 % → [b]72 %[/b]
 [*]In den Arbeitsspeicher ausgelagert: bis 1,2 GB → [b]~50 MB[/b]
 [*]FPS: 27–33 → [b]41–42[/b]
 [*]Längster Frame: Ruckler mit 190–280 ms → [b]~35 ms[/b]
 [/list]
-
-[b]Weißlauf-Markt:[/b]
+[i]Weißlauf-Markt:[/i]
 [list]
 [*]VRAM von Skyrim: ~10,5 GB (+600 MB ausgelagert) → [b]5,4 GB[/b]
 [*]~1.300 ferne Texturen: [b]0,33 GB statt 7–8 GB[/b], im A/B-Vergleich kein sichtbarer Unterschied
 [*]Licht-Zuordnung: 2,45 ms → [b]0,15 ms[/b] pro Frame
 [*]Alle Draw-Call-Optimierungen zusammen: [b]−26 % Draw-Calls[/b]
 [/list]
+[i]40-Minuten-Sitzung:[/i] 0 Ladefehler bei Texturen, VRAM 70–82 % im normalen Spiel.
 
-[b]40-Minuten-Sitzung:[/b] 0 Ladefehler bei Texturen, VRAM 70–82 % im normalen Spiel.
-
-[size=4][b]Voraussetzungen[/b][/size]
+[size=5][b]Hauptfunktionen[/b][/size]
+[b]Textur-Streaming[/b]
 [list]
-[*]Skyrim SE 1.5.97 oder AE 1.6.x / 1.7.x (im Spiel getestet auf 1.6.1170; Eingriffsstellen geprüft für 1.5.97, 1.6.640 und 1.7.104)
-[*][url=https://skse.silverlock.org/]SKSE64[/url]
-[*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url]
-[*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/120352]SKSE Menu Framework[/url] (Menü im Spiel; ohne es über SPS.ini)
-[*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/86492]Community Shaders[/url] (Himmelslicht-Funktion wirkt nur mit CS)
+[*][b]Texturgröße nach Entfernung[/b] – Texturen ferner Objekte (auch hinter dir) werden im VRAM verkleinert und bei Annäherung im Hintergrund in voller Größe neu geladen. Menüs, Karten, LOD, Schriften und Bücher sind ausgenommen.
+[*][b]VRAM-Budget[/b] – Greift nur, wenn das Spiel mehr als 85 % des Grafikspeichers belegt, den Windows ihm zuteilt. Mit genug VRAM passiert nichts und es kostet nichts.
+[*][b]VRAM auffüllen[/b] – Ist wieder Platz, werden verkleinerte Texturen wieder voll geladen, die meistgebrauchten zuerst.
+[*][b]Gleich in gemerkter Größe laden[/b] – Texturen werden direkt in der zuletzt benötigten Größe geladen (auch über Spielsitzungen und Ladebildschirme hinweg), dadurch keine VRAM-Spitze mehr nach Türen.
+[*][b]RAM-Puffer[/b] – Texturen, die mehrfach neu geladen werden, bleiben im Arbeitsspeicher (Standard 1 GB, einstellbar, 0 = aus). Vor allem mit 8K-Texturen nützlich.
 [/list]
-Jeder Eingriff prüft beim Start den Spielcode an seiner Stelle. Passt er nicht (unbekannte Spielversion oder eine andere Mod an derselben Stelle), wird nur diese Funktion abgeschaltet – sie steht dann im Menü und im Log.
+[b]Schatten und Draw-Calls[/b]
+[list]
+[*][b]Sonnenschatten kleiner Objekte weglassen[/b] – kleine, ferne Objekte werfen keinen Sonnenschatten (abhängig vom Sonnenstand).
+[*][b]Fackelschatten kleiner Objekte weglassen[/b] – kleine, ferne Objekte werfen keinen Fackel-/Feuerschatten. Objekte nahe am Licht behalten ihn; in Innenräumen standardmäßig aus.
+[*][b]Figurenschatten in der Ferne weglassen[/b] – Figuren werfen ab 50 m (einstellbar) keinen Schatten.
+[*][b]Himmelslicht[/b] – kleine Objekte werden in der Himmelslicht-Karte von Community Shaders weggelassen.
+[*][b]Ferne Bodendetails weglassen[/b] – Decals in Fußabdruck-Größe werden ab ~21 m nicht gezeichnet.
+[*][b]Gleiche Schatten bündeln[/b] – gleiche einfache Objekte im Sonnenschatten werden mit einem Aufruf gezeichnet (nur AE).
+[/list]
+[b]Engine-Arbeit[/b]
+[list]
+[*][b]Licht-Zuordnung drosseln[/b] – bewegte Lichter suchen ihre Objekte nur neu, wenn sie sich wirklich bewegt haben.
+[*][b]Teilbäume überspringen[/b] – ganze Szenen-Zweige werden im Sonnenschatten und Himmelslicht übersprungen, wenn sie die Regel erfüllen.
+[/list]
+[b]Komfort[/b]
+[list]
+[*]Menü im Spiel mit allen Schaltern und Reglern, wird automatisch gespeichert.
+[*]Taste [b]Bild auf[/b] (im Menü frei belegbar) schaltet alle Optimierungen für den Vergleich an und aus.
+[*]Jeder Eingriff prüft beim Start den Spielcode – bei unbekannter Spielversion oder einer Mod an derselben Stelle wird nur diese Funktion abgeschaltet und im Menü und Log angezeigt.
+[*]Knopf [i]Texturen unter dem Fadenkreuz protokollieren[/i] für Fehlerberichte.
+[/list]
 
-[size=4][b]SE-1.5.97-Tester gesucht![/b][/size]
-Die SE-Version ist am Spielcode geprüft, aber noch nicht im Spiel getestet. Rückmeldungen sind sehr willkommen – bitte [i]Dokumente\My Games\Skyrim Special Edition\SKSE\SPS.log[/i] anhängen.
+[size=5][b]Voraussetzungen[/b][/size]
+[list]
+[*]Skyrim [b]SE 1.5.97[/b] oder [b]AE 1.6.x / 1.7.x[/b] (im Spiel getestet auf 1.6.1170; Eingriffsstellen geprüft für 1.5.97, 1.6.640 und 1.7.104)
+[*][url=https://skse.silverlock.org/]SKSE64[/url] passend zur Spielversion
+[*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url]
+[*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/120352]SKSE Menu Framework[/url] – Menü im Spiel (ohne es über [i]SPS.ini[/i])
+[*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/86492]Community Shaders[/url] – die Himmelslicht-Funktion wirkt nur mit CS
+[/list]
+VR und SE-Versionen vor 1.5.97 werden nicht unterstützt.
 
-[size=4][b]Tipps[/b][/size]
+[b]SE-1.5.97-Tester gesucht![/b] Die SE-Version ist am Spielcode geprüft, aber noch nicht im Spiel getestet. Rückmeldungen sind sehr willkommen – bitte [i]Dokumente\My Games\Skyrim Special Edition\SKSE\SPS.log[/i] anhängen.
+
+[size=5][b]Installation[/b][/size]
+[list=1]
+[*]Die Voraussetzungen oben installieren.
+[*][b]SPS-x.y.z.zip[/b] mit Vortex oder Mod Organizer 2 wie jede andere Mod installieren. Die Ladereihenfolge ist egal (keine Plugin-Datei).
+[*]Spiel starten und im SKSE-Menu-Framework-Menü → [i]Skyrim Performance Solution[/i] die Einstellungen anpassen. Die Standardwerte sind ein guter Start.
+[/list]
+[b]Umstieg von „SkyrimPerf“:[/b] Die Mod wurde umbenannt. Zuerst die alte SkyrimPerf-Mod entfernen – deine Einstellungen und gemerkten Texturgrößen werden automatisch übernommen.
+[b]Deinstallation:[/b] Mod einfach entfernen. Im Spielstand wird nichts gespeichert.
+[b]Einstellungsdateien:[/b] [i]Data\SKSE\Plugins\SPS.ini[/i] enthält die Vorgaben, Änderungen aus dem Menü landen in [i]SPS_User.ini[/i].
+
+[size=5][b]Tipps & Fehlersuche[/b][/size]
 [list]
 [*][b]Kurzes Hängen beim Durchschreiten von Türen?[/b] Das ist meist das automatische Speichern beim Gebietswechsel zusammen mit RaceMenu, dessen Co-Save bis zu ~1 s zum Schreiben braucht. Abhilfe: in den Spieleinstellungen [i]Beim Reisen speichern[/i] ausschalten.
-[*]Mit [b]Bild auf[/b] (im Menü frei belegbar) mit und ohne Plugin vergleichen. Beim Ausschalten werden alle Texturen wieder voll geladen, das dauert ein paar Sekunden.
-[*]Sieht etwas anders aus? Menü öffnen, Fadenkreuz darauf und [i]Texturen unter dem Fadenkreuz protokollieren[/i] drücken, dann einzelne Funktionen ausschalten. Bitte mit Log melden.
+[*]Beim Ausschalten mit der Taste werden alle Texturen wieder voll geladen – das dauert ein paar Sekunden und hebt den VRAM kurz an.
+[*]Sieht etwas anders aus? Menü öffnen, Fadenkreuz darauf, [i]Texturen unter dem Fadenkreuz protokollieren[/i] drücken und dann einzelne Funktionen ausschalten, um den Auslöser zu finden. Bitte im Bugs-Tab mit deiner SPS.log melden.
 [/list]
 
-[size=4][b]Installation[/b][/size]
-Mit Vortex oder MO2 wie jede andere Mod installieren. Einstellungen: [i]Data\SKSE\Plugins\SPS.ini[/i] (Vorgaben); Änderungen aus dem Menü landen in [i]SPS_User.ini[/i].
-Deinstallation: Mod einfach entfernen. Im Spielstand wird nichts gespeichert.
+[size=5][b]Danksagungen[/b][/size]
+[list]
+[*][b]SKSE-Team[/b] (ianpatt, behippo, purple pizza, scruggsywuggsy) – für SKSE64, ohne das nichts davon möglich wäre.
+[*][b]Ryan-rsm-McKenzie, CharmedBaryon, alandtse und alle Mitwirkenden[/b] – für CommonLibSSE und CommonLibSSE NG.
+[*][b]meh321[/b] – für die Address Library.
+[*][b]Thiago099 und QTR-Modding[/b] – für das SKSE Menu Framework.
+[*][b]Das Community-Shaders-Team[/b] – dafür, Skyrims Grafik voranzubringen.
+[*][b]Bartosz Taudul[/b] – für den Tracy-Profiler, mit dem die Engpässe überhaupt erst sichtbar wurden.
+[*]Alle, die Fehler melden und SPS auf ihrem System testen.
+[/list]
 
-[size=4][b]Quellcode[/b][/size]
+[size=5][b]Lizenz & Quellcode[/b][/size]
 GPL-3.0, Quellcode auf [url=https://github.com/dnai92/skyrimPerformanceSolution]GitHub[/url]. Bitte verlinke auf diese Seite statt die Mod neu hochzuladen.
 
 [center][url=https://ko-fi.com/dani9281660][img]https://storage.ko-fi.com/cdn/kofi2.png?v=3[/img][/url]
 Dir gefällt SPS? Über einen Kaffee freue ich mich sehr![/center]
-
