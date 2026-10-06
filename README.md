@@ -154,3 +154,5 @@ the same license.
 ---
 
 [![Support me on Ko-fi](https://storage.ko-fi.com/cdn/kofi2.png?v=3)](https://ko-fi.com/dani9281660)
+
+SPS is completely free. If you enjoy the mod and want to support its development, voluntary donations are appreciated and help cover development costs such as AI/API services.
