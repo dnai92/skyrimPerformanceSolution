@@ -23,6 +23,6 @@ namespace Features
 	// Spielversion ist die im Spiel getestete (1.6.1170)?
 	bool TestedVersion() noexcept;
 
-	// Spielversion, deren Eingriffsstellen offline gegen die exe verglichen wurden (1.6.640, 1.7.104)?
+	// Spielversion, deren Eingriffsstellen offline gegen die exe verglichen wurden (1.5.97, 1.6.640, 1.7.104)?
 	bool VerifiedVersion() noexcept;
 }

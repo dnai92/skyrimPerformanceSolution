@@ -44,6 +44,6 @@ namespace Features
 	bool VerifiedVersion() noexcept
 	{
 		const auto v = REL::Module::get().version();
-		return v == REL::Version{ 1, 6, 640, 0 } || v == REL::Version{ 1, 7, 104, 0 };
+		return v == REL::Version{ 1, 5, 97, 0 } || v == REL::Version{ 1, 6, 640, 0 } || v == REL::Version{ 1, 7, 104, 0 };
 	}
 }

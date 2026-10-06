@@ -69,7 +69,7 @@ and depth passes, and sun shadows alone cost ~12–14 ms of CPU time per frame.
 
 | Dependency | Required | Notes |
 |---|---|---|
-| Skyrim **Anniversary Edition 1.6.x / 1.7.x** | yes | Tested in game on 1.6.1170; engine patch sites verified against the game code of 1.6.640 and 1.7.104. On other versions every engine patch checks the game code at its location first; if it differs, only that function is switched off (listed in the menu and the log). SE 1.5.97 and VR are not supported - the plugin stays inactive there and shows a message. |
+| Skyrim **SE 1.5.97** or **AE 1.6.x / 1.7.x** | yes | Tested in game on 1.6.1170. Engine patch sites verified against the game code of 1.5.97, 1.6.640 and 1.7.104. Every engine patch also checks the game code at its location at startup; if it differs, only that function is switched off (listed in the menu and the log). On SE 1.5.97 'shadow instancing' and the main camera timing are off. Older SE versions and VR are not supported. |
 | [SKSE64](https://skse.silverlock.org/) | yes | Matching your game version. |
 | [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444) | yes | |
 | [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352) | optional | In-game menu. Without it, everything is configured in `SkyrimPerf.ini`. |

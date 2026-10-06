@@ -71,13 +71,14 @@ namespace LightGather
 
 	void Install()
 	{
-		// ID 106335 (ShadowSceneNode-Lichtschleife) +0x6E2: call ID 106342 fuer dynamische Punktlichter
-		REL::Relocation<std::uintptr_t> site{ REL::ID(106335), 0x6E2 };
+		// Lichtschleife ruft die Licht-Zuordnung dynamischer Punktlichter: AE ID 106335 +0x6E2 -> 106342,
+		// SE 1.5.97 ID 99746 +0xB3 -> 99708 (per Code-Muster gefunden: gleiche Feldzugriffe 0xA4/0xA8/0x50-0x58)
+		REL::Relocation<std::uintptr_t> site{ RELOCATION_ID(99746, 106335), REL::Relocate(0xB3, 0x6E2) };
 		const auto                      addr = site.address();
-		const auto                      target = REL::Relocation<std::uintptr_t>{ REL::ID(106342) }.address();
+		const auto                      target = REL::Relocation<std::uintptr_t>{ RELOCATION_ID(99708, 106342) }.address();
 		if (*reinterpret_cast<std::uint8_t*>(addr) != 0xE8 ||
 			addr + 5 + *reinterpret_cast<std::int32_t*>(addr + 1) != target) {
-			Features::Report("Light assignment throttle", "Licht-Zuordnung drosseln", false, "call site ID 106335+0x6E2 differs (other game version or mod)");
+			Features::Report("Light assignment throttle", "Licht-Zuordnung drosseln", false, "call site in the light loop differs (other game version or mod)");
 			return;
 		}
 		UpdateLight::func = SKSE::GetTrampoline().write_call<5>(addr, UpdateLight::thunk);

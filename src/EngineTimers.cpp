@@ -41,12 +41,17 @@ namespace EngineTimers
 	void Install()
 	{
 		auto& trampoline = SKSE::GetTrampoline();
-		PrecipSetupMask::func = reinterpret_cast<void (*)(void*)>(REL::Relocation<std::uintptr_t>{ REL::ID(26183) }.address());
+		PrecipSetupMask::func = reinterpret_cast<void (*)(void*)>(REL::Relocation<std::uintptr_t>{ RELOCATION_ID(25641, 26183) }.address());
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&PrecipSetupMask::func), reinterpret_cast<void*>(&PrecipSetupMask::thunk)); err == 0) {
 			logger::info("Zeitmessung installiert: Precipitation::SetupMask (Regen/Sky-Karte, Detours)");
 			Features::Report("Timing: rain/sky map", "Zeitmessung: Regen-/Himmelskarte", true);
 		} else {
 			Features::Report("Timing: rain/sky map", "Zeitmessung: Regen-/Himmelskarte", false, std::format("Detours error {}", err));
+		}
+		// Nur AE: Aufrufstelle fuer SE 1.5.97 nicht ermittelt (reine Zeitmessung)
+		if (REL::Module::IsSE()) {
+			Features::Report("Timing: main camera culling", "Zeitmessung: Hauptkamera", false, "not mapped for SE 1.5.97 (diagnostics only)");
+			return;
 		}
 		const auto mainSite = REL::Relocation<std::uintptr_t>{ REL::ID(36560), 0xE9 }.address();
 		if (CheckCall(mainSite, 32174)) {

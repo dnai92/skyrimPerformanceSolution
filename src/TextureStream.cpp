@@ -1613,33 +1613,16 @@ namespace TextureStream
 
 	void InstallLate()
 	{
-		// Renderer-vtable-Eintrag 0xD0 (von ID 70716+0x198 aufgerufen) umbiegen: Objekt = globaler Zeiger, den 70716 bei
-		// +0x18B laedt (48 8B 0D disp32 = mov rcx, [rip+disp32]). Nach anderen Mods (kDataLoaded) -> deren Funktion bleibt drin.
+		// BSShaderResourceManager-vtable Eintrag 0xD0 (Renderer-Textur aus NiSourceTexture anlegen; aufgerufen aus
+		// AE ID 70716 / SE dieselbe Klasse, ebenfalls 0xD0 - offline geprueft) umbiegen. Nach anderen Mods (kDataLoaded):
+		// eine dort schon eingetragene fremde Funktion bleibt drin und wird von uns aufgerufen.
 		{
-			const auto site = REL::Relocation<std::uintptr_t>{ REL::ID(70716), 0x18B }.address();
-			const auto* code = reinterpret_cast<const std::uint8_t*>(site);
-			const auto* call = reinterpret_cast<const std::uint8_t*>(site + 0xD);
-			if (code[0] == 0x48 && code[1] == 0x8B && code[2] == 0x0D && call[0] == 0xFF && call[1] == 0x90 && call[2] == 0xD0) {
-				const auto global = site + 7 + *reinterpret_cast<const std::int32_t*>(site + 3);
-				const auto object = *reinterpret_cast<void**>(global);
-				if (object) {
-					auto**        vtbl = *reinterpret_cast<void***>(object);
-					std::uint32_t old = 0;
-					if (REX::W32::VirtualProtect(&vtbl[0xD0 / 8], sizeof(void*), 0x40, &old)) {
-						CreateRenderData::func = reinterpret_cast<decltype(CreateRenderData::func)>(vtbl[0xD0 / 8]);
-						vtbl[0xD0 / 8] = reinterpret_cast<void*>(&CreateRenderData::thunk);
-						REX::W32::VirtualProtect(&vtbl[0xD0 / 8], sizeof(void*), old, &old);
-						logger::info("Hook installiert: Renderer-Textur anlegen (vtable 0xD0, bisher 0x{:X}) - Textur fuer DDS-Lader merken",
-							reinterpret_cast<std::uintptr_t>(CreateRenderData::func));
-						Features::Report("Load textures at remembered size", "Gleich in gemerkter Größe laden", LoadDDS::func != nullptr,
-							LoadDDS::func ? "" : "DDS loader hook missing");
-					}
-				} else {
-					Features::Report("Load textures at remembered size", "Gleich in gemerkter Größe laden", false, "renderer object not available");
-				}
-			} else {
-				Features::Report("Load textures at remembered size", "Gleich in gemerkter Größe laden", false, "code at ID 70716+0x18B differs");
-			}
+			REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSShaderResourceManager[0] };
+			CreateRenderData::func = reinterpret_cast<decltype(CreateRenderData::func)>(vtbl.write_vfunc(0xD0 / 8, &CreateRenderData::thunk));
+			logger::info("Hook installiert: BSShaderResourceManager::CreateTexture (vtable 0xD0, bisher 0x{:X}) - Textur fuer DDS-Lader merken",
+				reinterpret_cast<std::uintptr_t>(CreateRenderData::func));
+			Features::Report("Load textures at remembered size", "Gleich in gemerkter Größe laden", LoadDDS::func != nullptr,
+				LoadDDS::func ? "" : "DDS loader hook missing");
 		}
 
 		const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
@@ -1679,13 +1662,14 @@ namespace TextureStream
 	void Install()
 	{
 		LoadSizes();
-		LoadDDS::func = reinterpret_cast<decltype(LoadDDS::func)>(REL::Relocation<std::uintptr_t>{ REL::ID(77533) }.address());
+		// DDS-Lader (DirectXTK-Variante): AE ID 77533, SE 1.5.97 ID 75721 (per DDS-Magic + einzigem Aufrufer gefunden)
+		LoadDDS::func = reinterpret_cast<decltype(LoadDDS::func)>(REL::Relocation<std::uintptr_t>{ RELOCATION_ID(75721, 77533) }.address());
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&LoadDDS::func), reinterpret_cast<void*>(&LoadDDS::thunk)); err != 0) {
 			logger::warn("TextureStream: Detours-Fehler {} an ID 77533 - Stufe 3 inaktiv", err);
 			LoadDDS::func = nullptr;
 			return;
 		}
-		logger::info("Hook installiert: DDS-Lader (Detour ID 77533) - gleich verkleinert laden");
+		logger::info("Hook installiert: DDS-Lader (Detour) - gleich verkleinert laden");
 	}
 
 	void OnFrame()
