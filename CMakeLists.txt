@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SPS
-	VERSION 1.0.3
+	VERSION 1.0.4
 	LANGUAGES CXX
 )
 
@@ -44,7 +44,13 @@ add_commonlibsse_plugin(
 # ON_DEMAND: kein Overhead/Speicher, solange kein Profiler verbunden ist.
 # NO_CRASH_HANDLER: Crash Logger nicht in die Quere kommen.
 target_include_directories(${PROJECT_NAME} PRIVATE src extern/tracy/public)
-target_compile_definitions(${PROJECT_NAME} PRIVATE TRACY_ENABLE TRACY_ON_DEMAND TRACY_NO_CRASH_HANDLER NOMINMAX)
+# Nur fuer Entwickler-Builds (-DSPS_TRACY=ON): Tracy oeffnet einen Netzwerk-Port und sendet Broadcasts ins lokale Netz
+# (Firewall-Abfrage bei Nutzern, 1.0.3). Ohne TRACY_ENABLE sind alle Tracy-Makros leer.
+option(SPS_TRACY "Tracy-Profiler einbauen (Entwicklung)" OFF)
+target_compile_definitions(${PROJECT_NAME} PRIVATE TRACY_ON_DEMAND TRACY_NO_CRASH_HANDLER NOMINMAX)
+if(SPS_TRACY)
+	target_compile_definitions(${PROJECT_NAME} PRIVATE TRACY_ENABLE)
+endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32 dbghelp)
 target_precompile_headers(${PROJECT_NAME} PRIVATE src/PCH.h)
 # Microsoft Detours (wie Community Shaders) - fuer Funktionen, die CS bereits per Detours umleitet

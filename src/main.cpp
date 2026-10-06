@@ -43,7 +43,11 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	info.trampolineSize = 256;
 	SKSE::Init(a_skse, info);
 
-	logger::info("SPS {} loaded (Tracy on-demand, report every 10 s)", SKSE::GetPluginVersion().string());
+	#ifdef TRACY_ENABLE
+	logger::info("SPS {} loaded (developer build with Tracy profiler)", SKSE::GetPluginVersion().string());
+#else
+	logger::info("SPS {} loaded", SKSE::GetPluginVersion().string());
+#endif
 	logger::info("Skyrim base address 0x{:X} (for tools/resolve_rva.py)", REL::Module::get().base());
 
 	// Address-Library-IDs: AE ab 1.6.317 stabil (auch 1.7.x, offline verglichen 1.6.640/1.7.104); SE 1.5.97 hat eigene IDs,
