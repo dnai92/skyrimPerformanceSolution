@@ -189,6 +189,7 @@ namespace TextureStream
 			RE::NiPointer<RE::NiSourceTexture> hold;  // haelt die Textur am Leben, solange wir sie veraendert haben / bearbeiten
 			W::ID3D11Resource*                 res = nullptr;  // aktuelles D3D-Objekt (anderes = Spiel hat neu geladen)
 			std::string                        path;           // BSResource-Pfad ("textures\...")
+			const char*                        name = nullptr;  // Dateiname-Zeiger (BSFixedString, gepoolt) zum Erkennen wiederverwendeter Adressen
 			std::uint32_t                      fullW = 0, fullH = 0, fullMips = 0;  // Original (laut Datei)
 			std::uint32_t                      curW = 0, curH = 0, curMips = 0;     // jetzt im VRAM
 			std::uint32_t                      format = 0;
@@ -1003,12 +1004,15 @@ namespace TextureStream
 			}
 			auto [it, inserted] = g_tex.try_emplace(r);
 			auto& st = it->second;
-			if (inserted || st.res != r->texture) {
+			// Auch bei anderem Dateinamen neu aufbauen: gibt das Spiel eine Textur frei und legt eine andere an derselben
+			// Adresse an, wuerde sonst beim Neuladen die alte Datei in das neue Objekt geladen (falsche Textur)
+			if (inserted || st.res != r->texture || st.name != a_src->name.c_str()) {
 				// neu oder vom Spiel ersetzt: Zustand aus dem D3D-Objekt neu aufbauen
 				const bool busy = st.busy;
 				st = TexState{};
 				st.busy = busy;
 				st.res = r->texture;
+				st.name = a_src->name.c_str();
 				W::D3D11_TEXTURE2D_DESC d{};
 				if (ReadDesc(st.res, d)) {
 					st.curW = st.fullW = d.width;
