@@ -20,6 +20,9 @@ namespace Features
 	// Aufrufstelle pruefen: call rel32 (E8) - optional auf ein bestimmtes Ziel
 	bool IsCall(std::uintptr_t a_site, std::uintptr_t a_target = 0) noexcept;
 
-	// Spielversion ist die getestete (1.6.1170)?
+	// Spielversion ist die im Spiel getestete (1.6.1170)?
 	bool TestedVersion() noexcept;
+
+	// Spielversion, deren Eingriffsstellen offline gegen die exe verglichen wurden (1.6.640, 1.7.104)?
+	bool VerifiedVersion() noexcept;
 }

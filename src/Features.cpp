@@ -40,4 +40,10 @@ namespace Features
 	{
 		return REL::Module::get().version() == REL::Version{ 1, 6, 1170, 0 };
 	}
+
+	bool VerifiedVersion() noexcept
+	{
+		const auto v = REL::Module::get().version();
+		return v == REL::Version{ 1, 6, 640, 0 } || v == REL::Version{ 1, 7, 104, 0 };
+	}
 }

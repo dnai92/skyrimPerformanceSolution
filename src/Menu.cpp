@@ -221,8 +221,9 @@ namespace Menu
 				const auto ver = REL::Module::get().version().string();
 				if (off == 0) {
 					ImGuiMCP::TextWrapped("%s", std::format("{} {} - {}", T("Game version", "Spielversion"), ver,
-													Features::TestedVersion() ? T("tested, all functions active.", "getestet, alle Funktionen aktiv.") :
-																			   T("not tested, but all functions passed their code check.", "nicht getestet, aber alle Funktionen haben ihre Code-Prüfung bestanden.")).c_str());
+													Features::TestedVersion()   ? T("tested, all functions active.", "getestet, alle Funktionen aktiv.") :
+													Features::VerifiedVersion() ? T("code verified, all functions active.", "Code geprüft, alle Funktionen aktiv.") :
+																				  T("not tested, but all functions passed their code check.", "nicht getestet, aber alle Funktionen haben ihre Code-Prüfung bestanden.")).c_str());
 				} else {
 					ImGuiMCP::TextWrapped("%s", std::format("{} {}: {}", T("Game version", "Spielversion"), ver,
 													T("these functions were switched off because the game code differs (see SkyrimPerf.log):",
