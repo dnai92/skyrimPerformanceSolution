@@ -36,6 +36,9 @@ namespace TextureStream
 	// bereits abgebaute Textur-Verwaltung -> Heap-Beschaedigung (Absturz 0.19.0 beim Laden aus dem Hauptmenue). Main-Thread.
 	void Reset(const char* a_reason);
 
+	// Diagnose: Texturen der Objekte unter dem Fadenkreuz beim naechsten Frame ins Log schreiben
+	void RequestCenterProbe();
+
 	// VRAM-Belegung des Spiels und Budget laut Windows (Bytes; 0 = unbekannt)
 	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget);
 }

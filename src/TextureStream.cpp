@@ -1301,6 +1301,99 @@ namespace TextureStream
 			g_pixelsPerUnit = screenH / (2.0f * tanHalf);
 		}
 
+		// ---------------- Diagnose: Texturen der Objekte unter dem Fadenkreuz (Menue-Knopf) ----------------
+
+		std::atomic<bool> g_probeCenter{ false };
+
+		void ProbeCenter()
+		{
+			const auto root = RE::Main::WorldRootNode();
+			const auto cam = RE::Main::WorldRootCamera();
+			const auto state = RE::BSGraphics::State::GetSingleton();
+			if (!root || !cam || !state || state->screenWidth == 0) {
+				logger::info("[TextureStream] Bildmitte: keine Welt/Kamera");
+				return;
+			}
+			const float w = static_cast<float>(state->screenWidth), h = static_cast<float>(state->screenHeight);
+			struct Hit
+			{
+				RE::BSGeometry* geom;
+				float           dist;
+				float           need;
+			};
+			std::vector<Hit>            hits;
+			std::vector<RE::NiAVObject*> stack{ root };
+			while (!stack.empty()) {
+				const auto obj = stack.back();
+				stack.pop_back();
+				if (!obj || obj->GetFlags().any(RE::NiAVObject::Flag::kHidden)) {
+					continue;
+				}
+				const auto& b = obj->worldBound;
+				const float dx = b.center.x - g_camX, dy = b.center.y - g_camY, dz = b.center.z - g_camZ;
+				const float centerDist = std::sqrt(dx * dx + dy * dy + dz * dz);
+				if (centerDist > b.radius) {
+					float sx = 0, sy = 0, sz = 0;
+					if (!cam->WorldPtToScreenPt3(b.center, sx, sy, sz, 1e-5f) || sz < 0.0f) {
+						continue;
+					}
+					const float offPx = std::hypot((sx - 0.5f) * w, (sy - 0.5f) * h);
+					if (offPx > b.radius / centerDist * g_pixelsPerUnit) {
+						continue;  // Huelle deckt die Bildmitte nicht
+					}
+				}
+				if (const auto node = obj->AsNode()) {
+					for (const auto& child : node->GetChildren()) {
+						if (child) {
+							stack.push_back(child.get());
+						}
+					}
+				} else if (const auto geom = obj->AsGeometry()) {
+					const float dist = std::max(0.0f, centerDist - b.radius);
+					hits.push_back({ geom, dist, dist <= 1.0f ? 1.0e6f : 2.0f * b.radius / dist * g_pixelsPerUnit });
+				}
+			}
+			std::ranges::sort(hits, [](const Hit& a, const Hit& b) { return a.dist < b.dist; });
+			logger::info("[TextureStream] Bildmitte: {} Objekte unter dem Fadenkreuz (naechste zuerst), Streaming {}", hits.size(), Active() ? "AN" : "AUS");
+			for (std::size_t i = 0; i < hits.size() && i < 12; ++i) {
+				const auto geom = hits[i].geom;
+				const auto prop = geom->GetGeometryRuntimeData().shaderProperty.get();
+				const auto lsp = prop ? netimmerse_cast<RE::BSLightingShaderProperty*>(prop) : nullptr;
+				const auto material = lsp ? static_cast<RE::BSLightingShaderMaterialBase*>(lsp->material) : nullptr;
+				logger::info("[TextureStream]  #{} '{}' Entfernung {:.0f} | Radius {:.0f} | ~{:.0f} px | Material {}", i + 1, geom->name.c_str() ? geom->name.c_str() : "",
+					hits[i].dist, geom->worldBound.radius, hits[i].need, material ? static_cast<int>(material->GetFeature()) : -1);
+				if (!material) {
+					continue;
+				}
+				RE::NiSourceTexture* textures[kMaxTextures]{};
+				const int            n = SafeGather(material, textures);
+				for (int t = 0; t < n; ++t) {
+					const auto src = textures[t];
+					const auto r = src ? src->rendererTexture : nullptr;
+					if (!r || !r->texture) {
+						continue;
+					}
+					W::D3D11_TEXTURE2D_DESC d{};
+					const bool hasDesc = ReadDesc(r->texture, d);
+					std::string extra = "nicht verwaltet";
+					if (const auto it = g_tex.find(r); it != g_tex.end()) {
+						const auto& st = it->second;
+						extra = std::format("Original {}x{} ({} Mips) | jetzt {}x{} | Bedarf {:.0f} px | {}{}", st.fullW, st.fullH, st.fullMips, st.curW, st.curH,
+							st.passNeed, st.eligible ? "verkleinerbar" : "nicht verkleinerbar", st.path != NormalizePath(src->name.c_str()) ? " | PFAD WEICHT AB: " + st.path : "");
+					}
+					std::uint32_t remembered = 0;
+					{
+						std::scoped_lock lock(g_sizeLock);
+						if (const auto it = g_loadEdge.find(NormalizePath(src->name.c_str())); it != g_loadEdge.end()) {
+							remembered = it->second;
+						}
+					}
+					logger::info("[TextureStream]     [{}] {} | D3D {}x{} {} Mips Format {} | gemerkt {} | {}", t, src->name.c_str() ? src->name.c_str() : "",
+						hasDesc ? d.width : 0, hasDesc ? d.height : 0, hasDesc ? d.mipLevels : 0, hasDesc ? static_cast<int>(d.format) : -1, remembered, extra);
+				}
+			}
+		}
+
 		void PassEnd()
 		{
 			const auto now = Clock::now();
@@ -1673,6 +1766,11 @@ namespace TextureStream
 		}
 	}
 
+	void RequestCenterProbe()
+	{
+		g_probeCenter = true;
+	}
+
 	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget)
 	{
 		a_usage = g_vramUsage.load(std::memory_order_relaxed);
@@ -1712,6 +1810,10 @@ namespace TextureStream
 				return;
 			}
 			InitAdapter();
+		}
+		if (g_probeCenter.exchange(false)) {
+			UpdateCamera();
+			ProbeCenter();
 		}
 		static Clock::time_point lastVram{};
 		if (now - lastVram >= 250ms) {

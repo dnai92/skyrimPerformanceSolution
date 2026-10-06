@@ -1,4 +1,4 @@
-#include "Menu.h"
+﻿#include "Menu.h"
 
 #include "Config.h"
 #include "Features.h"
@@ -371,6 +371,11 @@ namespace Menu
 				}
 				Config::textureStream.minEdge = p;
 			}
+			if (ImGuiMCP::Button(T("Log textures under crosshair##ts", "Texturen unter dem Fadenkreuz protokollieren##ts"))) {
+				TextureStream::RequestCenterProbe();
+			}
+			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SkyrimPerf.log. For bug reports.",
+				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SkyrimPerf.log. Für Fehlerberichte."));
 
 			ImGuiMCP::SeparatorText(T("Skylighting culling (Community Shaders)", "Himmelslicht: kleine Objekte weglassen (Community Shaders)"));
 			Toggle(T("Enabled##sky", "Aktiv##sky"), Config::skylightingCulling.enabled,
