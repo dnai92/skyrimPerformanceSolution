@@ -112,12 +112,12 @@ namespace TextureStream
 		std::string ReadHeader(RE::BSResourceNiBinaryStream& a_stream, FileInfo& a_out)
 		{
 			if (!a_stream.good()) {
-				return "Datei nicht gefunden";
+				return "file not found";
 			}
 			std::uint32_t magic = 0;
 			DDSHeader     h{};
 			if (!a_stream.read(&magic, 1) || magic != FourCC('D', 'D', 'S', ' ') || !a_stream.read(&h, 1) || h.size != 124) {
-				return "kein DDS";
+				return "not a DDS";
 			}
 			a_out.width = h.width;
 			a_out.height = h.height;
@@ -127,7 +127,7 @@ namespace TextureStream
 				return "Cubemap";
 			}
 			if (h.depth > 1 && (h.caps2 & 0x200000)) {
-				return "Volumentextur";
+				return "volume texture";
 			}
 			const auto& pf = h.pf;
 			if (pf.flags & 0x4) {  // FourCC
@@ -151,25 +151,25 @@ namespace TextureStream
 					{
 						DDSHeaderDX10 dx{};
 						if (!a_stream.read(&dx, 1)) {
-							return "DX10-Kopf fehlt";
+							return "DX10 header missing";
 						}
 						a_out.dataOffset += sizeof(DDSHeaderDX10);
 						if (dx.resourceDimension != 3 || dx.arraySize > 1 || (dx.miscFlag & 0x4)) {
-							return "kein einfaches 2D-Bild";
+							return "not a simple 2D image";
 						}
 						a_out.fi = InfoOf(dx.dxgiFormat);
 						break;
 					}
 				default:
-					return std::format("FourCC 0x{:08X} unbekannt", pf.fourCC);
+					return std::format("FourCC 0x{:08X} unknown", pf.fourCC);
 				}
 			} else if (pf.flags & (0x40 | 0x20000 | 0x2)) {  // RGB / Luminanz / Alpha
 				a_out.fi = { false, pf.rgbBitCount / 8 };
 			} else {
-				return "Pixelformat unbekannt";
+				return "pixel format unknown";
 			}
 			if (a_out.fi.bytes == 0) {
-				return "Format nicht unterstuetzt";
+				return "format not supported";
 			}
 			return {};
 		}
@@ -245,7 +245,7 @@ namespace TextureStream
 		{
 			W::IDXGIDevice* dxgiDevice = nullptr;
 			if (g_device->QueryInterface(W::IID_IDXGIDevice, reinterpret_cast<void**>(&dxgiDevice)) < 0 || !dxgiDevice) {
-				logger::warn("TextureStream: kein IDXGIDevice - Budget-Modus nicht moeglich, verkleinere immer");
+				logger::warn("TextureStream: no IDXGIDevice - budget mode not possible, always downscaling");
 				return;
 			}
 			W::IDXGIAdapter* adapter = nullptr;
@@ -255,7 +255,7 @@ namespace TextureStream
 			}
 			dxgiDevice->Release();
 			if (!g_adapter) {
-				logger::warn("TextureStream: kein IDXGIAdapter3 - Budget-Modus nicht moeglich, verkleinere immer");
+				logger::warn("TextureStream: no IDXGIAdapter3 - budget mode not possible, always downscaling");
 			}
 		}
 
@@ -559,7 +559,7 @@ namespace TextureStream
 			}
 			const auto& f = a_res.file;
 			if (f.width != job.fullW || f.height != job.fullH || f.mips != job.fullMips || !(f.fi == job.fi)) {
-				a_res.error = "Datei hat sich geaendert";
+				a_res.error = "file has changed";
 				return;
 			}
 			std::uint64_t skipBytes = 0;
@@ -571,7 +571,7 @@ namespace TextureStream
 				stream = std::make_unique<RE::BSResourceNiBinaryStream>(job.path);
 				FileInfo again;
 				if (!ReadHeader(*stream, again).empty() || !DiscardBytes(*stream, skipBytes)) {
-					a_res.error = "Lesefehler beim Ueberspringen";
+					a_res.error = "read error while skipping";
 					return;
 				}
 			}
@@ -581,7 +581,7 @@ namespace TextureStream
 			const std::uint32_t mips = f.mips - job.skip;
 			const auto          bytes = ChainBytes(f.fi, w, h, mips);
 			if (fromCache && data.size() < bytes) {
-				a_res.error = "RAM-Puffer unvollstaendig";
+				a_res.error = "RAM buffer incomplete";
 				return;
 			}
 			if (!fromCache) {
@@ -589,7 +589,7 @@ namespace TextureStream
 			for (std::uint64_t done = 0; done < bytes;) {
 				const auto n = static_cast<std::uint32_t>(std::min<std::uint64_t>(bytes - done, 16u << 20));
 				if (!stream->read(data.data() + done, n)) {
-					a_res.error = "Datei zu kurz";
+					a_res.error = "file too short";
 					return;
 				}
 				done += n;
@@ -616,7 +616,7 @@ namespace TextureStream
 			desc.usage = W::D3D11_USAGE_IMMUTABLE;
 			desc.bindFlags = W::D3D11_BIND_SHADER_RESOURCE;
 			if (g_device->CreateTexture2D(&desc, init.data(), &a_res.tex) < 0 || !a_res.tex) {
-				a_res.error = "CreateTexture2D fehlgeschlagen";
+				a_res.error = "CreateTexture2D failed";
 				return;
 			}
 			auto sd = job.srvDesc;
@@ -625,7 +625,7 @@ namespace TextureStream
 			if (g_device->CreateShaderResourceView(a_res.tex, &sd, &a_res.srv) < 0 || !a_res.srv) {
 				a_res.tex->Release();
 				a_res.tex = nullptr;
-				a_res.error = "CreateShaderResourceView fehlgeschlagen";
+				a_res.error = "CreateShaderResourceView failed";
 				return;
 			}
 			a_res.mb = bytes / 1048576.0;
@@ -835,7 +835,7 @@ namespace TextureStream
 				const auto      old = *dir / "SkyrimPerf_TextureSizes2.txt";
 				if (!std::filesystem::exists(SizesFile(), ec) && std::filesystem::exists(old, ec)) {
 					std::filesystem::copy_file(old, SizesFile(), ec);
-					logger::info("TextureStream: gemerkte Groessen aus SkyrimPerf_TextureSizes2.txt uebernommen{}", ec ? " - FEHLER: " + ec.message() : "");
+					logger::info("TextureStream: remembered sizes migrated from SkyrimPerf_TextureSizes2.txt{}", ec ? " - ERROR: " + ec.message() : "");
 				}
 			}
 			std::ifstream in(SizesFile());
@@ -852,7 +852,7 @@ namespace TextureStream
 					++n;
 				}
 			}
-			logger::info("TextureStream: {} gemerkte Texturgroessen geladen", n);
+			logger::info("TextureStream: {} remembered texture sizes loaded", n);
 		}
 
 		void SaveSizes()
@@ -955,7 +955,7 @@ namespace TextureStream
 						g_loadEdge.erase(t_loadPath);
 						g_sizesDirty = true;
 					}
-					logger::warn("[TextureStream] Laden mit maxsize {} fehlgeschlagen (0x{:X}) - wird nie mehr verkleinert geladen: {}", a_maxSize,
+					logger::warn("[TextureStream] loading with maxsize {} failed (0x{:X}) - will never be loaded reduced again: {}", a_maxSize,
 						static_cast<std::uint32_t>(result), t_loadPath);
 				}
 				return result;
@@ -1174,7 +1174,7 @@ namespace TextureStream
 		{
 			if (g_failLogged < 30) {
 				++g_failLogged;
-				logger::info("[TextureStream] nicht verkleinerbar: {} ({})", a_path, a_err);
+				logger::info("[TextureStream] cannot be downscaled: {} ({})", a_path, a_err);
 			}
 		}
 
@@ -1216,7 +1216,7 @@ namespace TextureStream
 						st.probe = Probe::kBad;
 						st.eligible = false;
 						++g_stats.probesBad;
-						LogFail(st.path, std::format("Datei {}x{} {} Mips, im Spiel {}x{} {} Mips", f.width, f.height, f.mips, st.curW, st.curH, st.curMips));
+						LogFail(st.path, std::format("file {}x{} {} mips, in game {}x{} {} mips", f.width, f.height, f.mips, st.curW, st.curH, st.curMips));
 						continue;
 					}
 					st.fullW = f.width;
@@ -1238,7 +1238,7 @@ namespace TextureStream
 						++g_stats.upFails;
 						if (it != g_tex.end()) {
 							it->second.eligible = false;
-							LogFail(job.path, "Neuladen: " + res.error);
+							LogFail(job.path, "reload: " + res.error);
 						}
 					}
 					continue;
@@ -1348,7 +1348,7 @@ namespace TextureStream
 			const auto root = RE::Main::WorldRootNode();
 			const auto cam = RE::Main::WorldRootCamera();
 			if (!root || !cam) {
-				logger::info("[TextureStream] Bildmitte: keine Welt/Kamera");
+				logger::info("[TextureStream] screen center: no world/camera");
 				return;
 			}
 			// Sichtstrahl der Kamera (NiCamera: erste Spalte der Drehung = Blickrichtung)
@@ -1357,7 +1357,7 @@ namespace TextureStream
 			float       fx = cw.rotate.entry[0][0], fy = cw.rotate.entry[1][0], fz = cw.rotate.entry[2][0];
 			const float fl = std::sqrt(fx * fx + fy * fy + fz * fz);
 			if (fl < 1e-4f) {
-				logger::info("[TextureStream] Bildmitte: keine Blickrichtung");
+				logger::info("[TextureStream] screen center: no view direction");
 				return;
 			}
 			fx /= fl, fy /= fl, fz /= fl;
@@ -1403,13 +1403,13 @@ namespace TextureStream
 				}
 			}
 			std::ranges::sort(hits, [](const Hit& a, const Hit& b) { return a.dist < b.dist; });
-			logger::info("[TextureStream] Bildmitte: {} Objekte unter dem Fadenkreuz (naechste zuerst, {} Knoten geprueft), Streaming {}", hits.size(), visited, Active() ? "AN" : "AUS");
+			logger::info("[TextureStream] screen center: {} objects under the crosshair (nearest first, {} nodes checked), streaming {}", hits.size(), visited, Active() ? "ON" : "OFF");
 			for (std::size_t i = 0; i < hits.size(); ++i) {
 				const auto geom = hits[i].geom;
 				const auto prop = geom->GetGeometryRuntimeData().shaderProperty.get();
 				const auto lsp = prop ? netimmerse_cast<RE::BSLightingShaderProperty*>(prop) : nullptr;
 				const auto material = lsp ? static_cast<RE::BSLightingShaderMaterialBase*>(lsp->material) : nullptr;
-				logger::info("[TextureStream]  #{} '{}' Entfernung {:.0f} | Radius {:.0f} | ~{:.0f} px | Material {}", i + 1, geom->name.c_str() ? geom->name.c_str() : "",
+				logger::info("[TextureStream]  #{} '{}' distance {:.0f} | radius {:.0f} | ~{:.0f} px | material {}", i + 1, geom->name.c_str() ? geom->name.c_str() : "",
 					hits[i].dist, geom->worldBound.radius, hits[i].need, material ? static_cast<int>(material->GetFeature()) : -1);
 				if (!material) {
 					continue;
@@ -1424,11 +1424,11 @@ namespace TextureStream
 					}
 					W::D3D11_TEXTURE2D_DESC d{};
 					const bool hasDesc = ReadDesc(r->texture, d);
-					std::string extra = "nicht verwaltet";
+					std::string extra = "not managed";
 					if (const auto it = g_tex.find(r); it != g_tex.end()) {
 						const auto& st = it->second;
-						extra = std::format("Original {}x{} ({} Mips) | jetzt {}x{} | Bedarf {:.0f} px | {}{}", st.fullW, st.fullH, st.fullMips, st.curW, st.curH,
-							st.passNeed, st.eligible ? "verkleinerbar" : "nicht verkleinerbar", st.path != NormalizePath(src->name.c_str()) ? " | PFAD WEICHT AB: " + st.path : "");
+						extra = std::format("original {}x{} ({} mips) | now {}x{} | need {:.0f} px | {}{}", st.fullW, st.fullH, st.fullMips, st.curW, st.curH,
+							st.passNeed, st.eligible ? "downscalable" : "not downscalable", st.path != NormalizePath(src->name.c_str()) ? " | PATH DIFFERS: " + st.path : "");
 					}
 					std::uint32_t remembered = 0;
 					{
@@ -1437,7 +1437,7 @@ namespace TextureStream
 							remembered = it->second;
 						}
 					}
-					logger::info("[TextureStream]     [{}] {} | D3D {}x{} {} Mips Format {} | gemerkt {} | {}", t, src->name.c_str() ? src->name.c_str() : "",
+					logger::info("[TextureStream]     [{}] {} | D3D {}x{} {} mips format {} | remembered {} | {}", t, src->name.c_str() ? src->name.c_str() : "",
 						hasDesc ? d.width : 0, hasDesc ? d.height : 0, hasDesc ? d.mipLevels : 0, hasDesc ? static_cast<int>(d.format) : -1, remembered, extra);
 				}
 			}
@@ -1622,7 +1622,7 @@ namespace TextureStream
 					}
 				}
 				if (key.empty()) {
-					key = "(nicht aus SkyrimSE.exe)";
+					key = "(not from SkyrimSE.exe)";
 				}
 				std::scoped_lock lock(g_chainLock);
 				++g_chains[key];
@@ -1651,7 +1651,7 @@ namespace TextureStream
 				--it;
 				return std::format("{}+0x{:X}", it->id, a_rva - it->offset);
 			};
-			logger::info("[TextureStream] Ladeweg-Diagnose: Dateitexturen nach Aufrufkette (SkyrimSE.exe, ID+Offset):");
+			logger::info("[TextureStream] load path diagnostics: file textures by call chain (SkyrimSE.exe, ID+offset):");
 			for (std::size_t i = 0; i < list.size() && i < 8; ++i) {
 				std::string chain;
 				std::size_t pos = 0;
@@ -1680,8 +1680,8 @@ namespace TextureStream
 				}
 			}
 			const auto& s = g_stats;
-			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, ausgelagert {:.0f} MB) | verkleinert {} Texturen, {:.0f} MB gespart | letzte Minute: "
-						 "verkleinert {}, neu geladen {} ({:.0f} MB), Hin und Her {}, aufgefuellt {}, gleich verkleinert geladen {}, aus RAM {}, Ladefehler {}",
+			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, paged out {:.0f} MB) | downscaled {} textures, {:.0f} MB saved | last minute: "
+						 "downscaled {}, reloaded {} ({:.0f} MB), ping-pong {}, refilled {}, loaded reduced {}, from RAM {}, load errors {}",
 				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_procShared.load() / 1048576.0, reduced,
 				savedMB, s.downs, s.ups, s.upMB, s.pingPong, s.refills, g_loadedReduced.exchange(0), g_cacheHits.exchange(0), s.upFails);
 			g_cacheMisses.exchange(0);
@@ -1723,9 +1723,9 @@ namespace TextureStream
 				queued = g_jobs.size();
 			}
 			const auto& s = g_stats;
-			logger::info("[TextureStream] {} | Texturen {} (verkleinerbar {}, Datei passt nicht {}) | verkleinert {} -> {:.0f} MB statt {:.0f} MB = {:.0f} MB gespart",
-				Active() ? "AN" : "AUS", managed, eligible, probeBad, reduced, curMB, fullMB, fullMB - curMB);
-			logger::info("[TextureStream]   10 s: verkleinert {} | neu geladen {} ({:.0f} MB, avg {:.0f} ms) | Ladefehler {} | Hin und Her {} | aufgefuellt {} | Warteschlange {} | Durchlaeufe {} (avg {:.0f} Frames, {:.0f} Knoten, {:.2f} ms gesamt)",
+			logger::info("[TextureStream] {} | textures {} (downscalable {}, file mismatch {}) | downscaled {} -> {:.0f} MB instead of {:.0f} MB = {:.0f} MB saved",
+				Active() ? "ON" : "OFF", managed, eligible, probeBad, reduced, curMB, fullMB, fullMB - curMB);
+			logger::info("[TextureStream]   10 s: downscaled {} | reloaded {} ({:.0f} MB, avg {:.0f} ms) | load errors {} | ping-pong {} | refilled {} | queue {} | passes {} (avg {:.0f} frames, {:.0f} nodes, {:.2f} ms total)",
 				s.downs, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, s.pingPong, s.refills, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
 				s.passes ? double(s.passNodes) / s.passes : 0.0, s.passes ? s.passMs / s.passes : 0.0);
 			std::size_t remembered = 0;
@@ -1733,25 +1733,25 @@ namespace TextureStream
 				std::scoped_lock lock(g_sizeLock);
 				remembered = g_loadEdge.size();
 			}
-			logger::info("[TextureStream]   VRAM {:.1f} / {:.1f} GB ({:.0f} %, DXGI {:.1f} GB, ausgelagert {:.0f} MB) | Budget-Modus {} ab {:.0f} % -> {}",
+			logger::info("[TextureStream]   VRAM {:.1f} / {:.1f} GB ({:.0f} %, DXGI {:.1f} GB, paged out {:.0f} MB) | budget mode {} from {:.0f} % -> {}",
 				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_dxgiUsage.load() / 1073741824.0,
-				g_procShared.load() / 1048576.0, Config::textureStream.budgetMode ? "AN" : "AUS", Config::textureStream.budgetStartPct,
-				Pressure() ? "verkleinern" : "genug Platz");
+				g_procShared.load() / 1048576.0, Config::textureStream.budgetMode ? "ON" : "OFF", Config::textureStream.budgetStartPct,
+				Pressure() ? "downscaling" : "enough room");
 			{
 				std::scoped_lock lock(g_cacheLock);
 				CacheTrim(CacheLimit());  // Regler im Menue verkleinert
-				logger::info("[TextureStream]   RAM-Puffer {:.0f} / {:.0f} MB, {} Texturen | aus RAM {} | von Platte {}", g_cacheBytes / 1048576.0,
+				logger::info("[TextureStream]   RAM buffer {:.0f} / {:.0f} MB, {} textures | from RAM {} | from disk {}", g_cacheBytes / 1048576.0,
 					Config::textureStream.ramCacheMB, g_cache.size(), g_cacheHits.exchange(0), g_cacheMisses.exchange(0));
 			}
-			logger::info("[TextureStream]   Stufe 3: {} | gleich verkleinert geladen {} | gemerkte Groessen {}", Config::textureStream.loadReduced ? "AN" : "AUS",
+			logger::info("[TextureStream]   stage 3: {} | loaded reduced {} | remembered sizes {}", Config::textureStream.loadReduced ? "ON" : "OFF",
 				g_loadedReduced.exchange(0), remembered);
 			if (Config::analysis.load(std::memory_order_relaxed))
-			logger::info("[TextureStream]   Stufe 3 Diagnose: Ladeaufrufe {} | DDS {} | ohne Textur {} | aus/kein Druck {} | Pfad unbekannt {} | maxsize von anderer Mod {} (zuletzt {})", g_diagCreate.exchange(0),
+			logger::info("[TextureStream]   stage 3 diagnostics: load calls {} | DDS {} | no texture {} | off/no pressure {} | path unknown {} | maxsize from other mod {} (last {})", g_diagCreate.exchange(0),
 				g_diagDDS.exchange(0), g_diagNoSrc.exchange(0), g_diagOff.exchange(0), g_diagMiss.exchange(0), g_diagPreset.exchange(0), g_diagPresetValue.load());
 			{
 				std::scoped_lock missLock(g_missLock);
 				for (const auto& m : g_missSamples) {
-					logger::info("[TextureStream]     unbekannt: {}", m);
+					logger::info("[TextureStream]     unknown: {}", m);
 				}
 				g_missSamples.clear();
 			}
@@ -1776,7 +1776,7 @@ namespace TextureStream
 		g_lastLoad = Clock::now();
 		g_lastLoadTicks.store(g_lastLoad.time_since_epoch().count(), std::memory_order_relaxed);
 		g_inflightUp = 0;
-		logger::info("[TextureStream] Reset ({}): {} gehaltene Texturen und Durchlauf freigegeben, {} Auftraege verworfen", a_reason, held, jobs);
+		logger::info("[TextureStream] Reset ({}): {} held textures and pass released, {} jobs discarded", a_reason, held, jobs);
 	}
 
 	void InstallLate()
@@ -1787,7 +1787,7 @@ namespace TextureStream
 		{
 			REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSShaderResourceManager[0] };
 			CreateRenderData::func = reinterpret_cast<decltype(CreateRenderData::func)>(vtbl.write_vfunc(0xD0 / 8, &CreateRenderData::thunk));
-			logger::info("Hook installiert: BSShaderResourceManager::CreateTexture (vtable 0xD0, bisher 0x{:X}) - Textur fuer DDS-Lader merken",
+			logger::info("Hook installed: BSShaderResourceManager::CreateTexture (vtable 0xD0, previously 0x{:X}) - remember texture for DDS loader",
 				reinterpret_cast<std::uintptr_t>(CreateRenderData::func));
 			Features::Report("Load textures at remembered size", "Gleich in gemerkter Größe laden", LoadDDS::func != nullptr,
 				LoadDDS::func ? "" : "DDS loader hook missing");
@@ -1796,7 +1796,7 @@ namespace TextureStream
 		const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
 		const auto device = renderer ? renderer->GetRuntimeData().forwarder : nullptr;
 		if (!device) {
-			logger::warn("TextureStream: kein Device fuer Ladeweg-Diagnose");
+			logger::warn("TextureStream: no device for load path diagnostics");
 			return;
 		}
 		// VRAM-Abfrage schon vor dem ersten Spielstand bereit (Budget-Modus beim allerersten Laden)
@@ -1817,7 +1817,7 @@ namespace TextureStream
 			g_origCreateTex2D = reinterpret_cast<CreateTex2DFn>(vtbl[5]);
 			vtbl[5] = reinterpret_cast<void*>(&ProbeCreateTex2D);
 			REX::W32::VirtualProtect(&vtbl[5], sizeof(void*), old, &old);
-			logger::info("TextureStream: Ladeweg-Diagnose aktiv (CreateTexture2D)");
+			logger::info("TextureStream: load path diagnostics active (CreateTexture2D)");
 		}
 	}
 
@@ -1838,11 +1838,11 @@ namespace TextureStream
 		// DDS-Lader (DirectXTK-Variante): AE ID 77533, SE 1.5.97 ID 75721 (per DDS-Magic + einzigem Aufrufer gefunden)
 		LoadDDS::func = reinterpret_cast<decltype(LoadDDS::func)>(REL::Relocation<std::uintptr_t>{ RELOCATION_ID(75721, 77533) }.address());
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&LoadDDS::func), reinterpret_cast<void*>(&LoadDDS::thunk)); err != 0) {
-			logger::warn("TextureStream: Detours-Fehler {} an ID 77533 - Stufe 3 inaktiv", err);
+			logger::warn("TextureStream: Detours error {} at ID 77533 - stage 3 inactive", err);
 			LoadDDS::func = nullptr;
 			return;
 		}
-		logger::info("Hook installiert: DDS-Lader (Detour) - gleich verkleinert laden");
+		logger::info("Hook installed: DDS loader (Detour) - load reduced");
 	}
 
 	void OnFrame()

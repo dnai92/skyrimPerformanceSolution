@@ -142,13 +142,13 @@ float4 main(VS_INPUT input) : SV_POSITION
 		}
 		g_device = static_cast<ID3D11Device*>(a_device);
 		if (!g_device) {
-			std::snprintf(a_error, a_errorSize, "kein D3D11-Device");
+			std::snprintf(a_error, a_errorSize, "no D3D11 device");
 			return false;
 		}
 		const auto compiler = LoadLibraryW(L"d3dcompiler_47.dll");
 		const auto compile = compiler ? reinterpret_cast<D3DCompileFn>(GetProcAddress(compiler, "D3DCompile")) : nullptr;
 		if (!compile) {
-			std::snprintf(a_error, a_errorSize, "d3dcompiler_47.dll/D3DCompile nicht gefunden");
+			std::snprintf(a_error, a_errorSize, "d3dcompiler_47.dll/D3DCompile not found");
 			return false;
 		}
 
@@ -158,13 +158,13 @@ float4 main(VS_INPUT input) : SV_POSITION
 			ID3DBlob* errors = nullptr;
 			const auto hr = compile(kShaderSource, sizeof(kShaderSource) - 1, "SPSInstancedShadow", defines, nullptr, "main", "vs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &bytecode[v], &errors);
 			if (FAILED(hr)) {
-				std::snprintf(a_error, a_errorSize, "Shader-Kompilierung fehlgeschlagen: %s", errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
+				std::snprintf(a_error, a_errorSize, "shader compilation failed: %s", errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
 				SafeRelease(errors);
 				return false;
 			}
 			SafeRelease(errors);
 			if (FAILED(g_device->CreateVertexShader(bytecode[v]->GetBufferPointer(), bytecode[v]->GetBufferSize(), nullptr, &g_vs[v]))) {
-				std::snprintf(a_error, a_errorSize, "CreateVertexShader fehlgeschlagen");
+				std::snprintf(a_error, a_errorSize, "CreateVertexShader failed");
 				return false;
 			}
 		}
@@ -178,7 +178,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 				{ "TEXCOORD", 10, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 32, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
 			};
 			if (FAILED(g_device->CreateInputLayout(elements, 4, bytecode[0]->GetBufferPointer(), bytecode[0]->GetBufferSize(), &g_layout[p]))) {
-				std::snprintf(a_error, a_errorSize, "CreateInputLayout fehlgeschlagen");
+				std::snprintf(a_error, a_errorSize, "CreateInputLayout failed");
 				return false;
 			}
 		}
@@ -191,7 +191,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 		desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
 		desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 		if (FAILED(g_device->CreateBuffer(&desc, nullptr, &g_instanceVB))) {
-			std::snprintf(a_error, a_errorSize, "CreateBuffer (Instanzen) fehlgeschlagen");
+			std::snprintf(a_error, a_errorSize, "CreateBuffer (instances) failed");
 			return false;
 		}
 		g_ready = true;
@@ -281,7 +281,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 	{
 		const auto ctx = static_cast<ID3D11DeviceContext*>(a_context);
 		if (!ctx) {
-			std::snprintf(a_out, a_size, "kein Kontext");
+			std::snprintf(a_out, a_size, "no context");
 			return;
 		}
 		ID3D11Buffer* vb = nullptr;
@@ -304,7 +304,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 		ctx->RSGetViewports(&nvp, &vp);
 		ID3D11VertexShader* vs = nullptr;
 		ctx->VSGetShader(&vs, nullptr, nullptr);
-		std::snprintf(a_out, a_size, "VB %p Stride %u Offset %u | IB %p Format %d Offset %u | Topologie %d | DSV %p Ebene %u | Viewport %.0fx%.0f @%.0f,%.0f | VS %p",
+		std::snprintf(a_out, a_size, "VB %p Stride %u Offset %u | IB %p Format %d Offset %u | topology %d | DSV %p slice %u | Viewport %.0fx%.0f @%.0f,%.0f | VS %p",
 			static_cast<void*>(vb), stride, offset, static_cast<void*>(ib), static_cast<int>(ibFormat), ibOffset, static_cast<int>(topo), static_cast<void*>(dsv),
 			dsv ? dsvDesc.Texture2DArray.FirstArraySlice : 0u, vp.Width, vp.Height, vp.TopLeftX, vp.TopLeftY, static_cast<void*>(vs));
 		SafeRelease(vb);

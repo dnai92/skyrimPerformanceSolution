@@ -42,7 +42,7 @@ namespace Hotkey
 			{
 				const bool enabled = !Config::masterEnabled.load(std::memory_order_relaxed);
 				Config::masterEnabled.store(enabled, std::memory_order_relaxed);
-				logger::info("Hotkey: Culling {}", enabled ? "AN" : "AUS");
+				logger::info("Hotkey: optimizations {}", enabled ? "ON" : "OFF");
 				const bool de = Menu::IsGerman();
 				RE::SendHUDMessage::ShowHUDMessage(enabled ? (de ? "SPS: Optimierungen AN" : "SPS: optimizations ON") :
 				                                             (de ? "SPS: Optimierungen AUS" : "SPS: optimizations OFF"));
@@ -54,7 +54,7 @@ namespace Hotkey
 	{
 		if (const auto input = RE::BSInputDeviceManager::GetSingleton()) {
 			input->AddEventSink(InputSink::GetSingleton());
-			logger::info("Hotkey registriert: Taste 0x{:X} schaltet alle Optimierungen an/aus", Config::toggleKey.load());
+			logger::info("Hotkey registered: key 0x{:X} toggles all optimizations on/off", Config::toggleKey.load());
 		}
 	}
 }

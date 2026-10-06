@@ -23,7 +23,7 @@ namespace Menu
 			}
 			std::string l = lang ? lang : "";
 			std::ranges::transform(l, l.begin(), [](char c) { return static_cast<char>(std::toupper(static_cast<unsigned char>(c))); });
-			logger::info("Spielsprache: {} -> Menue {}", l.empty() ? "(unbekannt)" : l, l == "GERMAN" ? "Deutsch" : "Englisch");
+			logger::info("Game language: {} -> menu {}", l.empty() ? "(unknown)" : l, l == "GERMAN" ? "German" : "English");
 			return l == "GERMAN";
 		}
 
@@ -144,7 +144,7 @@ namespace Menu
 				if (const auto dik = DikOf(key)) {
 					Config::toggleKey.store(dik);
 					Config::MarkDirty();
-					logger::info("Menue: Hotkey jetzt {} (0x{:X})", KeyName(dik), dik);
+					logger::info("Menu: hotkey now {} (0x{:X})", KeyName(dik), dik);
 				}
 				g_capturingKey = false;
 			}
@@ -410,13 +410,13 @@ namespace Menu
 	void Register()
 	{
 		if (!MenuApi::IsInstalled()) {
-			logger::warn("SKSE Menu Framework nicht installiert - kein Menue, Einstellungen nur ueber die INI");
+			logger::warn("SKSE Menu Framework not installed - no menu, settings via INI only");
 			return;
 		}
 		g_german = IsGerman();
 		MenuApi::AddSectionItem(kSection + T("Overview", "Übersicht"), RenderOverview);
 		MenuApi::AddSectionItem(kSection + T("Shadows", "Schatten"), RenderShadows);
 		MenuApi::AddSectionItem(kSection + T("Lights and scene", "Licht und Szene"), RenderScene);
-		logger::info("Menue im SKSE Menu Framework registriert (Version {:.1f})", MenuApi::Version());
+		logger::info("Menu registered in SKSE Menu Framework (version {:.1f})", MenuApi::Version());
 	}
 }

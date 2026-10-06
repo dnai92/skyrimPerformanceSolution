@@ -78,7 +78,7 @@ namespace Stats
 			const auto cellLoads = g_cellLoads.exchange(0);
 			const auto npcPerFrame = static_cast<double>(g_npcUpdatesInWindow) / static_cast<double>(frames);
 
-			logger::info("---- {} Frames | {:.1f} FPS | Frame avg {:.2f} ms, p99 {:.2f} ms, max {:.2f} ms | NPC-Updates/Frame {:.1f} | VM overstressed {} | Cell-Loads {}",
+			logger::info("---- {} Frames | {:.1f} FPS | Frame avg {:.2f} ms, p99 {:.2f} ms, max {:.2f} ms | NPC updates/frame {:.1f} | VM overstressed {} | cell loads {}",
 				frames, fps, frame.avg, frame.p99, frame.max, npcPerFrame, overstressed, cellLoads);
 
 			// Ohne Analyse-Protokoll nur diese eine Zeile (pro Minute) - Zonen, Zaehler und CSV nur zur Fehlersuche

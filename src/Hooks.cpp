@@ -26,7 +26,7 @@ namespace Hooks
 			std::sort(callers.begin(), callers.begin() + n, [](const auto& a, const auto& b) { return a.ns > b.ns; });
 
 			static const REL::Offset2ID offset2id;
-			logger::info("[Engine-Wait] Top-Wartestellen (Main-Thread, ueber 600 Frames):");
+			logger::info("[Engine-Wait] Top wait sites (main thread, over 600 frames):");
 			for (std::size_t i = 0; i < n && i < 10; ++i) {
 				const auto& c = callers[i];
 				auto it = std::upper_bound(offset2id.begin(), offset2id.end(), c.rva, [](std::uintptr_t a_off, const auto& a_map) { return a_off < a_map.offset; });
@@ -36,7 +36,7 @@ namespace Hooks
 					id = it->id;
 					delta = c.rva - it->offset;
 				}
-				logger::info("[Engine-Wait]   RVA 0x{:X} (ID {} +0x{:X}): {:.2f} ms/Frame, {:.1f} Aufrufe/Frame",
+				logger::info("[Engine-Wait]   RVA 0x{:X} (ID {} +0x{:X}): {:.2f} ms/frame, {:.1f} calls/frame",
 					c.rva, id, delta, c.ns / 1e6 / 600.0, c.calls / 600.0);
 			}
 		}
@@ -46,7 +46,7 @@ namespace Hooks
 		{
 			REL::Relocation<std::uintptr_t> vtbl{ a_vtable };
 			T::func = vtbl.write_vfunc(a_index, T::thunk);
-			logger::info("Hook installiert: {} (vfunc 0x{:X})", a_name, a_index);
+			logger::info("Hook installed: {} (vfunc 0x{:X})", a_name, a_index);
 		}
 
 		// IVirtualMachine::Update (04) - Papyrus-Skriptausfuehrung pro Frame
@@ -147,7 +147,7 @@ namespace Hooks
 			{
 				// Vor dem Abbau der Welt/Zellen alle eigenen Verweise freigeben (Ladebildschirm oeffnet vor dem Entladen)
 				if (a_event && a_event->opening && (a_event->menuName == RE::MainMenu::MENU_NAME || a_event->menuName == RE::LoadingMenu::MENU_NAME)) {
-					TextureStream::Reset(a_event->menuName == RE::MainMenu::MENU_NAME ? "Hauptmenue" : "Ladebildschirm");
+					TextureStream::Reset(a_event->menuName == RE::MainMenu::MENU_NAME ? "main menu" : "loading screen");
 				}
 				if (TracyIsConnected && a_event) {
 					const auto msg = std::format("Menue {}: {}", a_event->opening ? "auf" : "zu", a_event->menuName.c_str());
@@ -177,6 +177,6 @@ namespace Hooks
 		if (const auto ui = RE::UI::GetSingleton()) {
 			ui->AddEventSink<RE::MenuOpenCloseEvent>(EventSink::GetSingleton());
 		}
-		logger::info("Event-Sinks registriert");
+		logger::info("Event sinks registered");
 	}
 }

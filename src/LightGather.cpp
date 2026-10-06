@@ -82,7 +82,7 @@ namespace LightGather
 			return;
 		}
 		UpdateLight::func = SKSE::GetTrampoline().write_call<5>(addr, UpdateLight::thunk);
-		logger::info("LightGather: Hook auf Licht-Zuordnung dynamischer Punktlichter installiert");
+		logger::info("LightGather: hook on light assignment of dynamic point lights installed");
 		Features::Report("Light assignment throttle", "Licht-Zuordnung drosseln", true);
 	}
 }

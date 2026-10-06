@@ -17,7 +17,7 @@ namespace Features
 			g_entries.push_back({ std::string(a_name), std::string(a_nameDe), a_active, std::string(a_reason) });
 		}
 		if (!a_active) {
-			logger::warn("Feature abgeschaltet: {} - {}", a_name, a_reason);
+			logger::warn("Feature disabled: {} - {}", a_name, a_reason);
 		}
 	}
 

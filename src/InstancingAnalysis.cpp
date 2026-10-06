@@ -89,7 +89,7 @@ namespace InstancingAnalysis
 			kOther,      // kein TriShape / ohne Buffer
 			kTotal
 		};
-		constexpr std::array<const char*, static_cast<std::size_t>(Cat::kTotal)> kCatNames{ "einfach", "Alpha-Test", "Baum-Animation", "LOD", "geskinnt", "sonstige" };
+		constexpr std::array<const char*, static_cast<std::size_t>(Cat::kTotal)> kCatNames{ "simple", "alpha test", "tree animation", "LOD", "skinned", "other" };
 
 		struct Key2
 		{
@@ -200,10 +200,10 @@ namespace InstancingAnalysis
 				char err[512]{};
 				if (!InstancedDraw::Init(RE::BSGraphics::Renderer::GetDevice(), err, sizeof(err))) {
 					g_instInitFailed = true;
-					logger::error("ShadowInstancing: Initialisierung fehlgeschlagen - {}", err);
+					logger::error("ShadowInstancing: initialization failed - {}", err);
 					return false;
 				}
-				logger::info("ShadowInstancing: Shader und Puffer angelegt");
+				logger::info("ShadowInstancing: shaders and buffers created");
 			}
 			return true;
 		}
@@ -271,19 +271,19 @@ namespace InstancingAnalysis
 			if (const auto rd = a_pass.geometry->GetGeometryRuntimeData().rendererData) {
 				auto desc = rd->vertexDesc;
 				const auto tri = a_pass.geometry->AsTriShape();
-				logger::info("[Instancing-Debug]   Engine-Zustand nach Draw: {} || unsere Werte: VB {} Stride {} IB {} Dreiecke {} FullPrec {} Desc {:016X}", state,
+				logger::info("[Instancing-Debug]   engine state after draw: {} || our values: VB {} stride {} IB {} triangles {} FullPrec {} Desc {:016X}", state,
 					static_cast<const void*>(rd->vertexBuffer), desc.GetSize(), static_cast<const void*>(rd->indexBuffer), tri ? tri->GetTrishapeRuntimeData().triangleCount : 0,
 					PositionIsFloat32(std::bit_cast<std::uint64_t>(rd->vertexDesc)), std::bit_cast<std::uint64_t>(rd->vertexDesc));
 			}
 			const auto& w = a_pass.geometry->world;
-			logger::info("[Instancing-Debug] '{}' Welt-Pos ({:.1f} {:.1f} {:.1f}) Skalierung {:.3f} | CB2 gelesen {} | CB12 gelesen {}", a_pass.geometry->name.c_str(),
+			logger::info("[Instancing-Debug] '{}' world pos ({:.1f} {:.1f} {:.1f}) scale {:.3f} | CB2 read {} | CB12 read {}", a_pass.geometry->name.c_str(),
 				w.translate.x, w.translate.y, w.translate.z, w.scale, ok2, ok12);
 			for (int r = 0; r < 4; ++r) {
-				logger::info("[Instancing-Debug]   Engine World Zeile {}: {:10.4f} {:10.4f} {:10.4f} {:10.4f}   | unsere: {}", r, cb2[4 + r * 4], cb2[5 + r * 4], cb2[6 + r * 4], cb2[7 + r * 4],
+				logger::info("[Instancing-Debug]   engine world row {}: {:10.4f} {:10.4f} {:10.4f} {:10.4f}   | ours: {}", r, cb2[4 + r * 4], cb2[5 + r * 4], cb2[6 + r * 4], cb2[7 + r * 4],
 					r < 3 ? std::format("{:10.4f} {:10.4f} {:10.4f} {:10.4f}", ours.rows[r][0], ours.rows[r][1], ours.rows[r][2], ours.rows[r][3]) : std::string("0 0 0 1"));
 			}
 			for (int r = 0; r < 4; ++r) {
-				logger::info("[Instancing-Debug]   CB12 CameraViewProj Zeile {}: {:10.5f} {:10.5f} {:10.5f} {:10.5f}", r, cb12[32 + r * 4], cb12[33 + r * 4], cb12[34 + r * 4], cb12[35 + r * 4]);
+				logger::info("[Instancing-Debug]   CB12 CameraViewProj row {}: {:10.5f} {:10.5f} {:10.5f} {:10.5f}", r, cb12[32 + r * 4], cb12[33 + r * 4], cb12[34 + r * 4], cb12[35 + r * 4]);
 			}
 		}
 
@@ -490,21 +490,21 @@ namespace InstancingAnalysis
 				drawsAll += w.draws[i];
 				savedAll += w.saved[i];
 			}
-			logger::info("[Instancing-v2] {} Frames | Sonnenschatten-Draws/Frame {:.0f} | RenderBatches-Aufrufe/Frame {:.1f} | Sonne Render {:.2f} ms/Frame (~{:.2f} us/Draw)",
+			logger::info("[Instancing-v2] {} frames | sun shadow draws/frame {:.0f} | RenderBatches calls/frame {:.1f} | sun render {:.2f} ms/frame (~{:.2f} us/draw)",
 				w.frames, drawsAll / f, w.batches / f, a_sunRenderMs, drawsAll ? a_sunRenderMs * 1000.0 / (drawsAll / f) : 0.0);
 			for (std::size_t i = 0; i < w.draws.size(); ++i) {
-				logger::info("[Instancing-v2]   {:<15} {:6.0f} Draws/Frame | mit Instancing ab 2: -{:5.0f} (Gruppen {:4.0f}) | ab 4: -{:5.0f}",
+				logger::info("[Instancing-v2]   {:<15} {:6.0f} draws/frame | with instancing from 2: -{:5.0f} (groups {:4.0f}) | from 4: -{:5.0f}",
 					kCatNames[i], w.draws[i] / f, w.saved[i] / f, w.groups[i] / f, w.savedMin4[i] / f);
 			}
 			const double simple = w.saved[0] / f;
 			const double simpleAlpha = (w.saved[0] + w.saved[1]) / f;
 			const double usPerDraw = drawsAll ? a_sunRenderMs * 1000.0 / (drawsAll / f) : 0.0;
-			logger::info("[Instancing-v2]   => Schritt 2 (einfach): -{:.0f} Draws/Frame (~{:.2f} ms) | Schritt 3 (+Alpha-Test): -{:.0f} (~{:.2f} ms) | alles Moegliche: -{:.0f}",
+			logger::info("[Instancing-v2]   => step 2 (simple): -{:.0f} draws/frame (~{:.2f} ms) | step 3 (+alpha test): -{:.0f} (~{:.2f} ms) | everything possible: -{:.0f}",
 				simple, simple * usPerDraw / 1000.0, simpleAlpha, simpleAlpha * usPerDraw / 1000.0, savedAll / f);
 			std::vector<std::pair<std::uint32_t, TechStat>> techs(g_techStats.begin(), g_techStats.end());
 			std::ranges::sort(techs, [](const auto& a, const auto& b) { return a.second.saved > b.second.saved; });
 			for (std::size_t i = 0; i < techs.size() && i < 12; ++i) {
-				logger::info("[Instancing-v2]     Technik {:8X}: {:6.0f} Draws/Frame, Instancing spart {:6.0f}", techs[i].first, techs[i].second.draws / f, techs[i].second.saved / f);
+				logger::info("[Instancing-v2]     technique {:8X}: {:6.0f} draws/frame, instancing saves {:6.0f}", techs[i].first, techs[i].second.draws / f, techs[i].second.saved / f);
 			}
 			g_techStats.clear();
 			w = {};
@@ -665,7 +665,7 @@ namespace InstancingAnalysis
 			if (w.frames % kReportFrames == kReportFrames - 1) {
 				g_topGroups.clear();
 				for (const auto& [key, g] : g_frameGroups) {
-					g_topGroups.emplace_back(g.count, std::format("{} (Technik {:X})", g.sampleName ? g.sampleName : "?", key.technique));
+					g_topGroups.emplace_back(g.count, std::format("{} (technique {:X})", g.sampleName ? g.sampleName : "?", key.technique));
 				}
 				std::ranges::sort(g_topGroups, std::greater{}, &std::pair<std::uint32_t, std::string>::first);
 				if (g_topGroups.size() > 20) {
@@ -685,11 +685,11 @@ namespace InstancingAnalysis
 				return;
 			}
 			const auto f = static_cast<double>(w.frames);
-			logger::info("[Instancing-Analyse] {} Frames | Sonnenschatten-Draws/Frame {:.0f} | geskinnt {:.0f} | kein TriShape {:.0f} | ohne Buffer {:.0f}",
+			logger::info("[Instancing-Analysis] {} frames | sun shadow draws/frame {:.0f} | skinned {:.0f} | no TriShape {:.0f} | no buffer {:.0f}",
 				w.frames, w.passes / f, w.skinned / f, w.nonTriShape / f, w.noRendererData / f);
-			logger::info("[Instancing-Analyse]   Aufrufstelle: RenderBatches {:.0f} | zweite Stelle {:.0f} | unbekannt {:.0f}",
+			logger::info("[Instancing-Analysis]   call site: RenderBatches {:.0f} | second site {:.0f} | unknown {:.0f}",
 				w.callSites[1] / f, w.callSites[2] / f, w.callSites[0] / f);
-			logger::info("[Instancing-Analyse]   Mesh-Gruppen/Frame {:.0f} | Draws mit Instancing ab 2: {:.0f} ({:.0f}%) | ab 4: {:.0f} ({:.0f}%) | ab 8: {:.0f} ({:.0f}%)",
+			logger::info("[Instancing-Analysis]   mesh groups/frame {:.0f} | draws with instancing from 2: {:.0f} ({:.0f}%) | from 4: {:.0f} ({:.0f}%) | from 8: {:.0f} ({:.0f}%)",
 				w.groups / f,
 				w.drawsIfInstanced2 / f, 100.0 * w.drawsIfInstanced2 / w.passes,
 				w.drawsIfInstanced4 / f, 100.0 * w.drawsIfInstanced4 / w.passes,
@@ -700,9 +700,9 @@ namespace InstancingAnalysis
 					types += std::format(" [{}]={:.0f}", i, w.typeCounts[i] / f);
 				}
 			}
-			logger::info("[Instancing-Analyse]   Geometrie-Typen/Frame:{}", types);
+			logger::info("[Instancing-Analysis]   geometry types/frame:{}", types);
 			for (const auto& [count, name] : g_topGroups) {
-				logger::info("[Instancing-Analyse]     {:5}x  {}", count, name);
+				logger::info("[Instancing-Analysis]     {:5}x  {}", count, name);
 			}
 			w = {};
 		}
@@ -716,19 +716,19 @@ namespace InstancingAnalysis
 		SunShadowRender::func = sunVtbl.write_vfunc(0xA, SunShadowRender::thunk);
 		SunShadowAccumulate::func = sunVtbl.write_vfunc(0x9, SunShadowAccumulate::thunk);
 		SunUpdateCamera::func = sunVtbl.write_vfunc(0x10, SunUpdateCamera::thunk);
-		logger::info("Hooks installiert: BSShadowDirectionalLight::Accumulate (0x9) / Render (0xA)");
+		logger::info("Hooks installed: BSShadowDirectionalLight::Accumulate (0x9) / Render (0xA)");
 
 		RenderBatches::func = reinterpret_cast<decltype(RenderBatches::func)>(REL::RelocationID(100852, 107642).address());
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&RenderBatches::func), reinterpret_cast<void*>(&RenderBatches::thunk)); err != 0) {
 			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", false, std::format("Detours error {} at RenderBatches", err));
 		} else {
-			logger::info("Detour installiert: BSBatchRenderer::RenderBatches (Instancing-Analyse, Batch-Grenzen)");
+			logger::info("Detour installed: BSBatchRenderer::RenderBatches (instancing analysis, batch boundaries)");
 			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", !REL::Module::IsSE(), REL::Module::IsSE() ? "not verified on SE 1.5.97" : "");
 		}
 
 		REL::Relocation<std::uintptr_t> utilVtbl{ RE::VTABLE_BSUtilityShader[0] };
 		UtilitySetupGeometry::func = utilVtbl.write_vfunc(0x6, UtilitySetupGeometry::thunk);
-		logger::info("Hook installiert: BSUtilityShader::SetupGeometry (vfunc 0x6)");
+		logger::info("Hook installed: BSUtilityShader::SetupGeometry (vfunc 0x6)");
 
 		// Aufrufstellen von RenderPassImmediately (dieselben wie Community Shaders/LightLimitFix) - nur zur Zuordnung
 		auto& trampoline = SKSE::GetTrampoline();
@@ -739,7 +739,7 @@ namespace InstancingAnalysis
 		if (ok) {
 			RenderPassImmediately<1>::func = trampoline.write_call<5>(site1.address(), RenderPassImmediately<1>::thunk);
 			RenderPassImmediately<2>::func = trampoline.write_call<5>(site2.address(), RenderPassImmediately<2>::thunk);
-			logger::info("Hooks installiert: RenderPassImmediately-Aufrufstellen 1 und 2");
+			logger::info("Hooks installed: RenderPassImmediately call sites 1 and 2");
 		}
 		Features::Report("Diagnostics: draw call assignment", "Diagnose: Draw-Zuordnung", ok, ok ? "" : "call sites differ");
 	}
@@ -755,7 +755,7 @@ namespace InstancingAnalysis
 			std::uint32_t mism = 0, tot = 0;
 			InstancedDraw::DebugFlushStats(mism, tot);
 			if (tot) {
-				logger::info("[Instancing-Debug] Flushes {} | davon mit anderem Tiefenziel als beim ersten Draw: {}", tot, mism);
+				logger::info("[Instancing-Debug] flushes {} | of which with a different depth target than the first draw: {}", tot, mism);
 			}
 			g_sunRenderNs = 0;
 		}

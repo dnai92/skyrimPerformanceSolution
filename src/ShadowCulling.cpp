@@ -158,7 +158,7 @@ namespace ShadowCulling
 
 		void LogDiff(const char* a_label, FrameDiff& a_d)
 		{
-			logger::info("[Cascade-Diag]   {}: {} Frames | lightTransform {} (max {:.4f}) | worldToCam {} (max {:.4f}) | Frustum {} (max {:.2f}) | clipPlanes {} | Grenzen {} (max {:.1f}) | isEnabled {} | Port {}",
+			logger::info("[Cascade-Diag]   {}: {} frames | lightTransform {} (max {:.4f}) | worldToCam {} (max {:.4f}) | frustum {} (max {:.2f}) | clipPlanes {} | splits {} (max {:.1f}) | isEnabled {} | port {}",
 				a_label, a_d.frames, a_d.lightTransform, a_d.maxLightTransform, a_d.worldToCam, a_d.maxWorldToCam, a_d.frustum, a_d.maxFrustum, a_d.clipPlanes, a_d.splits, a_d.maxSplits, a_d.enabled, a_d.port);
 			a_d = {};
 		}
@@ -216,7 +216,7 @@ namespace ShadowCulling
 				a_b.copy = nullptr;
 				return false;
 			}
-			logger::info("Kaskaden-Cache: Sicherungstextur {}x{} x{} angelegt (Ziel {})", desc.width, desc.height, desc.arraySize, static_cast<std::uint32_t>(a_b.target));
+			logger::info("Cascade cache: backup texture {}x{} x{} created (target {})", desc.width, desc.height, desc.arraySize, static_cast<std::uint32_t>(a_b.target));
 			return true;
 		}
 
@@ -363,7 +363,7 @@ namespace ShadowCulling
 			try {
 				const char* name = a_geom.name.c_str();
 				std::scoped_lock lock{ g_culledLock };
-				auto& info = g_culledBig[name && *name ? name : "(ohne Name)"];
+				auto& info = g_culledBig[name && *name ? name : "(no name)"];
 				++info.count;
 				info.maxRadius = std::max(info.maxRadius, radius);
 				if (a_distance < info.minDist) {
@@ -385,10 +385,10 @@ namespace ShadowCulling
 				g_culledBig.clear();
 			}
 			std::ranges::sort(list, [](const auto& a, const auto& b) { return a.second.maxRadius > b.second.maxRadius; });
-			logger::info("[Culled-Diag] Groesste verworfene Sonnenschatten-Objekte (Radius >= {:.0f}), ueber 600 Frames, {} verschiedene Namen:", kCulledDiagMinRadius, list.size());
+			logger::info("[Culled-Diag] Largest culled sun shadow objects (radius >= {:.0f}), over 600 frames, {} distinct names:", kCulledDiagMinRadius, list.size());
 			for (std::size_t i = 0; i < list.size() && i < 25; ++i) {
 				const auto& [name, c] = list[i];
-				logger::info("[Culled-Diag]   {:<40} Radius {:6.0f} | Distanz {:6.0f}-{:6.0f} | Radius/Distanz {:.3f} | Kaskade {} | {}x", name, c.maxRadius, c.minDist, c.maxDist, c.angular, c.cascade, c.count);
+				logger::info("[Culled-Diag]   {:<40} radius {:6.0f} | distance {:6.0f}-{:6.0f} | radius/distance {:.3f} | cascade {} | {}x", name, c.maxRadius, c.minDist, c.maxDist, c.angular, c.cascade, c.count);
 			}
 		}
 
@@ -407,7 +407,7 @@ namespace ShadowCulling
 		void RecordDecalTexture(RE::BSGeometry& a_geom, float a_distance) noexcept
 		{
 			try {
-				std::string tex = "(keine Textur)";
+				std::string tex = "(no texture)";
 				if (const auto prop = a_geom.GetGeometryRuntimeData().shaderProperty.get()) {
 					if (const auto lighting = netimmerse_cast<RE::BSLightingShaderProperty*>(prop)) {
 						if (const auto mat = static_cast<RE::BSLightingShaderMaterialBase*>(lighting->material)) {
@@ -439,10 +439,10 @@ namespace ShadowCulling
 				g_decalTex.clear();
 			}
 			std::ranges::sort(list, [](const auto& a, const auto& b) { return a.second.count > b.second.count; });
-			logger::info("[Decal-Texturen] {} verschiedene Texturen (Decals/Frame, ueber 600 Frames gemittelt):", list.size());
+			logger::info("[Decal-Textures] {} distinct textures (decals/frame, averaged over 600 frames):", list.size());
 			for (std::size_t i = 0; i < list.size() && i < 18; ++i) {
 				const auto& [tex, d] = list[i];
-				logger::info("[Decal-Texturen]   {:6.1f}/Frame  Distanz {:5.0f}-{:5.0f}  Radius<={:4.0f}  '{}'  {}", d.count / 600.0, d.minDist, d.maxDist, d.maxRadius, d.meshName, tex);
+				logger::info("[Decal-Textures]   {:6.1f}/frame  distance {:5.0f}-{:5.0f}  radius<={:4.0f}  '{}'  {}", d.count / 600.0, d.minDist, d.maxDist, d.maxRadius, d.meshName, tex);
 			}
 		}
 
@@ -731,18 +731,18 @@ namespace ShadowCulling
 	{
 		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSCullingProcess[0] };
 		AppendVirtual::func = vtbl.write_vfunc(0x18, AppendVirtual::thunk);
-		logger::info("Hook installiert: BSCullingProcess::AppendVirtual (vfunc 0x18)");
+		logger::info("Hook installed: BSCullingProcess::AppendVirtual (vfunc 0x18)");
 
 		REL::Relocation<std::uintptr_t> parabolicVtbl{ RE::VTABLE_BSParabolicCullingProcess[0] };
 		AppendVirtualParabolic::func = parabolicVtbl.write_vfunc(0x18, AppendVirtualParabolic::thunk);
-		logger::info("Hook installiert: BSParabolicCullingProcess::AppendVirtual (vfunc 0x18)");
+		logger::info("Hook installed: BSParabolicCullingProcess::AppendVirtual (vfunc 0x18)");
 
 		// Teilbaeume ueberspringen: Process (vfunc 0x16) der drei Culler-Arten
 		REL::Relocation<std::uintptr_t> geomListVtbl{ RE::VTABLE_BSGeometryListCullingProcess[0] };
 		Process<0, false>::func = vtbl.write_vfunc(0x16, Process<0, false>::thunk);
 		Process<1, true>::func = parabolicVtbl.write_vfunc(0x16, Process<1, true>::thunk);
 		Process<2, false>::func = geomListVtbl.write_vfunc(0x16, Process<2, false>::thunk);
-		logger::info("Hook installiert: Process (vfunc 0x16) fuer BSCullingProcess, BSParabolicCullingProcess, BSGeometryListCullingProcess");
+		logger::info("Hook installed: Process (vfunc 0x16) for BSCullingProcess, BSParabolicCullingProcess, BSGeometryListCullingProcess");
 	}
 
 	void InstallLate()
@@ -750,14 +750,14 @@ namespace ShadowCulling
 		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSLightingShaderProperty[0] };
 		OcclusionRenderPasses::func = vtbl.write_vfunc(0x2D, OcclusionRenderPasses::thunk);
 		LightingRenderPasses::func = vtbl.write_vfunc(0x2A, LightingRenderPasses::thunk);
-		logger::info("Hook installiert: BSLightingShaderProperty::GetRenderPasses (vfunc 0x2A, nach Community Shaders)");
-		logger::info("Hook installiert: BSLightingShaderProperty::GetRenderPasses_Occlusion (vfunc 0x2D, nach Community Shaders)");
+		logger::info("Hook installed: BSLightingShaderProperty::GetRenderPasses (vfunc 0x2A, after Community Shaders)");
+		logger::info("Hook installed: BSLightingShaderProperty::GetRenderPasses_Occlusion (vfunc 0x2D, after Community Shaders)");
 
 		// Main::RenderDepth wird nur indirekt aufgerufen (kein direkter call/jmp im Spielcode). Community Shaders leitet den
 		// Funktionsanfang per Detours um; Detours verkettet einen weiteren Hook sauber dahinter.
 		RenderDepth::func = reinterpret_cast<void (*)(bool, bool)>(REL::Relocation<std::uintptr_t>{ RELOCATION_ID(100421, 107139) }.address());
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&RenderDepth::func), reinterpret_cast<void*>(&RenderDepth::thunk)); err == 0) {
-			logger::info("Hook installiert: Main::RenderDepth (Detours)");
+			logger::info("Hook installed: Main::RenderDepth (Detours)");
 			Features::Report("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen", true);
 		} else {
 			Features::Report("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen", false, std::format("Detours error {}", err));
@@ -934,7 +934,7 @@ namespace ShadowCulling
 		if (!ok) {
 			g_backupFailed = true;
 			g_backupValid = false;
-			logger::error("Kaskaden-Cache: Sicherungstextur konnte nicht angelegt werden - Cache deaktiviert");
+			logger::error("Cascade cache: backup texture could not be created - cache disabled");
 			return;
 		}
 		if (!skip) {
@@ -1082,7 +1082,7 @@ namespace ShadowCulling
 
 		// Diagnose alle ~600 Frames ins Log - nur mit dem Analyse-Protokoll
 		if (++g_frameCounter % 600 == 0 && Config::analysis.load(std::memory_order_relaxed)) {
-			logger::info("[ShadowCulling-Diag] Sonnen-Deskriptoren: {} | Punktlicht-Kameras: {} | Sonnenhoehe sin={:.2f} (~{:.0f} Grad, Schattenfaktor {:.1f})",
+			logger::info("[ShadowCulling-Diag] sun descriptors: {} | point light cameras: {} | sun elevation sin={:.2f} (~{:.0f} deg, shadow factor {:.1f})",
 				g_descCount, pointCount, g_sunSin.load(), std::asin(g_sunSin.load()) * 57.2958f, 1.0f / g_sunSin.load());
 			// Kaskaden-Cache: Ziel-Textur und Slice aller Schattenkarten (Sonne + Punktlichter) - teilen sie sich etwas?
 			if (const auto ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]) {
@@ -1091,7 +1091,7 @@ namespace ShadowCulling
 					const auto& descs = sun->GetRuntimeData().shadowmapDescriptors;
 					for (std::uint32_t i = 0; i < descs.size(); ++i) {
 						const auto& d = descs[i];
-						logger::info("[Cascade-Diag]   Sonne K{}: Ziel {} Slice {} Clear {} Aktiv {} Port {}x{}", i, static_cast<std::uint32_t>(d.renderTarget), d.shadowmapIndex,
+						logger::info("[Cascade-Diag]   sun C{}: target {} slice {} clear {} active {} port {}x{}", i, static_cast<std::uint32_t>(d.renderTarget), d.shadowmapIndex,
 							d.clearRenderTarget, d.isEnabled, d.port.GetWidth(), d.port.GetHeight());
 					}
 				}
@@ -1101,7 +1101,7 @@ namespace ShadowCulling
 						continue;
 					}
 					for (const auto& d : light->GetRuntimeData().shadowmapDescriptors) {
-						logger::info("[Cascade-Diag]   Licht {}: Ziel {} Slice {}", n, static_cast<std::uint32_t>(d.renderTarget), d.shadowmapIndex);
+						logger::info("[Cascade-Diag]   light {}: target {} slice {}", n, static_cast<std::uint32_t>(d.renderTarget), d.shadowmapIndex);
 					}
 					++n;
 				}
@@ -1110,30 +1110,30 @@ namespace ShadowCulling
 			if (Config::analysis.load(std::memory_order_relaxed)) {
 				ReportDecalTextures();
 			}
-			logger::info("[Cascade-Diag]   Cache-Invalidierungen (Ziel/Slice gewechselt): {} | Normal-Frames ferne Kaskade clearRenderTarget false/true: {}/{}",
+			logger::info("[Cascade-Diag]   cache invalidations (target/slice changed): {} | normal frames far cascade clearRenderTarget false/true: {}/{}",
 				g_cacheInvalidations, g_clearFlagSeen[0], g_clearFlagSeen[1]);
 			g_clearFlagSeen = {};
-			logger::info("[Cascade-Diag]   Render veraendert lightTransform nach Accumulate: {}/{} (max {:.4f})", g_renderChangedMatrix, g_renderChecked, g_renderChangedMax);
-			logger::info("[Cascade-Diag]   Projektion gleich wie im letzten gezeichneten Frame: {}/{} Frames", g_projSame, g_projChecked);
+			logger::info("[Cascade-Diag]   Render changes lightTransform after Accumulate: {}/{} (max {:.4f})", g_renderChangedMatrix, g_renderChecked, g_renderChangedMax);
+			logger::info("[Cascade-Diag]   projection same as in last drawn frame: {}/{} frames", g_projSame, g_projChecked);
 			g_projSame = g_projChecked = 0;
 			g_renderChangedMatrix = g_renderChecked = 0;
 			g_renderChangedMax = 0.0f;
-			LogDiff("Cache-Frame vs. letzter gezeichneter", g_diffCache);
-			LogDiff("Gezeichnet vs. vorheriger gezeichneter", g_diffNormal);
+			LogDiff("cache frame vs. last drawn", g_diffCache);
+			LogDiff("drawn vs. previous drawn", g_diffNormal);
 			if (const auto mainCam = RE::Main::WorldRootCamera()) {
-				logger::info("[ShadowCulling-Diag]   Hauptkamera (WorldRootCamera): {:p} '{}'", static_cast<const void*>(mainCam), mainCam->name.c_str());
+				logger::info("[ShadowCulling-Diag]   main camera (WorldRootCamera): {:p} '{}'", static_cast<const void*>(mainCam), mainCam->name.c_str());
 			}
 			if (const auto pc = RE::PlayerCamera::GetSingleton(); pc && pc->cameraRoot) {
 				for (const auto& child : pc->cameraRoot->GetChildren()) {
 					if (child && child->GetRTTI() && std::string_view{ child->GetRTTI()->GetName() } == "NiCamera") {
-						logger::info("[ShadowCulling-Diag]   PlayerCamera-Kind (NiCamera): {:p} '{}'", static_cast<const void*>(child.get()), child->name.c_str());
+						logger::info("[ShadowCulling-Diag]   PlayerCamera child (NiCamera): {:p} '{}'", static_cast<const void*>(child.get()), child->name.c_str());
 					}
 				}
 			}
 			for (std::size_t i = 0; i < kMaxCascades && i < g_descCount; ++i) {
-				logger::info("[ShadowCulling-Diag]   Kaskade {}: Kamera {:p}, Culler {:p}", i, static_cast<const void*>(cameras[i]), static_cast<const void*>(g_descCullers[i]));
+				logger::info("[ShadowCulling-Diag]   cascade {}: camera {:p}, culler {:p}", i, static_cast<const void*>(cameras[i]), static_cast<const void*>(g_descCullers[i]));
 			}
-			logger::info("[Decal-Diag] Decals/Frame nach Entfernung (Zeilen) x Radius (Spalten <25 <50 <100 <200 <500 >=500) | Namen: Decal {} DecalDirt {} sonstige {} leer {}",
+			logger::info("[Decal-Diag] decals/frame by distance (rows) x radius (columns <25 <50 <100 <200 <500 >=500) | names: Decal {} DecalDirt {} other {} empty {}",
 				g_decalNames[0].exchange(0) / 600, g_decalNames[1].exchange(0) / 600, g_decalNames[2].exchange(0) / 600, g_decalNames[3].exchange(0) / 600);
 			constexpr std::array<const char*, 6> kDistLabels{ "   <500", "  <1000", "  <1500", "  <3000", "  <6000", "  >6000" };
 			for (std::size_t d = 0; d < 6; ++d) {
@@ -1147,7 +1147,7 @@ namespace ShadowCulling
 				const auto cam = g_diagCameras[i].exchange(nullptr, std::memory_order_relaxed);
 				const auto cnt = g_diagCounts[i].exchange(0, std::memory_order_relaxed);
 				if (cnt > 0) {
-					logger::info("[ShadowCulling-Diag]   Kamera {:p}: {} Meshes (~{}/Frame)", static_cast<const void*>(cam), cnt, cnt / 600);
+					logger::info("[ShadowCulling-Diag]   camera {:p}: {} meshes (~{}/frame)", static_cast<const void*>(cam), cnt, cnt / 600);
 				}
 			}
 		}

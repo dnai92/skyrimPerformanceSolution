@@ -102,7 +102,7 @@ namespace Config
 			g_dirty.store(false);
 			std::error_code ec;
 			std::filesystem::remove(kUserPath, ec);
-			logger::info("Menue: SPS_User.ini geloescht - Vorgaben aus SPS.ini");
+			logger::info("Menu: SPS_User.ini deleted - defaults from SPS.ini");
 			Load();
 		}
 		const auto now = std::chrono::steady_clock::now();
@@ -112,10 +112,10 @@ namespace Config
 		g_lastCheck = now;
 		if (g_dirty.exchange(false)) {
 			SaveUser();
-			logger::info("Menue-Einstellungen in SPS_User.ini gespeichert");
+			logger::info("Menu settings saved to SPS_User.ini");
 		}
 		if (LastWrite(kPath) != g_lastWrite || LastWrite(kUserPath) != g_lastWriteUser) {
-			logger::info("SPS.ini / SPS_User.ini geaendert - lade neu");
+			logger::info("SPS.ini / SPS_User.ini changed - reloading");
 			Load();
 		}
 	}
@@ -128,7 +128,7 @@ namespace Config
 			std::error_code ec;
 			if (!migrated && !std::filesystem::exists(kUserPath, ec) && std::filesystem::exists(L"Data/SKSE/Plugins/SkyrimPerf_User.ini", ec)) {
 				std::filesystem::copy_file(L"Data/SKSE/Plugins/SkyrimPerf_User.ini", kUserPath, ec);
-				logger::info("Menue-Einstellungen aus SkyrimPerf_User.ini uebernommen{}", ec ? " - FEHLER: " + ec.message() : "");
+				logger::info("Menu settings migrated from SkyrimPerf_User.ini{}", ec ? " - ERROR: " + ec.message() : "");
 			}
 			migrated = true;
 		}
@@ -138,11 +138,11 @@ namespace Config
 		CSimpleIniA ini;
 		ini.SetUnicode();
 		if (ini.LoadFile(kPath) < 0) {
-			logger::warn("SPS.ini nicht gefunden - Defaults aktiv");
+			logger::warn("SPS.ini not found - using defaults");
 		}
 		// Menue-Werte darueber laden (gleiche Schluessel ersetzen die Vorgaben)
 		if (ini.LoadFile(kUserPath) >= 0) {
-			logger::info("SPS_User.ini (Menue-Einstellungen) geladen");
+			logger::info("SPS_User.ini (menu settings) loaded");
 		}
 
 		// Werte einzeln setzen; die Culling-Jobs lesen parallel (einzelne Felder, kein Absturz-Risiko)
@@ -182,8 +182,8 @@ namespace Config
 		cc.projectionEpsilon = static_cast<float>(ini.GetDoubleValue("ShadowCascadeCache", "fProjectionEpsilon", cc.projectionEpsilon));
 		cc.restoreShadowmap = ini.GetBoolValue("ShadowCascadeCache", "bRestoreShadowmap", cc.restoreShadowmap);
 		cc.restoreVolumetric = ini.GetBoolValue("ShadowCascadeCache", "bRestoreVolumetric", cc.restoreVolumetric);
-		logger::info("ShadowCascadeCache: {} | ab Kaskade {} | neu zeichnen jeden {}. Frame | Matrix {} | Kamera {} | Grenzen {} | Clear aus {} | Kopie Schatten {} | Kopie Volumetric {} | Draws weglassen {} | nur bei gleicher Projektion {} (eps {})",
-			cc.enabled ? "AN" : "AUS", cc.cascade, cc.interval, cc.freezeMatrix, cc.freezeCamera, cc.freezeSplits, cc.noClear, cc.restoreShadowmap, cc.restoreVolumetric, cc.skipDraws, cc.requireSameProjection, cc.projectionEpsilon);
+		logger::info("ShadowCascadeCache: {} | from cascade {} | redraw every {}. frame | matrix {} | camera {} | splits {} | clear off {} | copy shadow {} | copy volumetric {} | skip draws {} | only with same projection {} (eps {})",
+			cc.enabled ? "ON" : "OFF", cc.cascade, cc.interval, cc.freezeMatrix, cc.freezeCamera, cc.freezeSplits, cc.noClear, cc.restoreShadowmap, cc.restoreVolumetric, cc.skipDraws, cc.requireSameProjection, cc.projectionEpsilon);
 
 		auto& si = shadowInstancing;
 		si.enabled = ini.GetBoolValue("ShadowInstancing", "bEnabled", si.enabled);
@@ -214,20 +214,20 @@ namespace Config
 		for (std::uint32_t i = 0; i < si.techniqueCount; ++i) {
 			techs += std::format("{}{:X}", i ? "," : "", si.techniques[i]);
 		}
-		logger::info("ShadowInstancing: {} | Pruefmodus {} (Versatz {:.0f}) | Techniken {} | zweiseitig {} | Debug-Modus {}", si.enabled ? "AN" : "AUS", si.verify, si.debugOffsetZ, techs, si.allowTwoSided, si.debugMode);
+		logger::info("ShadowInstancing: {} | verify mode {} (offset {:.0f}) | techniques {} | two-sided {} | debug mode {}", si.enabled ? "ON" : "OFF", si.verify, si.debugOffsetZ, techs, si.allowTwoSided, si.debugMode);
 
 		auto& ac = actorShadowCulling;
 		ac.enabled = ini.GetBoolValue("ActorShadowCulling", "bEnabled", ac.enabled);
 		ac.minDistance = std::max(ActorShadowCulling::kMinAllowed, static_cast<float>(ini.GetDoubleValue("ActorShadowCulling", "fMinDistance", ac.minDistance)));
 		ac.pointLights = ini.GetBoolValue("ActorShadowCulling", "bPointLights", ac.pointLights);
-		logger::info("ActorShadowCulling: {} | ab Distanz {:.0f} | Punktlichter {}", ac.enabled ? "AN" : "AUS", ac.minDistance, ac.pointLights);
+		logger::info("ActorShadowCulling: {} | from distance {:.0f} | point lights {}", ac.enabled ? "ON" : "OFF", ac.minDistance, ac.pointLights);
 
 		auto& lg = lightGather;
 		lg.enabled = ini.GetBoolValue("LightGatherThrottle", "bEnabled", lg.enabled);
 		lg.minMove = static_cast<float>(ini.GetDoubleValue("LightGatherThrottle", "fMinMove", lg.minMove));
 		lg.minRadiusChange = static_cast<float>(ini.GetDoubleValue("LightGatherThrottle", "fMinRadiusChange", lg.minRadiusChange));
 		lg.maxAgeMs = static_cast<float>(ini.GetDoubleValue("LightGatherThrottle", "fMaxAgeMs", lg.maxAgeMs));
-		logger::info("LightGatherThrottle: {} | Bewegung >= {:.0f} | Radius +-{:.0f} | spaetestens nach {:.0f} ms", lg.enabled ? "AN" : "AUS", lg.minMove, lg.minRadiusChange, lg.maxAgeMs);
+		logger::info("LightGatherThrottle: {} | movement >= {:.0f} | radius +-{:.0f} | at the latest after {:.0f} ms", lg.enabled ? "ON" : "OFF", lg.minMove, lg.minRadiusChange, lg.maxAgeMs);
 
 		auto& sp = subtreePruning;
 		sp.enabled = ini.GetBoolValue("SubtreePruning", "bEnabled", sp.enabled);
@@ -236,7 +236,7 @@ namespace Config
 		// Alte SPS_User.ini (aus 0.16.0, Vorgabe damals an) hatten den Schalter noch gespeichert.
 		sp.point = false;
 		sp.precip = ini.GetBoolValue("SubtreePruning", "bPrecipitation", sp.precip);
-		logger::info("SubtreePruning: {} | Sonne {} | Punktlicht {} | Regen/Sky {}", sp.enabled ? "AN" : "AUS", sp.sun, sp.point, sp.precip);
+		logger::info("SubtreePruning: {} | sun {} | point light {} | rain/sky {}", sp.enabled ? "ON" : "OFF", sp.sun, sp.point, sp.precip);
 
 		auto& ts = textureStream;
 		ts.enabled = ini.GetBoolValue("TextureStream", "bEnabled", ts.enabled);
@@ -251,7 +251,7 @@ namespace Config
 		ts.minEdge = static_cast<float>(ini.GetDoubleValue("TextureStream", "fMinEdge", ts.minEdge));
 		ts.budgetMs = static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetMs", ts.budgetMs));
 		ts.exclude = ini.GetValue("TextureStream", "sExclude", ts.exclude.c_str());
-		logger::info("TextureStream: {} | Bericht {} | Sicherheitsfaktor {:.1f} | min. {:.0f} px | Budget {:.2f} ms | ausgenommen: {}", ts.enabled ? "AN" : "AUS",
+		logger::info("TextureStream: {} | report {} | safety factor {:.1f} | min. {:.0f} px | budget {:.2f} ms | excluded: {}", ts.enabled ? "ON" : "OFF",
 			ts.analysis, ts.safetyFactor, ts.minEdge, ts.budgetMs, ts.exclude);
 
 		auto& sky = skylightingCulling;
@@ -259,18 +259,18 @@ namespace Config
 		sky.minRadius = static_cast<float>(ini.GetDoubleValue("SkylightingCulling", "fMinRadius", sky.minRadius));
 
 		const auto& sc = shadowCulling;
-		logger::info("ShadowCulling: {} | ab Kaskade {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {} | erst ab Sonnenhoehe {:.0f} Grad",
-			sc.enabled ? "AN" : "AUS", sc.minCascade, sc.minDistance, sc.maxRadius, sc.minAngularSize, sc.skipSkinned, sunMinElevation.load());
+		logger::info("ShadowCulling: {} | from cascade {} | distance > {:.0f} | radius < {:.0f} | radius/distance < {:.3f} | skinned excluded: {} | only above sun elevation {:.0f} deg",
+			sc.enabled ? "ON" : "OFF", sc.minCascade, sc.minDistance, sc.maxRadius, sc.minAngularSize, sc.skipSkinned, sunMinElevation.load());
 		const auto& pc = pointLightCulling;
-		logger::info("PointLightShadowCulling: {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {}",
-			pc.enabled ? "AN" : "AUS", pc.minDistance, pc.maxRadius, pc.minAngularSize, pc.skipSkinned);
-		logger::info("SkylightingCulling: {} | Mindestradius {:.0f}", sky.enabled ? "AN" : "AUS", sky.minRadius);
-		logger::info("DecalCulling: {} | ab Distanz {:.0f} | Radius < {:.0f}", dec.enabled ? "AN" : "AUS", dec.maxDistance, dec.maxRadius);
+		logger::info("PointLightShadowCulling: {} | distance > {:.0f} | radius < {:.0f} | radius/distance < {:.3f} | skinned excluded: {}",
+			pc.enabled ? "ON" : "OFF", pc.minDistance, pc.maxRadius, pc.minAngularSize, pc.skipSkinned);
+		logger::info("SkylightingCulling: {} | min. radius {:.0f}", sky.enabled ? "ON" : "OFF", sky.minRadius);
+		logger::info("DecalCulling: {} | from distance {:.0f} | radius < {:.0f}", dec.enabled ? "ON" : "OFF", dec.maxDistance, dec.maxRadius);
 		const auto& mc = mainViewCulling;
-		logger::info("MainViewCulling: {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.4f} | Skinned ausgenommen: {}",
-			mc.enabled ? "AN" : "AUS", mc.minDistance, mc.maxRadius, mc.minAngularSize, mc.skipSkinned);
+		logger::info("MainViewCulling: {} | distance > {:.0f} | radius < {:.0f} | radius/distance < {:.4f} | skinned excluded: {}",
+			mc.enabled ? "ON" : "OFF", mc.minDistance, mc.maxRadius, mc.minAngularSize, mc.skipSkinned);
 		const auto& dc = depthPrepassCulling;
-		logger::info("DepthPrepassCulling: {} | Distanz > {:.0f} | Radius < {:.0f} | Radius/Distanz < {:.3f} | Skinned ausgenommen: {}",
-			dc.enabled ? "AN" : "AUS", dc.minDistance, dc.maxRadius, dc.minAngularSize, dc.skipSkinned);
+		logger::info("DepthPrepassCulling: {} | distance > {:.0f} | radius < {:.0f} | radius/distance < {:.3f} | skinned excluded: {}",
+			dc.enabled ? "ON" : "OFF", dc.minDistance, dc.maxRadius, dc.minAngularSize, dc.skipSkinned);
 	}
 }

@@ -18,12 +18,12 @@ namespace
 		if (a_msg->type == SKSE::MessagingInterface::kPostLoad) {
 			WaitProbe::ModuleResult fsmp, cbpc, game;
 			WaitProbe::Install(fsmp, cbpc, game);
-			logger::info("WaitProbe: FSMP (hdtsmp64.dll) {} - {} Import-Eintraege umgebogen | CBPC (cbp.dll) {} - {} umgebogen | SkyrimSE.exe {} umgebogen",
-				fsmp.found ? "gefunden" : "NICHT geladen", fsmp.patched, cbpc.found ? "gefunden" : "NICHT geladen", cbpc.patched, game.patched);
+			logger::info("WaitProbe: FSMP (hdtsmp64.dll) {} - {} import entries redirected | CBPC (cbp.dll) {} - {} redirected | SkyrimSE.exe {} redirected",
+				fsmp.found ? "found" : "NOT loaded", fsmp.patched, cbpc.found ? "found" : "NOT loaded", cbpc.patched, game.patched);
 		} else if (a_msg->type == SKSE::MessagingInterface::kPreLoadGame) {
-			TextureStream::Reset("Spielstand wird geladen");
+			TextureStream::Reset("loading save game");
 		} else if (a_msg->type == SKSE::MessagingInterface::kNewGame) {
-			TextureStream::Reset("neues Spiel");
+			TextureStream::Reset("new game");
 		} else if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
 			ShadowCulling::InstallLate();
@@ -43,15 +43,15 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	info.trampolineSize = 256;
 	SKSE::Init(a_skse, info);
 
-	logger::info("SPS {} geladen (Tracy on-demand, Report alle 10 s)", SKSE::GetPluginVersion().string());
-	logger::info("Skyrim-Basisadresse 0x{:X} (fuer tools/resolve_rva.py)", REL::Module::get().base());
+	logger::info("SPS {} loaded (Tracy on-demand, report every 10 s)", SKSE::GetPluginVersion().string());
+	logger::info("Skyrim base address 0x{:X} (for tools/resolve_rva.py)", REL::Module::get().base());
 
 	// Address-Library-IDs: AE ab 1.6.317 stabil (auch 1.7.x, offline verglichen 1.6.640/1.7.104); SE 1.5.97 hat eigene IDs,
 	// die fuer alle Eingriffe per Code-Muster ermittelt wurden (RELOCATION_ID). Eingriffe mitten in Funktionen pruefen
 	// den Code an ihrer Stelle selbst und schalten bei Abweichung nur sich ab (Features.h). Aeltere SE / VR: inaktiv.
 	// Alte Version unter dem frueheren Namen noch installiert? Beide zusammen wuerden dieselben Stellen doppelt patchen.
 	if (GetModuleHandleW(L"SkyrimPerf.dll")) {
-		logger::error("SkyrimPerf.dll (alter Name) ist ebenfalls geladen - SPS bleibt inaktiv. Bitte die alte Mod entfernen.");
+		logger::error("SkyrimPerf.dll (old name) is also loaded - SPS stays inactive. Please remove the old mod.");
 		SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
 			if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 				RE::DebugMessageBox(Menu::IsGerman() ? "Skyrim Performance Solution: Die alte Version (SkyrimPerf) ist noch installiert. Bitte entfernen - SPS bleibt bis dahin inaktiv." :
@@ -64,7 +64,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	const auto version = REL::Module::get().version();
 	const bool supported = version == REL::Version{ 1, 5, 97, 0 } || (version >= REL::Version{ 1, 6, 317, 0 } && version < REL::Version{ 1, 8, 0, 0 });
 	if (!supported) {
-		logger::warn("Spielversion {} wird nicht unterstuetzt (nur 1.5.97 und Anniversary Edition 1.6.x / 1.7.x) - SPS bleibt inaktiv", version.string());
+		logger::warn("Game version {} is not supported (1.5.97 and Anniversary Edition 1.6.x / 1.7.x only) - SPS stays inactive", version.string());
 		SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
 			if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 				const auto v = REL::Module::get().version().string();
@@ -76,8 +76,8 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	}
 
 	if (!Features::TestedVersion()) {
-		logger::warn("Spielversion {} ist {} (im Spiel getestet: 1.6.1170) - Eingriffe pruefen den Code selbst, abweichende werden abgeschaltet",
-			version.string(), Features::VerifiedVersion() ? "offline gegen den Spielcode geprueft" : "nicht getestet");
+		logger::warn("Game version {} is {} (tested in game: 1.6.1170) - patches verify the code themselves, mismatching ones are disabled",
+			version.string(), Features::VerifiedVersion() ? "verified offline against the game code" : "not tested");
 	}
 
 	Stats::Init();
