@@ -390,7 +390,8 @@ namespace Menu
 				T("Decals farther away than this are not drawn. Below 1500 leaves can disappear.",
 					"Weiter entfernte Decals werden nicht gezeichnet. Unter 1500 können Blätter auf dem Boden verschwinden."));
 			Slider(T("Max. decal radius##decal", "Max. Radius##decal"), Config::decalCulling.maxRadius, 10.0f, 500.0f, "%.0f",
-				T("Only decals smaller than this are affected.", "Nur kleinere Bodendetails sind betroffen."));
+				T("Only decals smaller than this are affected. Footprints are about 22. From about 50 plaster and stone patches on walls disappear too (visible).",
+					"Nur kleinere Bodendetails sind betroffen. Fußabdrücke haben etwa 22. Ab etwa 50 verschwinden auch Putz- und Steinflecken an Mauern (sichtbar)."));
 		}
 	}
 

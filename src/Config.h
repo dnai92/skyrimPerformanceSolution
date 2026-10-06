@@ -38,7 +38,7 @@ namespace Config
 	{
 		bool  enabled = true;
 		float maxDistance = 1500.0f;  // Decals (Fussabdruecke, Blut, Schmutz) weiter weg werden nicht gezeichnet
-		float maxRadius = 100.0f;     // nur kleine Decals
+		float maxRadius = 32.0f;      // nur kleine Decals (Fussabdruecke ~22); groesser traf Putz-/Steinflecken an Mauern
 	};
 	inline DecalCulling decalCulling;
 
