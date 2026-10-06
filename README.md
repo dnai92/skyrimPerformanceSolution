@@ -2,6 +2,8 @@
 
 ![Skyrim Performance Solution (SPS)](docs/sps_banner.webp)
 
+[![Support me on Ko-fi](https://storage.ko-fi.com/cdn/kofi2.png?v=3)](https://ko-fi.com/dani9281660)
+
 SKSE plugin that makes **Skyrim Special Edition / Anniversary Edition** run smoother on heavily modded setups —
 without touching a single game file. It cuts draw calls in the shadow passes, removes redundant per-frame engine work
 and **streams textures by distance**, so a 12 GB GPU no longer runs out of VRAM in cities.
@@ -137,6 +139,10 @@ Result: `dist\SPS-<version>.zip`.
 | Tracy 0.14.1 | git submodule (`extern/tracy`), on-demand profiling |
 | SKSE Menu Framework | runtime only, own binding in `src/MenuApi.h` |
 | Detours, DirectXMath, DirectXTK, fmt, spdlog, SimpleIni, xbyak, nlohmann-json, rapidcsv, toml11 | vcpkg (`vcpkg.json`) |
+
+## Support
+
+If SPS helps your game run better, you can buy me a coffee on [Ko-fi](https://ko-fi.com/dani9281660). Thank you!
 
 ## License
 
