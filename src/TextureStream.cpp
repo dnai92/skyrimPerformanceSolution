@@ -1309,12 +1309,20 @@ namespace TextureStream
 		{
 			const auto root = RE::Main::WorldRootNode();
 			const auto cam = RE::Main::WorldRootCamera();
-			const auto state = RE::BSGraphics::State::GetSingleton();
-			if (!root || !cam || !state || state->screenWidth == 0) {
+			if (!root || !cam) {
 				logger::info("[TextureStream] Bildmitte: keine Welt/Kamera");
 				return;
 			}
-			const float w = static_cast<float>(state->screenWidth), h = static_cast<float>(state->screenHeight);
+			// Sichtstrahl der Kamera (NiCamera: erste Spalte der Drehung = Blickrichtung)
+			const auto& cw = cam->world;
+			const float px = cw.translate.x, py = cw.translate.y, pz = cw.translate.z;
+			float       fx = cw.rotate.entry[0][0], fy = cw.rotate.entry[1][0], fz = cw.rotate.entry[2][0];
+			const float fl = std::sqrt(fx * fx + fy * fy + fz * fz);
+			if (fl < 1e-4f) {
+				logger::info("[TextureStream] Bildmitte: keine Blickrichtung");
+				return;
+			}
+			fx /= fl, fy /= fl, fz /= fl;
 			struct Hit
 			{
 				RE::BSGeometry* geom;
@@ -1323,25 +1331,22 @@ namespace TextureStream
 			};
 			std::vector<Hit>            hits;
 			std::vector<RE::NiAVObject*> stack{ root };
+			std::uint32_t                visited = 0;
 			while (!stack.empty()) {
 				const auto obj = stack.back();
 				stack.pop_back();
 				if (!obj || obj->GetFlags().any(RE::NiAVObject::Flag::kHidden)) {
 					continue;
 				}
+				++visited;
 				const auto& b = obj->worldBound;
-				const float dx = b.center.x - g_camX, dy = b.center.y - g_camY, dz = b.center.z - g_camZ;
-				const float centerDist = std::sqrt(dx * dx + dy * dy + dz * dz);
-				if (centerDist > b.radius) {
-					float sx = 0, sy = 0, sz = 0;
-					if (!cam->WorldPtToScreenPt3(b.center, sx, sy, sz, 1e-5f) || sz < 0.0f) {
-						continue;
-					}
-					const float offPx = std::hypot((sx - 0.5f) * w, (sy - 0.5f) * h);
-					if (offPx > b.radius / centerDist * g_pixelsPerUnit) {
-						continue;  // Huelle deckt die Bildmitte nicht
-					}
+				const float dx = b.center.x - px, dy = b.center.y - py, dz = b.center.z - pz;
+				const float t = dx * fx + dy * fy + dz * fz;
+				const float centerDist2 = dx * dx + dy * dy + dz * dz;
+				if (b.radius > 0.0f && (t < -b.radius || centerDist2 - t * t > b.radius * b.radius)) {
+					continue;  // Huelle liegt nicht auf dem Sichtstrahl
 				}
+				const float centerDist = std::sqrt(centerDist2);
 				if (const auto node = obj->AsNode()) {
 					for (const auto& child : node->GetChildren()) {
 						if (child) {
@@ -1354,7 +1359,7 @@ namespace TextureStream
 				}
 			}
 			std::ranges::sort(hits, [](const Hit& a, const Hit& b) { return a.dist < b.dist; });
-			logger::info("[TextureStream] Bildmitte: {} Objekte unter dem Fadenkreuz (naechste zuerst), Streaming {}", hits.size(), Active() ? "AN" : "AUS");
+			logger::info("[TextureStream] Bildmitte: {} Objekte unter dem Fadenkreuz (naechste zuerst, {} Knoten geprueft), Streaming {}", hits.size(), visited, Active() ? "AN" : "AUS");
 			for (std::size_t i = 0; i < hits.size() && i < 12; ++i) {
 				const auto geom = hits[i].geom;
 				const auto prop = geom->GetGeometryRuntimeData().shaderProperty.get();
