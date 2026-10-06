@@ -292,8 +292,24 @@ namespace TextureStream
 		// Gegen Hin und Her (Plattenlast): groesser laden erst bei deutlich mehr Bedarf, verkleinern erst nach
 		// Abkuehlzeit seit dem letzten Neuladen und nach mehreren Durchlaeufen mit geringem Bedarf
 		constexpr float kUpMargin = 1.25f;
+		// Bei Knappheit (0.21.1 am Markt: 95-98 % VRAM, ~1000 Neuladungen/min): groesser nur, wenn deutlich zu klein,
+		// und ohne Reserve-Stufe (die verdoppelt die Kante = 4x Speicher)
+		constexpr float kUpMarginPressure = 2.0f;
+
+		float UpMargin() noexcept;
+		std::uint32_t UpTarget(std::uint32_t a_want, std::uint32_t a_full) noexcept;
 		constexpr auto  kCooldown = 30s;
 		constexpr int   kLowPasses = 3;
+
+		float UpMargin() noexcept
+		{
+			return Pressure() ? kUpMarginPressure : kUpMargin;
+		}
+
+		std::uint32_t UpTarget(std::uint32_t a_want, std::uint32_t a_full) noexcept
+		{
+			return Pressure() ? std::min(a_full, a_want) : std::min(a_full, a_want * 2);
+		}
 
 		// ---------------- Statistik ----------------
 		struct Counters
@@ -1024,8 +1040,8 @@ namespace TextureStream
 			}
 			// zu klein fuer diesen Abstand -> sofort groesser laden (mit einer Stufe Reserve)
 			if (st.Reduced() && !st.busy && st.probe == Probe::kOk) {
-				if (WantedEdge(st, a_needPx / kUpMargin) > st.CurEdge()) {
-					QueueReload(st, r, std::min(st.FullEdge(), WantedEdge(st, a_needPx) * 2));
+				if (WantedEdge(st, a_needPx / UpMargin()) > st.CurEdge()) {
+					QueueReload(st, r, UpTarget(WantedEdge(st, a_needPx), st.FullEdge()));
 				}
 			}
 		}
@@ -1327,8 +1343,8 @@ namespace TextureStream
 						ChainBytes(st.fi, st.fullW, st.fullH, st.fullMips) - ChainBytes(st.fi, st.curW, st.curH, st.curMips) });
 				}
 				if (st.eligible && !st.busy) {
-					if (st.Reduced() && st.hold && st.probe == Probe::kOk && (!active || (seen && WantedEdge(st, st.passNeed / kUpMargin) > st.CurEdge()))) {
-						QueueReload(st, r, active ? std::min(st.FullEdge(), WantedEdge(st, st.passNeed) * 2) : st.FullEdge());
+					if (st.Reduced() && st.hold && st.probe == Probe::kOk && (!active || (seen && WantedEdge(st, st.passNeed / UpMargin()) > st.CurEdge()))) {
+						QueueReload(st, r, active ? UpTarget(WantedEdge(st, st.passNeed), st.FullEdge()) : st.FullEdge());
 					} else if (active && seen && pressure) {
 						const auto want = WantedEdge(st, st.passNeed);
 						if (want * 2 <= st.CurEdge() && now - st.lastReload >= kCooldown) {
@@ -1515,9 +1531,9 @@ namespace TextureStream
 			}
 			const auto& s = g_stats;
 			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, ausgelagert {:.0f} MB) | verkleinert {} Texturen, {:.0f} MB gespart | letzte Minute: "
-						 "verkleinert {}, neu geladen {} ({:.0f} MB), aufgefuellt {}, gleich verkleinert geladen {}, aus RAM {}, Ladefehler {}",
+						 "verkleinert {}, neu geladen {} ({:.0f} MB), Hin und Her {}, aufgefuellt {}, gleich verkleinert geladen {}, aus RAM {}, Ladefehler {}",
 				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_procShared.load() / 1048576.0, reduced,
-				savedMB, s.downs, s.ups, s.upMB, s.refills, g_loadedReduced.exchange(0), g_cacheHits.exchange(0), s.upFails);
+				savedMB, s.downs, s.ups, s.upMB, s.pingPong, s.refills, g_loadedReduced.exchange(0), g_cacheHits.exchange(0), s.upFails);
 			g_cacheMisses.exchange(0);
 			g_diagCreate.exchange(0);
 			g_diagDDS.exchange(0);
