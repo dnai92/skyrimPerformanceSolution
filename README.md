@@ -1,4 +1,4 @@
-# SkyrimPerf
+# Skyrim Performance Solution (SPS)
 
 SKSE plugin that makes **Skyrim Special Edition / Anniversary Edition** run smoother on heavily modded setups —
 without touching a single game file. It cuts draw calls in the shadow passes, removes redundant per-frame engine work
@@ -30,7 +30,7 @@ so you can compare with and without the plugin at any time.
 | **Subtree pruning** | Whole scene-graph branches are skipped in the sun shadow and skylighting passes when the branch as a whole already meets the culling rule. Same result, less traversal. | ON |
 | **In-game menu** | All switches and sliders via SKSE Menu Framework, English and German, saved automatically. | — |
 | **Hotkey** | One key toggles every optimization (default *Page Up*, freely assignable in the menu). | — |
-| **Logging & diagnostics** | One summary line per minute in `SkyrimPerf.log`. The *Analysis logging* switch adds a detailed 10-second report (counters per optimization, VRAM, streaming), and *Log textures under crosshair* writes path and current size of every texture you look at — handy for bug reports. Optional Tracy timeline. | analysis off |
+| **Logging & diagnostics** | One summary line per minute in `SPS.log`. The *Analysis logging* switch adds a detailed 10-second report (counters per optimization, VRAM, streaming), and *Log textures under crosshair* writes path and current size of every texture you look at — handy for bug reports. Optional Tracy timeline. | analysis off |
 
 Experimental and **off** by default (known side effects): depth pre-pass culling, main view micro culling, far shadow
 cascade cache.
@@ -93,26 +93,28 @@ and depth passes, and sun shadows alone cost ~12–14 ms of CPU time per frame.
 | Skyrim **SE 1.5.97** or **AE 1.6.x / 1.7.x** | yes | Tested in game on 1.6.1170. Engine patch sites verified against the game code of 1.5.97, 1.6.640 and 1.7.104. Every engine patch also checks the game code at its location at startup; if it differs, only that function is switched off (listed in the menu and the log). On SE 1.5.97 'shadow instancing' and the main camera timing are off. Older SE versions and VR are not supported. |
 | [SKSE64](https://skse.silverlock.org/) | yes | Matching your game version. |
 | [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444) | yes | |
-| [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352) | optional | In-game menu. Without it, everything is configured in `SkyrimPerf.ini`. |
+| [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352) | optional | In-game menu. Without it, everything is configured in `SPS.ini`. |
 | [Community Shaders](https://www.nexusmods.com/skyrimspecialedition/mods/86492) | optional | Skylighting culling only has an effect with CS skylighting. |
 
 ## Tips
 
 - **Short hitches when walking through doors** are usually the autosave on travel together with RaceMenu, whose
   co-save serialization can take ~1 s with many presets/morphs. Turning off *Save on travel* in the game settings
-  removes them. SkyrimPerf does not change this.
+  removes them. SPS does not change this.
 - To compare, press the hotkey: a message top left shows *optimizations ON/OFF*. Switching streaming off reloads all
   textures at full size, which takes a few seconds and briefly raises VRAM.
 
 ## Installation
 
-1. Download `SkyrimPerf-<version>.zip` from [Releases](../../releases).
-2. Install it with your mod manager (Vortex / MO2) like any other mod.
-3. In game: open the SKSE Menu Framework menu → *SkyrimPerf*. The log is written to
-   `Documents\My Games\Skyrim Special Edition\SKSE\SkyrimPerf.log`.
+> **Updating from SkyrimPerf (≤ 1.0.0):** the mod was renamed. Remove the old *SkyrimPerf* mod before installing SPS. Your menu settings and remembered texture sizes are taken over automatically on first start.
 
-Settings: `Data\SKSE\Plugins\SkyrimPerf.ini` holds the defaults; changes made in the menu go to
-`SkyrimPerf_User.ini` (only values that differ from the defaults). *Reset to defaults* in the menu deletes that file.
+1. Download `SPS-<version>.zip` from [Releases](../../releases).
+2. Install it with your mod manager (Vortex / MO2) like any other mod.
+3. In game: open the SKSE Menu Framework menu → *Skyrim Performance Solution*. The log is written to
+   `Documents\My Games\Skyrim Special Edition\SKSE\SPS.log`.
+
+Settings: `Data\SKSE\Plugins\SPS.ini` holds the defaults; changes made in the menu go to
+`SPS_User.ini` (only values that differ from the defaults). *Reset to defaults* in the menu deletes that file.
 
 ## Building from source
 
@@ -125,7 +127,7 @@ build.cmd
 powershell -File package.ps1
 ```
 
-Result: `dist\SkyrimPerf-<version>.zip`.
+Result: `dist\SPS-<version>.zip`.
 
 | Build dependency | Source |
 |---|---|

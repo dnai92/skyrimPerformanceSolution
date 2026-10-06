@@ -38,26 +38,38 @@ namespace
 SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::InitInfo info{};
-	info.logName = "SkyrimPerf";
+	info.logName = "SPS";
 	info.trampoline = true;
 	info.trampolineSize = 256;
 	SKSE::Init(a_skse, info);
 
-	logger::info("SkyrimPerf {} geladen (Tracy on-demand, Report alle 10 s)", SKSE::GetPluginVersion().string());
+	logger::info("SPS {} geladen (Tracy on-demand, Report alle 10 s)", SKSE::GetPluginVersion().string());
 	logger::info("Skyrim-Basisadresse 0x{:X} (fuer tools/resolve_rva.py)", REL::Module::get().base());
 
 	// Address-Library-IDs: AE ab 1.6.317 stabil (auch 1.7.x, offline verglichen 1.6.640/1.7.104); SE 1.5.97 hat eigene IDs,
 	// die fuer alle Eingriffe per Code-Muster ermittelt wurden (RELOCATION_ID). Eingriffe mitten in Funktionen pruefen
 	// den Code an ihrer Stelle selbst und schalten bei Abweichung nur sich ab (Features.h). Aeltere SE / VR: inaktiv.
+	// Alte Version unter dem frueheren Namen noch installiert? Beide zusammen wuerden dieselben Stellen doppelt patchen.
+	if (GetModuleHandleW(L"SkyrimPerf.dll")) {
+		logger::error("SkyrimPerf.dll (alter Name) ist ebenfalls geladen - SPS bleibt inaktiv. Bitte die alte Mod entfernen.");
+		SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
+			if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
+				RE::DebugMessageBox(Menu::IsGerman() ? "Skyrim Performance Solution: Die alte Version (SkyrimPerf) ist noch installiert. Bitte entfernen - SPS bleibt bis dahin inaktiv." :
+				                                       "Skyrim Performance Solution: the old version (SkyrimPerf) is still installed. Please remove it - SPS stays inactive until then.");
+			}
+		});
+		return true;
+	}
+
 	const auto version = REL::Module::get().version();
 	const bool supported = version == REL::Version{ 1, 5, 97, 0 } || (version >= REL::Version{ 1, 6, 317, 0 } && version < REL::Version{ 1, 8, 0, 0 });
 	if (!supported) {
-		logger::warn("Spielversion {} wird nicht unterstuetzt (nur 1.5.97 und Anniversary Edition 1.6.x / 1.7.x) - SkyrimPerf bleibt inaktiv", version.string());
+		logger::warn("Spielversion {} wird nicht unterstuetzt (nur 1.5.97 und Anniversary Edition 1.6.x / 1.7.x) - SPS bleibt inaktiv", version.string());
 		SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
 			if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 				const auto v = REL::Module::get().version().string();
-				RE::DebugMessageBox((Menu::IsGerman() ? std::format("SkyrimPerf: Spielversion {} wird nicht unterstützt (nur 1.5.97 und Anniversary Edition 1.6.x / 1.7.x). Das Plugin bleibt inaktiv.", v) :
-				                                        std::format("SkyrimPerf: game version {} is not supported (1.5.97 and Anniversary Edition 1.6.x / 1.7.x only). The plugin stays inactive.", v)).c_str());
+				RE::DebugMessageBox((Menu::IsGerman() ? std::format("SPS: Spielversion {} wird nicht unterstützt (nur 1.5.97 und Anniversary Edition 1.6.x / 1.7.x). Das Plugin bleibt inaktiv.", v) :
+				                                        std::format("SPS: game version {} is not supported (1.5.97 and Anniversary Edition 1.6.x / 1.7.x only). The plugin stays inactive.", v)).c_str());
 			}
 		});
 		return true;

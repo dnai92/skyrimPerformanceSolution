@@ -44,8 +44,8 @@ namespace Hotkey
 				Config::masterEnabled.store(enabled, std::memory_order_relaxed);
 				logger::info("Hotkey: Culling {}", enabled ? "AN" : "AUS");
 				const bool de = Menu::IsGerman();
-				RE::SendHUDMessage::ShowHUDMessage(enabled ? (de ? "SkyrimPerf: Optimierungen AN" : "SkyrimPerf: optimizations ON") :
-				                                             (de ? "SkyrimPerf: Optimierungen AUS" : "SkyrimPerf: optimizations OFF"));
+				RE::SendHUDMessage::ShowHUDMessage(enabled ? (de ? "SPS: Optimierungen AN" : "SPS: optimizations ON") :
+				                                             (de ? "SPS: Optimierungen AUS" : "SPS: optimizations OFF"));
 			}
 		};
 	}

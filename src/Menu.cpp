@@ -211,8 +211,8 @@ namespace Menu
 					"Schaltet alle Optimierungen auf einmal an/aus (wie die Taste, Standard Bild auf). Wird nicht gespeichert - startet AN."),
 				false);
 			HotkeyPicker();
-			ImGuiMCP::TextWrapped("%s", T("Use this switch (or the hotkey) to compare FPS and look with and without SkyrimPerf. The 10-second report in SkyrimPerf.log shows the numbers.",
-											"Mit diesem Schalter (oder der Taste) FPS und Bild mit und ohne SkyrimPerf vergleichen. Der 10-Sekunden-Bericht in SkyrimPerf.log zeigt die Zahlen."));
+			ImGuiMCP::TextWrapped("%s", T("Use this switch (or the hotkey) to compare FPS and look with and without SPS. The 10-second report in SPS.log shows the numbers.",
+											"Mit diesem Schalter (oder der Taste) FPS und Bild mit und ohne SPS vergleichen. Der 10-Sekunden-Bericht in SPS.log zeigt die Zahlen."));
 
 			// Status der Engine-Eingriffe (andere Spielversion / andere Mod an derselben Stelle)
 			{
@@ -226,8 +226,8 @@ namespace Menu
 																				  T("not tested, but all functions passed their code check.", "nicht getestet, aber alle Funktionen haben ihre Code-Prüfung bestanden.")).c_str());
 				} else {
 					ImGuiMCP::TextWrapped("%s", std::format("{} {}: {}", T("Game version", "Spielversion"), ver,
-													T("these functions were switched off because the game code differs (see SkyrimPerf.log):",
-														"diese Funktionen wurden abgeschaltet, weil der Spielcode abweicht (siehe SkyrimPerf.log):")).c_str());
+													T("these functions were switched off because the game code differs (see SPS.log):",
+														"diese Funktionen wurden abgeschaltet, weil der Spielcode abweicht (siehe SPS.log):")).c_str());
 					for (const auto& e : list) {
 						if (!e.active) {
 							ImGuiMCP::BulletText("%s", (g_german ? e.nameDe : e.name).c_str());
@@ -271,11 +271,11 @@ namespace Menu
 			if (ImGuiMCP::Button(T("Reset to defaults", "Auf Standard zurücksetzen"))) {
 				Config::RequestReset();
 			}
-			Tip(T("Deletes SkyrimPerf_User.ini and reloads the defaults from SkyrimPerf.ini (takes up to 2 s).",
-				"Löscht SkyrimPerf_User.ini und lädt die Standardwerte aus SkyrimPerf.ini (dauert bis zu 2 s)."));
+			Tip(T("Deletes SPS_User.ini and reloads the defaults from SPS.ini (takes up to 2 s).",
+				"Löscht SPS_User.ini und lädt die Standardwerte aus SPS.ini (dauert bis zu 2 s)."));
 			AtomicToggle(T("Analysis logging (costs performance)", "Analyse-Protokoll (kostet Leistung)"), Config::analysis,
-				T("Extra diagnostics in SkyrimPerf.log (incl. detailed texture streaming report every 10 s). Costs 2-4 ms per frame - only for troubleshooting.",
-					"Zusätzliche Diagnose in SkyrimPerf.log (inkl. ausführlichem Textur-Streaming-Bericht alle 10 s). Kostet 2-4 ms pro Frame - nur zur Fehlersuche."));
+				T("Extra diagnostics in SPS.log (incl. detailed texture streaming report every 10 s). Costs 2-4 ms per frame - only for troubleshooting.",
+					"Zusätzliche Diagnose in SPS.log (inkl. ausführlichem Textur-Streaming-Bericht alle 10 s). Kostet 2-4 ms pro Frame - nur zur Fehlersuche."));
 		}
 
 		void __stdcall RenderShadows()
@@ -377,8 +377,8 @@ namespace Menu
 			if (ImGuiMCP::Button(T("Log textures under crosshair##ts", "Texturen unter dem Fadenkreuz protokollieren##ts"))) {
 				TextureStream::RequestCenterProbe();
 			}
-			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SkyrimPerf.log. For bug reports.",
-				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SkyrimPerf.log. Für Fehlerberichte."));
+			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log. For bug reports.",
+				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log. Für Fehlerberichte."));
 
 			ImGuiMCP::SeparatorText(T("Skylighting culling (Community Shaders)", "Himmelslicht: kleine Objekte weglassen (Community Shaders)"));
 			Toggle(T("Enabled##sky", "Aktiv##sky"), Config::skylightingCulling.enabled,
@@ -411,7 +411,7 @@ namespace Menu
 			return;
 		}
 		g_german = IsGerman();
-		SKSEMenuFramework::SetSection("SkyrimPerf");
+		SKSEMenuFramework::SetSection("Skyrim Performance Solution");
 		SKSEMenuFramework::AddSectionItem(T("Overview", "Übersicht"), RenderOverview);
 		SKSEMenuFramework::AddSectionItem(T("Shadows", "Schatten"), RenderShadows);
 		SKSEMenuFramework::AddSectionItem(T("Lights and scene", "Licht und Szene"), RenderScene);

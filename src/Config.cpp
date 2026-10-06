@@ -6,8 +6,8 @@ namespace Config
 {
 	namespace
 	{
-		constexpr auto kPath = L"Data/SKSE/Plugins/SkyrimPerf.ini";            // Vorgaben (Mod-Paket, von Vortex verwaltet)
-		constexpr auto kUserPath = L"Data/SKSE/Plugins/SkyrimPerf_User.ini";   // Menue-Einstellungen (vom Plugin geschrieben)
+		constexpr auto kPath = L"Data/SKSE/Plugins/SPS.ini";            // Vorgaben (Mod-Paket, von Vortex verwaltet)
+		constexpr auto kUserPath = L"Data/SKSE/Plugins/SPS_User.ini";   // Menue-Einstellungen (vom Plugin geschrieben)
 
 		std::filesystem::file_time_type g_lastWrite{};
 		std::filesystem::file_time_type g_lastWriteUser{};
@@ -22,12 +22,12 @@ namespace Config
 			return ec ? std::filesystem::file_time_type{} : t;
 		}
 
-		// Nur die im Menue einstellbaren Werte; alles andere kommt weiter aus SkyrimPerf.ini
+		// Nur die im Menue einstellbaren Werte; alles andere kommt weiter aus SPS.ini
 		void SaveUser()
 		{
 			CSimpleIniA ini;
 			ini.SetUnicode();
-			// Nur Abweichungen von SkyrimPerf.ini speichern - sonst ueberdecken alte Vorgaben spaeter geaenderte Standards
+			// Nur Abweichungen von SPS.ini speichern - sonst ueberdecken alte Vorgaben spaeter geaenderte Standards
 			// (so blieben bPointLights=true und fMinDistance=2500 aus alten Versionen haengen).
 			CSimpleIniA base;
 			base.SetUnicode();
@@ -102,7 +102,7 @@ namespace Config
 			g_dirty.store(false);
 			std::error_code ec;
 			std::filesystem::remove(kUserPath, ec);
-			logger::info("Menue: SkyrimPerf_User.ini geloescht - Vorgaben aus SkyrimPerf.ini");
+			logger::info("Menue: SPS_User.ini geloescht - Vorgaben aus SPS.ini");
 			Load();
 		}
 		const auto now = std::chrono::steady_clock::now();
@@ -112,27 +112,37 @@ namespace Config
 		g_lastCheck = now;
 		if (g_dirty.exchange(false)) {
 			SaveUser();
-			logger::info("Menue-Einstellungen in SkyrimPerf_User.ini gespeichert");
+			logger::info("Menue-Einstellungen in SPS_User.ini gespeichert");
 		}
 		if (LastWrite(kPath) != g_lastWrite || LastWrite(kUserPath) != g_lastWriteUser) {
-			logger::info("SkyrimPerf.ini / SkyrimPerf_User.ini geaendert - lade neu");
+			logger::info("SPS.ini / SPS_User.ini geaendert - lade neu");
 			Load();
 		}
 	}
 
 	void Load()
 	{
+		// Umbenennung SkyrimPerf -> SPS (1.0.1): Menue-Einstellungen einmalig uebernehmen
+		{
+			static bool migrated = false;
+			std::error_code ec;
+			if (!migrated && !std::filesystem::exists(kUserPath, ec) && std::filesystem::exists(L"Data/SKSE/Plugins/SkyrimPerf_User.ini", ec)) {
+				std::filesystem::copy_file(L"Data/SKSE/Plugins/SkyrimPerf_User.ini", kUserPath, ec);
+				logger::info("Menue-Einstellungen aus SkyrimPerf_User.ini uebernommen{}", ec ? " - FEHLER: " + ec.message() : "");
+			}
+			migrated = true;
+		}
 		g_lastWrite = LastWrite(kPath);
 		g_lastWriteUser = LastWrite(kUserPath);
 
 		CSimpleIniA ini;
 		ini.SetUnicode();
 		if (ini.LoadFile(kPath) < 0) {
-			logger::warn("SkyrimPerf.ini nicht gefunden - Defaults aktiv");
+			logger::warn("SPS.ini nicht gefunden - Defaults aktiv");
 		}
 		// Menue-Werte darueber laden (gleiche Schluessel ersetzen die Vorgaben)
 		if (ini.LoadFile(kUserPath) >= 0) {
-			logger::info("SkyrimPerf_User.ini (Menue-Einstellungen) geladen");
+			logger::info("SPS_User.ini (Menue-Einstellungen) geladen");
 		}
 
 		// Werte einzeln setzen; die Culling-Jobs lesen parallel (einzelne Felder, kein Absturz-Risiko)
@@ -223,7 +233,7 @@ namespace Config
 		sp.enabled = ini.GetBoolValue("SubtreePruning", "bEnabled", sp.enabled);
 		sp.sun = ini.GetBoolValue("SubtreePruning", "bSun", sp.sun);
 		// bPointLights wird bewusst ignoriert (0.17.5): liess Schatten von Feuerschalen/Fackeln verschwinden, Nutzen 1-3 Knoten/Frame.
-		// Alte SkyrimPerf_User.ini (aus 0.16.0, Vorgabe damals an) hatten den Schalter noch gespeichert.
+		// Alte SPS_User.ini (aus 0.16.0, Vorgabe damals an) hatten den Schalter noch gespeichert.
 		sp.point = false;
 		sp.precip = ini.GetBoolValue("SubtreePruning", "bPrecipitation", sp.precip);
 		logger::info("SubtreePruning: {} | Sonne {} | Punktlicht {} | Regen/Sky {}", sp.enabled ? "AN" : "AUS", sp.sun, sp.point, sp.precip);

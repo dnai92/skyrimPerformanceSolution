@@ -1,7 +1,7 @@
 #pragma once
 
 // Eigene, leichtgewichtige Frame-Statistik (unabhaengig von Tracy).
-// Schreibt alle kReportInterval eine Zusammenfassung ins Log und eine Zeile in SkyrimPerf.csv.
+// Schreibt alle kReportInterval eine Zusammenfassung ins Log und eine Zeile in SPS.csv.
 namespace Stats
 {
 	enum class Zone : std::size_t

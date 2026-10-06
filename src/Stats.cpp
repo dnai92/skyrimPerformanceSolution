@@ -123,7 +123,7 @@ namespace Stats
 	void Init()
 	{
 		if (const auto dir = logger::log_directory()) {
-			g_csvPath = *dir / "SkyrimPerf.csv";
+			g_csvPath = *dir / "SPS.csv";
 		}
 
 		std::ofstream csv(g_csvPath, std::ios::trunc);

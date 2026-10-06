@@ -1,6 +1,6 @@
 #pragma once
 
-// Einstellungen aus Data\SKSE\Plugins\SkyrimPerf.ini (fehlende Werte -> Defaults)
+// Einstellungen aus Data\SKSE\Plugins\SPS.ini (fehlende Werte -> Defaults)
 namespace Config
 {
 	// Hauptschalter (Taste, siehe Hotkey) - wirkt auf ALLE Culling-Funktionen, unabhaengig von den einzelnen bEnabled
@@ -127,16 +127,16 @@ namespace Config
 	};
 	inline TextureStream textureStream;  // [TextureStream]
 
-	// Laedt SkyrimPerf.ini (Vorgaben aus dem Mod-Paket) und darueber SkyrimPerf_User.ini (Werte aus dem Menue im Spiel)
+	// Laedt SPS.ini (Vorgaben aus dem Mod-Paket) und darueber SPS_User.ini (Werte aus dem Menue im Spiel)
 	void Load();
 
 	// Prueft (alle ~2 s, Main-Thread) ob eine der INIs geaendert wurde und laedt sie dann neu.
-	// Schreibt ausserdem vorgemerkte Menue-Aenderungen in SkyrimPerf_User.ini.
+	// Schreibt ausserdem vorgemerkte Menue-Aenderungen in SPS_User.ini.
 	void ReloadIfChanged();
 
-	// Menue: Werte wurden direkt geaendert -> beim naechsten ReloadIfChanged in SkyrimPerf_User.ini speichern
+	// Menue: Werte wurden direkt geaendert -> beim naechsten ReloadIfChanged in SPS_User.ini speichern
 	void MarkDirty() noexcept;
 
-	// Menue: SkyrimPerf_User.ini loeschen und die Vorgaben aus SkyrimPerf.ini neu laden (beim naechsten ReloadIfChanged)
+	// Menue: SPS_User.ini loeschen und die Vorgaben aus SPS.ini neu laden (beim naechsten ReloadIfChanged)
 	void RequestReset() noexcept;
 }

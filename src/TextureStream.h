@@ -17,7 +17,7 @@
 //
 // Stufe 3 - gleich verkleinert laden: Das Spiel laedt DDS-Dateien ueber eine DirectXTK-Variante (ID 77533 ->
 // 77539 CreateTextureFromDDS) mit Parameter maxsize, den es immer auf 0 (= unbegrenzt) setzt. Wir merken uns je Pfad
-// die zuletzt benoetigte Kantenlaenge (auch ueber Spielsitzungen, SkyrimPerf_TextureSizes.txt im SKSE-Log-Ordner)
+// die zuletzt benoetigte Kantenlaenge (auch ueber Spielsitzungen, SPS_TextureSizes.txt im SKSE-Log-Ordner)
 // und geben sie beim naechsten Laden als maxsize mit -> die oberen Mip-Stufen werden gar nicht erst gelesen/angelegt.
 // Kette: NiSourceTexture-Ladefunktion ID 108531 (+0x44) -> ID 77301 (+0x62) -> ID 77533.
 namespace TextureStream

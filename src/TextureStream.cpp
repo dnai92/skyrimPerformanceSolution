@@ -800,7 +800,7 @@ namespace TextureStream
 		std::filesystem::path SizesFile()
 		{
 			auto dir = SKSE::log::log_directory();
-			return dir ? *dir / "SkyrimPerf_TextureSizes2.txt" : std::filesystem::path{};
+			return dir ? *dir / "SPS_TextureSizes.txt" : std::filesystem::path{};
 		}
 
 		// a_edge 0 = vergessen (wird wieder voll geladen)
@@ -829,6 +829,15 @@ namespace TextureStream
 
 		void LoadSizes()
 		{
+			// Umbenennung SkyrimPerf -> SPS (1.0.1): gemerkte Groessen aus der alten Datei uebernehmen
+			if (const auto dir = SKSE::log::log_directory(); dir) {
+				std::error_code ec;
+				const auto      old = *dir / "SkyrimPerf_TextureSizes2.txt";
+				if (!std::filesystem::exists(SizesFile(), ec) && std::filesystem::exists(old, ec)) {
+					std::filesystem::copy_file(old, SizesFile(), ec);
+					logger::info("TextureStream: gemerkte Groessen aus SkyrimPerf_TextureSizes2.txt uebernommen{}", ec ? " - FEHLER: " + ec.message() : "");
+				}
+			}
 			std::ifstream in(SizesFile());
 			std::string   line;
 			std::size_t   n = 0;

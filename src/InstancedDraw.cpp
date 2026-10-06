@@ -156,7 +156,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 		for (int v = 0; v < 2; ++v) {
 			const D3D_SHADER_MACRO defines[] = { { v ? "CLAMP_Z" : "NO_CLAMP", "1" }, { nullptr, nullptr } };
 			ID3DBlob* errors = nullptr;
-			const auto hr = compile(kShaderSource, sizeof(kShaderSource) - 1, "SkyrimPerfInstancedShadow", defines, nullptr, "main", "vs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &bytecode[v], &errors);
+			const auto hr = compile(kShaderSource, sizeof(kShaderSource) - 1, "SPSInstancedShadow", defines, nullptr, "main", "vs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &bytecode[v], &errors);
 			if (FAILED(hr)) {
 				std::snprintf(a_error, a_errorSize, "Shader-Kompilierung fehlgeschlagen: %s", errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
 				SafeRelease(errors);

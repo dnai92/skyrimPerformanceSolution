@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(
-	SkyrimPerf
-	VERSION 1.0.0
+	SPS
+	VERSION 1.0.1
 	LANGUAGES CXX
 )
 
@@ -17,7 +17,7 @@ include(extern/CommonLibSSE-NG/cmake/CommonLibSSE.cmake)  # add_commonlibsse_plu
 
 add_commonlibsse_plugin(
 	${PROJECT_NAME}
-	NAME "SkyrimPerf"
+	NAME "SPS"
 	AUTHOR "dnai92"
 	USE_ADDRESS_LIBRARY
 	SOURCES

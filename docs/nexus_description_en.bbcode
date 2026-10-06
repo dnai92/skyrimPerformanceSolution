@@ -1,4 +1,4 @@
-[size=5][b]SkyrimPerf[/b][/size]
+[size=5][b]Skyrim Performance Solution (SPS)[/b][/size]
 [i]Smoother Skyrim on heavily modded setups – without changing a single game file.[/i]
 
 SKSE plugin for [b]Skyrim SE 1.5.97 and AE 1.6.x / 1.7.x[/b]. It streams textures by distance so your GPU no longer runs out of VRAM in cities, cuts draw calls in the shadow passes and removes redundant per-frame engine work. Everything can be toggled live in an in-game menu (English / German, follows the game language) and with a single hotkey, so you can compare with and without the plugin at any time.
@@ -46,13 +46,13 @@ Ryzen 7 5700X, RTX 4070 12 GB, 1920x1200, ~380 plugins, Community Shaders with D
 [*]Skyrim SE 1.5.97 or AE 1.6.x / 1.7.x (tested in game on 1.6.1170; patch sites verified against 1.5.97, 1.6.640 and 1.7.104)
 [*][url=https://skse.silverlock.org/]SKSE64[/url]
 [*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url]
-[*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/120352]SKSE Menu Framework[/url] (in-game menu; without it use SkyrimPerf.ini)
+[*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/120352]SKSE Menu Framework[/url] (in-game menu; without it use SPS.ini)
 [*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/86492]Community Shaders[/url] (skylighting culling only has an effect with CS)
 [/list]
 Every engine patch checks the game code at startup. If it does not match (unknown game version or another mod patching the same spot), only that feature is switched off – it is listed in the menu and the log.
 
 [size=4][b]SE 1.5.97 users wanted![/b][/size]
-The SE version is verified against the game code but not yet tested in game. Feedback is very welcome – please attach [i]Documents\My Games\Skyrim Special Edition\SKSE\SkyrimPerf.log[/i].
+The SE version is verified against the game code but not yet tested in game. Feedback is very welcome – please attach [i]Documents\My Games\Skyrim Special Edition\SKSE\SPS.log[/i].
 
 [size=4][b]Tips[/b][/size]
 [list]
@@ -62,7 +62,7 @@ The SE version is verified against the game code but not yet tested in game. Fee
 [/list]
 
 [size=4][b]Installation[/b][/size]
-Install with Vortex or MO2 like any other mod. Settings: [i]Data\SKSE\Plugins\SkyrimPerf.ini[/i] (defaults); changes from the menu go to [i]SkyrimPerf_User.ini[/i].
+Install with Vortex or MO2 like any other mod. Settings: [i]Data\SKSE\Plugins\SPS.ini[/i] (defaults); changes from the menu go to [i]SPS_User.ini[/i].
 Uninstall: simply remove the mod. Nothing is stored in your save.
 
 [size=4][b]Source[/b][/size]
