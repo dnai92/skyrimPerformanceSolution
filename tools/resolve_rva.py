@@ -16,7 +16,8 @@ import re
 import struct
 import sys
 
-LIB = r"E:\SteamLibrary\steamapps\common\Skyrim Special Edition\Data\SKSE\Plugins\versionlib-1-6-1170-0.bin"
+# Address Library: Umgebungsvariable SKYRIM_VERSIONLIB oder relativ zum Spielordner
+LIB = os.environ.get("SKYRIM_VERSIONLIB", r"Data\SKSE\Plugins\versionlib-1-6-1170-0.bin")
 
 
 def load_library(path):

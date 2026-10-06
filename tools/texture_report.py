@@ -4,7 +4,8 @@ Aufruf: python texture_report.py [staging] > report.txt"""
 import os, struct, sys
 from collections import defaultdict
 
-STAGING = sys.argv[1] if len(sys.argv) > 1 else r"E:\Skyrim\Vortex Mods\skyrimse"
+# Mod-Ordner (Vortex-Staging oder MO2 "mods"): Argument oder Umgebungsvariable SKYRIM_MODS
+STAGING = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SKYRIM_MODS", ".")
 
 
 def dds_dims(head):

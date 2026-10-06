@@ -135,12 +135,17 @@ Result: `dist\SPS-<version>.zip`.
 |---|---|
 | CommonLibSSE-NG | git submodule (`extern/CommonLibSSE-NG`) |
 | Tracy 0.14.1 | git submodule (`extern/tracy`), on-demand profiling |
-| SKSE Menu Framework header | `src/third_party` (GPL-3.0) |
+| SKSE Menu Framework | runtime only, own binding in `src/MenuApi.h` |
 | Detours, DirectXMath, DirectXTK, fmt, spdlog, SimpleIni, xbyak, nlohmann-json, rapidcsv, toml11 | vcpkg (`vcpkg.json`) |
 
 ## License
 
-GPL-3.0 (required by the bundled SKSE Menu Framework header). See [LICENSE](LICENSE).
+GPL-3.0-or-later, see [LICENSE](LICENSE). Required by CommonLibSSE NG, which is licensed GPL-3.0-or-later with a
+modding exception since July 2026. Copyright © 2026 dnai92 (dnai92).
+
+Please link to the official Nexus Mods page instead of re-uploading the mod. If you redistribute or modify it,
+the GPL requires you to keep the copyright notices, credit the original and publish your changes as source code under
+the same license.
 
 ---
 
