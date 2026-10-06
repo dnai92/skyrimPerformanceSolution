@@ -222,12 +222,24 @@ namespace TextureStream
 		// Windows-Zaehler fuer den ganzen Prozess (Hintergrund-Thread, 1x/s): enthaelt auch CS/DLSS/FG-Speicher
 		std::atomic<std::uint64_t> g_procDedicated{ 0 }, g_procShared{ 0 };
 		std::atomic<std::uint64_t> g_dxgiUsage{ 0 };
-		constexpr std::uint64_t    kSharedPressure = 128ull << 20;  // so viel ausgelagert = VRAM laeuft ueber
+		// so viel ausgelagert = VRAM laeuft ueber. 0.22.10: eigenes Neuladen erzeugt kurz ~150-200 MB (Upload-Puffer)
+		// -> bei 128 MB loeste das Auffuellen selbst Knappheit aus und verkleinerte gleich wieder (Hin und Her)
+		constexpr std::uint64_t    kSharedPressure = 256ull << 20;
 		// Auffuellen erst nach ruhiger Phase: direkt nach dem Laden ist der VRAM kurz leer, waehrend die Szene noch
 		// hereinkommt -> 0.20.4 fuellte 4 GB auf und verkleinerte gleich wieder (Hin und Her)
 		Clock::time_point          g_lastPressure{};
 		Clock::time_point          g_lastLoad{};
 		constexpr auto             kRefillCalm = 30s;
+		// Kopien fuer die Lade-Threads (Stufe 3)
+		std::atomic<Clock::rep>    g_lastPressureTicks{ 0 }, g_lastLoadTicks{ 0 };
+		// Waehrend eines Ladebildschirms ist der VRAM kurz leer -> ohne das lud Stufe 3 alles voll, danach 97 % und
+		// Massen-Verkleinern mit Rucklern (langer Test 0.22.10). War kurz vorher Knappheit, gilt sie beim Laden weiter.
+		constexpr auto             kLoadWindow = 60s;
+		constexpr auto             kPressureMemory = 10min;
+		// Auffuellen: noch nicht eingetroffene Neuladungen mitzaehlen, sonst stapeln mehrere Durchlaeufe (je 0,5 s)
+		// Auftraege fuer denselben freien Platz (langer Test: bis 3,6 GB in 10 s, VRAM 89 %, danach Verkleinern)
+		std::uint64_t              g_inflightUp = 0;  // Main-Thread
+		constexpr std::uint64_t    kRefillPerPass = 512ull << 20;
 
 		void InitAdapter()
 		{
@@ -286,8 +298,19 @@ namespace TextureStream
 			// Ausgelagerter Speicher = der VRAM laeuft schon ueber (genau das verursachte die Ruckler beim Umdrehen)
 			// Nur solange der VRAM auch nahe der Schwelle ist - Windows holt Ausgelagertes nicht immer sofort zurueck,
 			// sonst wuerde endlos weiter verkleinert
-			const bool overflowing = g_procShared.load(std::memory_order_relaxed) >= kSharedPressure && pct >= cfg.budgetStartPct - cfg.refillGapPct;
+			const bool overflowing = g_procShared.load(std::memory_order_relaxed) >= kSharedPressure && pct >= cfg.budgetStartPct - cfg.refillGapPct / 2.0f;
 			return pct < 0.0f || pct >= cfg.budgetStartPct || overflowing;
+		}
+
+		bool LoadPressure() noexcept
+		{
+			if (Pressure()) {
+				return true;
+			}
+			const auto now = Clock::now().time_since_epoch().count();
+			const auto load = g_lastLoadTicks.load(std::memory_order_relaxed), pressure = g_lastPressureTicks.load(std::memory_order_relaxed);
+			return load != 0 && pressure != 0 && now - load < Clock::duration(kLoadWindow).count() &&
+			       now - pressure < Clock::duration(kPressureMemory).count();
 		}
 
 		// Gegen Hin und Her (Plattenlast): groesser laden erst bei deutlich mehr Bedarf, verkleinern erst nach
@@ -378,6 +401,7 @@ namespace TextureStream
 			FormatInfo                         fi;
 			std::uint32_t                      skip = 0;  // obere Mip-Stufen weglassen
 			W::D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+			std::uint64_t                      extraBytes = 0;  // Neuladen: zusaetzlicher VRAM gegenueber jetzt
 		};
 
 		struct Result
@@ -855,7 +879,7 @@ namespace TextureStream
 			if (Config::textureStream.budgetMode) {
 				RefreshVramThrottled();
 			}
-			if (!Config::textureStream.loadReduced || !Config::textureStream.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || !Pressure()) {
+			if (!Config::textureStream.loadReduced || !Config::textureStream.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || !LoadPressure()) {
 				g_diagOff.fetch_add(1, std::memory_order_relaxed);
 				return 0;
 			}
@@ -978,6 +1002,10 @@ namespace TextureStream
 				a_st.eligible = false;
 				return;
 			}
+			const std::uint64_t now = ChainBytes(a_st.fi, a_st.curW, a_st.curH, a_st.curMips);
+			const std::uint64_t then = ChainBytes(a_st.fi, std::max(1u, a_st.fullW >> skip), std::max(1u, a_st.fullH >> skip), a_st.fullMips - skip);
+			job.extraBytes = then > now ? then - now : 0;
+			g_inflightUp += job.extraBytes;
 			a_st.busy = true;
 			Enqueue(std::move(job));
 		}
@@ -1150,6 +1178,7 @@ namespace TextureStream
 			}
 			for (auto& res : results) {
 				const auto& job = res.job;
+				g_inflightUp -= std::min(g_inflightUp, job.extraBytes);
 				const auto  it = g_tex.find(job.r);
 				const bool  valid = it != g_tex.end() && it->second.res == job.expectRes && job.r->texture == job.expectRes;
 				if (it != g_tex.end()) {
@@ -1431,9 +1460,11 @@ namespace TextureStream
 			const float                  pct = g_vramPct.load(std::memory_order_relaxed);
 			if (pressure) {
 				g_lastPressure = now;
+				g_lastPressureTicks.store(now.time_since_epoch().count(), std::memory_order_relaxed);
 			}
 			const bool calm = now - g_lastPressure >= kRefillCalm && now - g_lastLoad >= kRefillCalm;
-			const bool wantRefill = active && cfg.budgetMode && cfg.refill && calm && pct >= 0.0f && pct < cfg.budgetStartPct - cfg.refillGapPct;
+			const bool wantRefill = active && cfg.budgetMode && cfg.refill && calm && pct >= 0.0f && pct < cfg.budgetStartPct - cfg.refillGapPct &&
+			                        g_procShared.load(std::memory_order_relaxed) < kSharedPressure / 2;
 			g_reducedCount = 0;
 			for (auto it = g_tex.begin(); it != g_tex.end(); ++it) {
 				auto&      st = it->second;
@@ -1480,7 +1511,9 @@ namespace TextureStream
 			if (!refill.empty()) {
 				const double budget = static_cast<double>(g_vramBudget.load(std::memory_order_relaxed));
 				const double usage = static_cast<double>(g_vramUsage.load(std::memory_order_relaxed));
-				double       room = budget * (cfg.budgetStartPct - cfg.refillGapPct / 2.0) / 100.0 - usage;
+				// Ziel unterhalb der Ueberlauf-Grenze (Schwelle - Abstand/2), damit Auffuellen nicht selbst Knappheit ausloest
+				double room = budget * (cfg.budgetStartPct - cfg.refillGapPct * 0.75) / 100.0 - usage - static_cast<double>(g_inflightUp);
+				room = std::min(room, static_cast<double>(kRefillPerPass));
 				std::ranges::sort(refill, [](const RefillCandidate& a, const RefillCandidate& b) { return a.priority > b.priority; });
 				for (const auto& c : refill) {
 					if (room < static_cast<double>(c.bytes)) {
@@ -1732,6 +1765,8 @@ namespace TextureStream
 		g_tex.clear();
 		g_reducedCount = 0;
 		g_lastLoad = Clock::now();
+		g_lastLoadTicks.store(g_lastLoad.time_since_epoch().count(), std::memory_order_relaxed);
+		g_inflightUp = 0;
 		logger::info("[TextureStream] Reset ({}): {} gehaltene Texturen und Durchlauf freigegeben, {} Auftraege verworfen", a_reason, held, jobs);
 	}
 
