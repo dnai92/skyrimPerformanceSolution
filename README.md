@@ -141,7 +141,7 @@ Result: `dist\SPS-<version>.zip`.
 ## License
 
 GPL-3.0-or-later, see [LICENSE](LICENSE). Required by CommonLibSSE NG, which is licensed GPL-3.0-or-later with a
-modding exception since July 2026. Copyright © 2026 dnai92 (dnai92).
+modding exception since July 2026. Copyright © 2026 dnai92.
 
 Please link to the official Nexus Mods page instead of re-uploading the mod. If you redistribute or modify it,
 the GPL requires you to keep the copyright notices, credit the original and publish your changes as source code under
