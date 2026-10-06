@@ -1352,14 +1352,19 @@ namespace TextureStream
 							stack.push_back(child.get());
 						}
 					}
-				} else if (const auto geom = obj->AsGeometry(); geom && onRay) {
+				} else if (const auto geom = obj->AsGeometry(); geom && onRay && b.radius < 20000.0f) {
+					// nur Objekte mit normalem Material (keine Partikel/Nebel/Himmel)
+					const auto gp = geom->GetGeometryRuntimeData().shaderProperty.get();
+					if (!gp || !netimmerse_cast<RE::BSLightingShaderProperty*>(gp)) {
+						continue;
+					}
 					const float dist = std::max(0.0f, centerDist - b.radius);
 					hits.push_back({ geom, dist, dist <= 1.0f ? 1.0e6f : 2.0f * b.radius / dist * g_pixelsPerUnit });
 				}
 			}
 			std::ranges::sort(hits, [](const Hit& a, const Hit& b) { return a.dist < b.dist; });
 			logger::info("[TextureStream] Bildmitte: {} Objekte unter dem Fadenkreuz (naechste zuerst, {} Knoten geprueft), Streaming {}", hits.size(), visited, Active() ? "AN" : "AUS");
-			for (std::size_t i = 0; i < hits.size() && i < 12; ++i) {
+			for (std::size_t i = 0; i < hits.size() && i < 25; ++i) {
 				const auto geom = hits[i].geom;
 				const auto prop = geom->GetGeometryRuntimeData().shaderProperty.get();
 				const auto lsp = prop ? netimmerse_cast<RE::BSLightingShaderProperty*>(prop) : nullptr;
