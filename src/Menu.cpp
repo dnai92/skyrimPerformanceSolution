@@ -1,6 +1,7 @@
 #include "Menu.h"
 
 #include "Config.h"
+#include "Features.h"
 #include "TextureStream.h"
 
 #include "third_party/SKSEMenuFramework.h"
@@ -212,6 +213,27 @@ namespace Menu
 			HotkeyPicker();
 			ImGuiMCP::TextWrapped("%s", T("Use this switch (or the hotkey) to compare FPS and look with and without SkyrimPerf. The 10-second report in SkyrimPerf.log shows the numbers.",
 											"Mit diesem Schalter (oder der Taste) FPS und Bild mit und ohne SkyrimPerf vergleichen. Der 10-Sekunden-Bericht in SkyrimPerf.log zeigt die Zahlen."));
+
+			// Status der Engine-Eingriffe (andere Spielversion / andere Mod an derselben Stelle)
+			{
+				const auto list = Features::List();
+				const auto off = std::ranges::count_if(list, [](const Features::Entry& e) { return !e.active; });
+				const auto ver = REL::Module::get().version().string();
+				if (off == 0) {
+					ImGuiMCP::TextWrapped("%s", std::format("{} {} - {}", T("Game version", "Spielversion"), ver,
+													Features::TestedVersion() ? T("tested, all functions active.", "getestet, alle Funktionen aktiv.") :
+																			   T("not tested, but all functions passed their code check.", "nicht getestet, aber alle Funktionen haben ihre Code-Prüfung bestanden.")).c_str());
+				} else {
+					ImGuiMCP::TextWrapped("%s", std::format("{} {}: {}", T("Game version", "Spielversion"), ver,
+													T("these functions were switched off because the game code differs (see SkyrimPerf.log):",
+														"diese Funktionen wurden abgeschaltet, weil der Spielcode abweicht (siehe SkyrimPerf.log):")).c_str());
+					for (const auto& e : list) {
+						if (!e.active) {
+							ImGuiMCP::BulletText("%s", (g_german ? e.nameDe : e.name).c_str());
+						}
+					}
+				}
+			}
 
 			ImGuiMCP::SeparatorText(T("Optimizations", "Optimierungen"));
 			Toggle(T("Sun shadow culling", "Sonnenschatten kleiner Objekte weglassen"), Config::shadowCulling.enabled,

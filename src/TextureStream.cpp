@@ -1,4 +1,5 @@
 #include "TextureStream.h"
+#include "Features.h"
 
 #include "Config.h"
 #include "DetourHelper.h"
@@ -1630,12 +1631,14 @@ namespace TextureStream
 						REX::W32::VirtualProtect(&vtbl[0xD0 / 8], sizeof(void*), old, &old);
 						logger::info("Hook installiert: Renderer-Textur anlegen (vtable 0xD0, bisher 0x{:X}) - Textur fuer DDS-Lader merken",
 							reinterpret_cast<std::uintptr_t>(CreateRenderData::func));
+						Features::Report("Load textures at remembered size", "Gleich in gemerkter Größe laden", LoadDDS::func != nullptr,
+							LoadDDS::func ? "" : "DDS loader hook missing");
 					}
 				} else {
-					logger::warn("TextureStream: Renderer-Objekt fuer Texturladen noch nicht da - Stufe 3 inaktiv");
+					Features::Report("Load textures at remembered size", "Gleich in gemerkter Größe laden", false, "renderer object not available");
 				}
 			} else {
-				logger::warn("TextureStream: Code in ID 70716 nicht wie erwartet - Stufe 3 inaktiv");
+				Features::Report("Load textures at remembered size", "Gleich in gemerkter Größe laden", false, "code at ID 70716+0x18B differs");
 			}
 		}
 
@@ -1679,6 +1682,7 @@ namespace TextureStream
 		LoadDDS::func = reinterpret_cast<decltype(LoadDDS::func)>(REL::Relocation<std::uintptr_t>{ REL::ID(77533) }.address());
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&LoadDDS::func), reinterpret_cast<void*>(&LoadDDS::thunk)); err != 0) {
 			logger::warn("TextureStream: Detours-Fehler {} an ID 77533 - Stufe 3 inaktiv", err);
+			LoadDDS::func = nullptr;
 			return;
 		}
 		logger::info("Hook installiert: DDS-Lader (Detour ID 77533) - gleich verkleinert laden");

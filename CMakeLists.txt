@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SkyrimPerf
-	VERSION 0.20.10
+	VERSION 0.21.0
 	LANGUAGES CXX
 )
 
@@ -22,6 +22,7 @@ add_commonlibsse_plugin(
 	USE_ADDRESS_LIBRARY
 	SOURCES
 		src/main.cpp
+		src/Features.cpp
 		src/Hooks.cpp
 		src/Hotkey.cpp
 		src/InstancingAnalysis.cpp

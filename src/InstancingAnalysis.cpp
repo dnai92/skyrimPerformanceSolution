@@ -1,4 +1,5 @@
 #include "InstancingAnalysis.h"
+#include "Features.h"
 
 #include "Config.h"
 #include "DetourHelper.h"
@@ -718,9 +719,10 @@ namespace InstancingAnalysis
 
 		RenderBatches::func = reinterpret_cast<decltype(RenderBatches::func)>(REL::RelocationID(100852, 107642).address());
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&RenderBatches::func), reinterpret_cast<void*>(&RenderBatches::thunk)); err != 0) {
-			logger::error("Detour BSBatchRenderer::RenderBatches fehlgeschlagen ({})", err);
+			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", false, std::format("Detours error {} at RenderBatches", err));
 		} else {
 			logger::info("Detour installiert: BSBatchRenderer::RenderBatches (Instancing-Analyse, Batch-Grenzen)");
+			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", true);
 		}
 
 		REL::Relocation<std::uintptr_t> utilVtbl{ RE::VTABLE_BSUtilityShader[0] };
@@ -729,11 +731,16 @@ namespace InstancingAnalysis
 
 		// Aufrufstellen von RenderPassImmediately (dieselben wie Community Shaders/LightLimitFix) - nur zur Zuordnung
 		auto& trampoline = SKSE::GetTrampoline();
+		// Nur Diagnose-Zuordnung: ohne passenden call (andere Version/Mod) einfach weglassen
 		REL::Relocation<std::uintptr_t> site1{ RELOCATION_ID(100852, 107642), REL::Relocate(0x29E, 0x28F) };
-		RenderPassImmediately<1>::func = trampoline.write_call<5>(site1.address(), RenderPassImmediately<1>::thunk);
 		REL::Relocation<std::uintptr_t> site2{ RELOCATION_ID(100877, 107667), REL::Relocate(0x1E5, 0xED) };
-		RenderPassImmediately<2>::func = trampoline.write_call<5>(site2.address(), RenderPassImmediately<2>::thunk);
-		logger::info("Hooks installiert: RenderPassImmediately-Aufrufstellen 1 und 2");
+		const bool ok = Features::IsCall(site1.address()) && Features::IsCall(site2.address());
+		if (ok) {
+			RenderPassImmediately<1>::func = trampoline.write_call<5>(site1.address(), RenderPassImmediately<1>::thunk);
+			RenderPassImmediately<2>::func = trampoline.write_call<5>(site2.address(), RenderPassImmediately<2>::thunk);
+			logger::info("Hooks installiert: RenderPassImmediately-Aufrufstellen 1 und 2");
+		}
+		Features::Report("Diagnostics: draw call assignment", "Diagnose: Draw-Zuordnung", ok, ok ? "" : "call sites differ");
 	}
 
 	void OnFrame()

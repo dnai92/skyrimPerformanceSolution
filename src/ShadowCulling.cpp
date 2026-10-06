@@ -1,4 +1,5 @@
 #include "ShadowCulling.h"
+#include "Features.h"
 
 #include "Config.h"
 #include "TextureStream.h"
@@ -740,8 +741,9 @@ namespace ShadowCulling
 		RenderDepth::func = reinterpret_cast<void (*)(bool, bool)>(REL::Relocation<std::uintptr_t>{ RELOCATION_ID(100421, 107139) }.address());
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&RenderDepth::func), reinterpret_cast<void*>(&RenderDepth::thunk)); err == 0) {
 			logger::info("Hook installiert: Main::RenderDepth (Detours)");
+			Features::Report("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen", true);
 		} else {
-			logger::warn("Main::RenderDepth: Detours-Fehler {} - Tiefenvorpass-Culling deaktiviert", err);
+			Features::Report("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen", false, std::format("Detours error {}", err));
 		}
 	}
 

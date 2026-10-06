@@ -54,7 +54,7 @@ namespace Hotkey
 	{
 		if (const auto input = RE::BSInputDeviceManager::GetSingleton()) {
 			input->AddEventSink(InputSink::GetSingleton());
-			logger::info("Hotkey registriert: Taste 0x{:X} schaltet Culling an/aus", Config::toggleKey.load());
+			logger::info("Hotkey registriert: Taste 0x{:X} schaltet alle Optimierungen an/aus", Config::toggleKey.load());
 		}
 	}
 }

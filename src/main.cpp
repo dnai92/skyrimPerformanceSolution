@@ -45,18 +45,24 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	logger::info("SkyrimPerf {} geladen (Tracy on-demand, Report alle 10 s)", SKSE::GetPluginVersion().string());
 	logger::info("Skyrim-Basisadresse 0x{:X} (fuer tools/resolve_rva.py)", REL::Module::get().base());
 
-	// Alle Engine-Eingriffe benutzen AE-Adressen (Address-Library-IDs + Offsets innerhalb von Funktionen), getestet nur
-	// gegen 1.6.1170. Auf anderen Versionen (z. B. SE 1.5.97) wuerden sie falsche Stellen treffen -> gar nichts installieren.
-	if (const auto version = REL::Module::get().version(); version != REL::Version{ 1, 6, 1170, 0 }) {
-		logger::warn("Spielversion {} wird nicht unterstuetzt (nur 1.6.1170) - SkyrimPerf bleibt inaktiv", version.string());
+	// Engine-Eingriffe benutzen AE-Adressen (Address-Library-IDs sind innerhalb der AE 1.6.x stabil). Eingriffe mitten in
+	// Funktionen pruefen den Code an ihrer Stelle selbst und schalten bei Abweichung nur sich ab (Features.h).
+	// SE 1.5.x / VR haben andere IDs -> dort gar nichts installieren.
+	const auto version = REL::Module::get().version();
+	if (version < REL::Version{ 1, 6, 317, 0 } || version >= REL::Version{ 1, 7, 0, 0 }) {
+		logger::warn("Spielversion {} wird nicht unterstuetzt (nur Anniversary Edition 1.6.x) - SkyrimPerf bleibt inaktiv", version.string());
 		SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
 			if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 				const auto v = REL::Module::get().version().string();
-				RE::DebugMessageBox((Menu::IsGerman() ? std::format("SkyrimPerf: Spielversion {} wird nicht unterstützt (nur 1.6.1170). Das Plugin bleibt inaktiv.", v) :
-				                                        std::format("SkyrimPerf: game version {} is not supported (only 1.6.1170). The plugin stays inactive.", v)).c_str());
+				RE::DebugMessageBox((Menu::IsGerman() ? std::format("SkyrimPerf: Spielversion {} wird nicht unterstützt (nur Anniversary Edition 1.6.x). Das Plugin bleibt inaktiv.", v) :
+				                                        std::format("SkyrimPerf: game version {} is not supported (Anniversary Edition 1.6.x only). The plugin stays inactive.", v)).c_str());
 			}
 		});
 		return true;
+	}
+
+	if (version != REL::Version{ 1, 6, 1170, 0 }) {
+		logger::warn("Spielversion {} ist nicht getestet (getestet: 1.6.1170) - Eingriffe pruefen den Code selbst, abweichende werden abgeschaltet", version.string());
 	}
 
 	Stats::Init();

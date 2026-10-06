@@ -1,4 +1,5 @@
 #include "LightGather.h"
+#include "Features.h"
 
 #include "Config.h"
 #include "Stats.h"
@@ -76,10 +77,11 @@ namespace LightGather
 		const auto                      target = REL::Relocation<std::uintptr_t>{ REL::ID(106342) }.address();
 		if (*reinterpret_cast<std::uint8_t*>(addr) != 0xE8 ||
 			addr + 5 + *reinterpret_cast<std::int32_t*>(addr + 1) != target) {
-			logger::warn("LightGather: Aufrufstelle passt nicht (anderes Spiel-Update oder anderer Mod) - nicht installiert");
+			Features::Report("Light assignment throttle", "Licht-Zuordnung drosseln", false, "call site ID 106335+0x6E2 differs (other game version or mod)");
 			return;
 		}
 		UpdateLight::func = SKSE::GetTrampoline().write_call<5>(addr, UpdateLight::thunk);
 		logger::info("LightGather: Hook auf Licht-Zuordnung dynamischer Punktlichter installiert");
+		Features::Report("Light assignment throttle", "Licht-Zuordnung drosseln", true);
 	}
 }

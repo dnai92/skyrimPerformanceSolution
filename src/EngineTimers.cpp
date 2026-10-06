@@ -1,4 +1,5 @@
 #include "EngineTimers.h"
+#include "Features.h"
 
 #include "DetourHelper.h"
 #include "Stats.h"
@@ -43,15 +44,17 @@ namespace EngineTimers
 		PrecipSetupMask::func = reinterpret_cast<void (*)(void*)>(REL::Relocation<std::uintptr_t>{ REL::ID(26183) }.address());
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&PrecipSetupMask::func), reinterpret_cast<void*>(&PrecipSetupMask::thunk)); err == 0) {
 			logger::info("Zeitmessung installiert: Precipitation::SetupMask (Regen/Sky-Karte, Detours)");
+			Features::Report("Timing: rain/sky map", "Zeitmessung: Regen-/Himmelskarte", true);
 		} else {
-			logger::warn("Zeitmessung Regen/Sky-Karte: Detours-Fehler {} - nicht installiert", err);
+			Features::Report("Timing: rain/sky map", "Zeitmessung: Regen-/Himmelskarte", false, std::format("Detours error {}", err));
 		}
 		const auto mainSite = REL::Relocation<std::uintptr_t>{ REL::ID(36560), 0xE9 }.address();
 		if (CheckCall(mainSite, 32174)) {
 			MainCull::func = trampoline.write_call<5>(mainSite, MainCull::thunk);
 			logger::info("Zeitmessung installiert: Hauptkamera-Culling (ID 32174)");
+			Features::Report("Timing: main camera culling", "Zeitmessung: Hauptkamera", true);
 		} else {
-			logger::warn("Zeitmessung Hauptkamera-Culling: Aufrufstelle passt nicht - nicht installiert");
+			Features::Report("Timing: main camera culling", "Zeitmessung: Hauptkamera", false, "call site ID 36560+0xE9 differs");
 		}
 	}
 }
