@@ -293,6 +293,9 @@ namespace Menu
 			ImGuiMCP::SeparatorText(T("Torch / point light shadow culling", "Fackelschatten kleiner Objekte weglassen"));
 			Toggle(T("Enabled##point", "Aktiv##point"), Config::pointLightCulling.enabled,
 				T("Small, far objects do not cast shadows from torches and fires.", "Kleine, ferne Objekte werfen keinen Schatten von Fackeln und Feuern."));
+			AtomicToggle(T("Also in interiors##point", "Auch in Innenräumen##point"), Config::pointLightInteriors,
+				T("Interiors are lit almost only by torches and fires, missing shadows are noticeable there. Off = full torch shadows indoors.",
+					"Innenräume werden fast nur von Fackeln und Feuern beleuchtet, fehlende Schatten fallen dort auf. Aus = in Innenräumen volle Fackelschatten."));
 			RuleControls("point", Config::pointLightCulling, 5000.0f);
 
 			ImGuiMCP::SeparatorText(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"));

@@ -321,7 +321,8 @@ namespace ShadowCulling
 
 		// Punktlicht: Objekte nahe am Licht werfen grosse, gut sichtbare Schatten, auch wenn sie selbst klein sind
 		// (Wegweiser direkt neben dem Feuer im Pavillon vor Weisslauf). Die Schattenkamera steht im Licht.
-		constexpr float kNearLightAngular = 0.1f;  // Radius/Abstand zum Licht darueber -> Schatten immer behalten
+		constexpr float kNearLightAngular = 0.1f;
+		std::atomic<bool> g_pointCullAllowed{ true };  // false = Innenraum und dort nicht erlaubt  // Radius/Abstand zum Licht darueber -> Schatten immer behalten
 
 		bool NearPointLight(const RE::NiCamera* a_lightCamera, const RE::BSGeometry& a_geom) noexcept
 		{
@@ -555,7 +556,7 @@ namespace ShadowCulling
 						return;
 					}
 					// minCascade gilt nur fuer die Sonne -> hier Kaskade als "hinreichend gross" uebergeben
-					if (!NearPointLight(a_this->camera, a_visible) && ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX)) {
+					if (g_pointCullAllowed.load(std::memory_order_relaxed) && !NearPointLight(a_this->camera, a_visible) && ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX)) {
 						Stats::Count(Stats::Counter::PointCulled);
 						return;
 					}
@@ -591,7 +592,7 @@ namespace ShadowCulling
 			static void thunk(RE::BSCullingProcess* a_this, RE::BSGeometry& a_visible, std::int32_t a_alphaGroupIndex)
 			{
 				DiagRecord(a_this->camera);
-				if (!NearPointLight(a_this->camera, a_visible) && ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX)) {
+				if (g_pointCullAllowed.load(std::memory_order_relaxed) && !NearPointLight(a_this->camera, a_visible) && ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX)) {
 					Stats::Count(Stats::Counter::PointCulled);
 					return;
 				}
@@ -1037,6 +1038,11 @@ namespace ShadowCulling
 		}
 
 		g_mainCamera.store(RE::Main::WorldRootCamera(), std::memory_order_relaxed);
+		{
+			const auto player = RE::PlayerCharacter::GetSingleton();
+			const auto cell = player ? player->GetParentCell() : nullptr;
+			g_pointCullAllowed.store(!cell || !cell->IsInteriorCell() || Config::pointLightInteriors.load(std::memory_order_relaxed), std::memory_order_relaxed);
+		}
 
 		std::array<const RE::NiCamera*, kMaxCascades> cameras{};
 		std::uint32_t                                 pointCount = 0;
