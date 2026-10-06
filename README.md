@@ -2,16 +2,12 @@
 
 ![Skyrim Performance Solution (SPS)](docs/sps_banner.webp)
 
-[![Support me on Ko-fi](https://storage.ko-fi.com/cdn/kofi2.png?v=3)](https://ko-fi.com/dani9281660)
-
 SKSE plugin that makes **Skyrim Special Edition / Anniversary Edition** run smoother on heavily modded setups —
 without touching a single game file. It cuts draw calls in the shadow passes, removes redundant per-frame engine work
 and **streams textures by distance**, so a 12 GB GPU no longer runs out of VRAM in cities.
 
 Everything can be toggled live in an in-game menu (English / German, follows the game language) and with one hotkey,
 so you can compare with and without the plugin at any time.
-
-> 🇩🇪 Deutsche Kurzbeschreibung weiter unten.
 
 ---
 
@@ -155,21 +151,4 @@ the same license.
 
 ---
 
-## 🇩🇪 Kurzbeschreibung
-
-SKSE-Plugin für Skyrim SE/AE, das stark gemoddete Spiele flüssiger macht, ohne eine einzige Spieldatei zu verändern:
-
-- **Texture-Streaming:** Texturen ferner Objekte (auch hinter der Kamera) werden im VRAM verkleinert und bei
-  Annäherung im Hintergrund in voller Größe neu geladen. Am Weißlauf-Markt: 0,33 GB statt 7–8 GB für diese
-  Texturen, Skyrim braucht 5,4 statt ~10,5 GB VRAM, kein sichtbarer Unterschied.
-- **Schatten-Culling** für Sonne, Fackeln und Figuren, **Skylighting- und Decal-Culling**, **Schatten-Instancing**:
-  rund 26 % weniger Draw-Calls.
-- **Licht-Zuordnung drosseln** (2,45 → 0,15 ms pro Frame) und **Teilbäume überspringen** (−0,7 ms Sonnenschatten).
-- **Drachenfeste mit vollem VRAM:** 72 statt 98 % VRAM, 41 statt 27–33 FPS, keine Ruckler mehr (vorher bis 280 ms).
-- **Menü** auf Deutsch/Englisch (folgt der Spielsprache), **Hotkey** frei belegbar (Standard *Bild auf*).
-
-Voraussetzungen: Skyrim SE 1.5.97 oder AE 1.6.x/1.7.x (getestet auf 1.6.1170), SKSE64, Address Library;
-optional SKSE Menu Framework und Community Shaders.
-
-**Tipp:** Hängt das Spiel kurz beim Durchschreiten von Türen, ist das meist das automatische Speichern beim
-Gebietswechsel zusammen mit RaceMenu (große Co-Save-Datei). Abhilfe: in den Spieleinstellungen (Gameplay) *Beim Reisen speichern* ausschalten.
+[![Support me on Ko-fi](https://storage.ko-fi.com/cdn/kofi2.png?v=3)](https://ko-fi.com/dani9281660)
