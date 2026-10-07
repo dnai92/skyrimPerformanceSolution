@@ -269,7 +269,8 @@ namespace Menu
 			Toggle(T("Main view micro culling", "Winzige Objekte im Bild weglassen"), Config::mainViewCulling.enabled,
 				T("Tiny far objects are not drawn at all - can pop in. Default OFF.", "Winzige ferne Objekte werden gar nicht gezeichnet - können aufploppen. Standard AUS."));
 			Toggle(T("Far shadow cascade cache", "Cache ferne Schattenkaskade"), Config::cascadeCache.enabled,
-				T("Far sun shadows only every 2nd frame - flickers with a low sun. Default OFF.", "Ferne Sonnenschatten nur jeden 2. Frame - flackert bei tiefer Sonne. Standard AUS."));
+				T("Far sun shadows only every 2nd frame (test). Use together with 'Stable far shadow cascade' - without it, it flickers with a low sun. Default OFF.",
+					"Ferne Sonnenschatten nur jeden 2. Frame (Test). Zusammen mit 'Stabile ferne Schattenkaskade' nutzen - ohne flackert es bei tiefer Sonne. Standard AUS."));
 			Toggle(T("Stable far shadow cascade (test)", "Stabile ferne Schattenkaskade (Test)"), Config::stableCascade.enabled,
 				T("Keeps the far sun shadow cascade fixed and only realigns it in steps (sun moved, view left the area). Basis for the cascade cache. Far shadows slightly coarser. Default OFF.",
 					"Hält die ferne Sonnenschatten-Kaskade fest und richtet sie nur in Schritten neu aus (Sonne gewandert, Blick aus dem Bereich). Grundlage für den Kaskaden-Cache. Ferne Schatten etwas gröber. Standard AUS."));

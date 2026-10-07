@@ -900,6 +900,12 @@ namespace ShadowCulling
 			fr.fFar = s.f;
 			RE::NiUpdateData ud{};
 			cam->Update(ud);
+			// Mit Kaskaden-Cache: Schattenwerfer fuer den GANZEN gehaltenen Ausschnitt sammeln. Die Engine cullt sonst mit
+			// einer engen Huelle um den aktuellen Sichtbereich (customCullPlanes) - beim Drehen fehlten im wiederverwendeten
+			// Frame Schatten am Rand. Ohne die Huelle gelten die Ebenen der Kamera, also unser Ausschnitt.
+			if (Config::cascadeCache.enabled && desc.cullingProcess) {
+				desc.cullingProcess->doCustomCullPlanes = false;
+			}
 
 			static auto lastLog = std::chrono::steady_clock::now();
 			if (std::chrono::steady_clock::now() - lastLog >= std::chrono::seconds(10)) {
