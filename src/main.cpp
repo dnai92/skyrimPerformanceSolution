@@ -88,8 +88,11 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	}
 
 	if (!Features::TestedVersion()) {
-		logger::warn("Game version {} is {} (tested in game: 1.6.1170) - patches verify the code themselves, mismatching ones are disabled",
-			version.string(), Features::VerifiedVersion() ? "verified offline against the game code" : "not tested");
+		if (Features::VerifiedVersion()) {
+			logger::info("Game version {}: all patch sites verified offline against this version's game code (in-game testing so far on 1.6.1170)", version.string());
+		} else {
+			logger::warn("Game version {} not tested - every patch checks its code site at startup, mismatching ones are disabled", version.string());
+		}
 	}
 
 	Stats::Init();

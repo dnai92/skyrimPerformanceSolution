@@ -723,7 +723,7 @@ namespace InstancingAnalysis
 			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", false, std::format("Detours error {} at RenderBatches", err));
 		} else {
 			logger::info("Detour installed: BSBatchRenderer::RenderBatches (instancing analysis, batch boundaries)");
-			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", !REL::Module::IsSE(), REL::Module::IsSE() ? "not verified on SE 1.5.97" : "");
+			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", !REL::Module::IsSE(), REL::Module::IsSE() ? "Anniversary Edition only" : "", REL::Module::IsSE());
 		}
 
 		REL::Relocation<std::uintptr_t> utilVtbl{ RE::VTABLE_BSUtilityShader[0] };

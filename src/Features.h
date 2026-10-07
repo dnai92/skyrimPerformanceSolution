@@ -13,7 +13,8 @@ namespace Features
 		std::string reason;  // warum nicht aktiv
 	};
 
-	void Report(std::string_view a_name, std::string_view a_nameDe, bool a_active, std::string_view a_reason = {});
+	// a_expected: bewusst nicht verfuegbar (z. B. auf SE) -> nur Info im Log statt Warnung
+	void Report(std::string_view a_name, std::string_view a_nameDe, bool a_active, std::string_view a_reason = {}, bool a_expected = false);
 
 	std::vector<Entry> List();
 

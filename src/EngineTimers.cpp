@@ -50,7 +50,7 @@ namespace EngineTimers
 		}
 		// Nur AE: Aufrufstelle fuer SE 1.5.97 nicht ermittelt (reine Zeitmessung)
 		if (REL::Module::IsSE()) {
-			Features::Report("Timing: main camera culling", "Zeitmessung: Hauptkamera", false, "not mapped for SE 1.5.97 (diagnostics only)");
+			Features::Report("Timing: main camera culling", "Zeitmessung: Hauptkamera", false, "Anniversary Edition only (diagnostics)", true);
 			return;
 		}
 		const auto mainSite = REL::Relocation<std::uintptr_t>{ REL::ID(36560), 0xE9 }.address();

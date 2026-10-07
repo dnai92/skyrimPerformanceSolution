@@ -10,13 +10,15 @@ namespace Features
 		std::vector<Entry> g_entries;
 	}
 
-	void Report(std::string_view a_name, std::string_view a_nameDe, bool a_active, std::string_view a_reason)
+	void Report(std::string_view a_name, std::string_view a_nameDe, bool a_active, std::string_view a_reason, bool a_expected)
 	{
 		{
 			std::scoped_lock lock(g_lock);
 			g_entries.push_back({ std::string(a_name), std::string(a_nameDe), a_active, std::string(a_reason) });
 		}
-		if (!a_active) {
+		if (!a_active && a_expected) {
+			logger::info("Feature not used on this game version (by design): {} - {}", a_name, a_reason);
+		} else if (!a_active) {
 			logger::warn("Feature disabled: {} - {}", a_name, a_reason);
 		}
 	}
