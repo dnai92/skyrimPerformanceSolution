@@ -1,5 +1,5 @@
 @echo off
-rem Baut SPS.dll (RelWithDebInfo). Aufruf: build.cmd [release|vr] -> build\<preset>\SPS.dll
+rem Baut SPS.dll (RelWithDebInfo). Aufruf: build.cmd [release|vr|profile] -> build\<preset>\SPS.dll
 setlocal
 set PRESET=%1
 if "%PRESET%"=="" set PRESET=release
@@ -8,5 +8,7 @@ call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 cd /d "%~dp0"
 cmake --preset %PRESET% || exit /b 1
 cmake --build --preset %PRESET% || exit /b 1
+rem Mess-Build gleich als Vortex-Archiv nach dist (nur lokal, nie veroeffentlichen)
+if /i "%PRESET%"=="profile" powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0package.ps1" -Profile || exit /b 1
 echo.
 echo Fertig: %~dp0build\%PRESET%\SPS.dll
