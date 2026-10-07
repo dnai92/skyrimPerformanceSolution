@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SPS Measurements</title>
+<style>
+  :root {
+    --bg: #16191e; --panel: #1c2027; --line: #2c313a;
+    --text: #d9dde3; --muted: #8a919c;
+    --off: #5c636e; --on: #5b8fc7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    padding: 52px 64px 40px; display: flex; flex-direction: column; gap: 32px;
+  }
+  header { display: flex; align-items: flex-end; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 20px; }
+  h1 { font-size: 34px; font-weight: 600; }
+  .sub { font-size: 19px; color: var(--muted); margin-top: 8px; }
+  .legend { display: flex; gap: 26px; font-size: 19px; color: var(--muted); }
+  .legend i { display: inline-block; width: 16px; height: 16px; vertical-align: -2px; margin-right: 8px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 28px; flex: 1; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 28px 30px 32px; display: flex; flex-direction: column; justify-content: space-between; }
+  .card h2 { font-size: 23px; font-weight: 600; }
+  .card h2 small { display: block; font-size: 16px; font-weight: 400; color: var(--muted); margin-top: 4px; }
+  .metric { display: flex; flex-direction: column; gap: 7px; }
+  .mhead { font-size: 18px; color: var(--muted); }
+  .bar { display: flex; align-items: center; height: 28px; }
+  .track { flex: 1; display: flex; align-items: center; gap: 12px; height: 100%; }
+  .fill { height: 100%; min-width: 4px; }
+  .bar.off .fill { background: var(--off); }
+  .bar.on .fill { background: var(--on); }
+  .val { font-size: 18px; white-space: nowrap; }
+  .bar.off .val { color: var(--muted); }
+  .note { font-size: 17px; color: var(--muted); line-height: 1.5; border-top: 1px solid var(--line); padding-top: 14px; }
+  footer { font-size: 16px; color: var(--muted); display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Skyrim Performance Solution (SPS) – measurements</h1>
+    <div class="sub">Same spot, SPS toggled with the hotkey</div>
+  </div>
+  <div class="legend">
+    <div><i style="background:var(--off)"></i>SPS off</div>
+    <div><i style="background:var(--on)"></i>SPS on</div>
+  </div>
+</header>
+
+<div class="grid">
+  <section class="card">
+    <h2>Dragonsreach<small>Interior, VRAM full, 10-second windows</small></h2>
+    <div class="metric" data-max="45">
+      <div class="mhead">Frames per second (higher is better)</div>
+      <div class="bar off" data-v="30" data-label="27–33 FPS"></div>
+      <div class="bar on" data-v="41.5" data-label="41–42 FPS"></div>
+    </div>
+    <div class="metric" data-max="280">
+      <div class="mhead">Longest frame (lower is better)</div>
+      <div class="bar off" data-v="235" data-label="190–280 ms"></div>
+      <div class="bar on" data-v="35" data-label="~35 ms"></div>
+    </div>
+    <div class="metric" data-max="100">
+      <div class="mhead">VRAM usage</div>
+      <div class="bar off" data-v="96.5" data-label="95–98 %"></div>
+      <div class="bar on" data-v="72.5" data-label="72–73 %"></div>
+    </div>
+    <div class="metric" data-max="1200">
+      <div class="mhead">Swapped to system RAM</div>
+      <div class="bar off" data-v="1200" data-label="up to 1.2 GB"></div>
+      <div class="bar on" data-v="50" data-label="~50 MB"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Texture streaming<small>Skyrim 202X 4K textures, 12 GB VRAM</small></h2>
+    <div class="metric" data-max="11.1">
+      <div class="mhead">Dedicated VRAM, outside a town</div>
+      <div class="bar off" data-v="9.9" data-label="9.9 GB"></div>
+      <div class="bar on" data-v="5.4" data-label="5.4 GB"></div>
+    </div>
+    <div class="metric" data-max="11.1">
+      <div class="mhead">Dedicated VRAM, Whiterun market</div>
+      <div class="bar off" data-v="11.1" data-label="10.5 GB + 0.6 GB swapped"></div>
+      <div class="bar on" data-v="5.4" data-label="5.4 GB"></div>
+    </div>
+    <div class="metric" data-max="7.9">
+      <div class="mhead">~1,300 distant textures, Whiterun market</div>
+      <div class="bar off" data-v="7.5" data-label="7.0–7.9 GB"></div>
+      <div class="bar on" data-v="0.33" data-label="0.33 GB"></div>
+    </div>
+    <div class="note">Textures are reloaded at full size when you get close.<br>No visible difference noticed in A/B screenshots.</div>
+  </section>
+
+  <section class="card">
+    <h2>Engine and draw calls<small>Whiterun market, CPU main thread</small></h2>
+    <div class="metric" data-max="2.45">
+      <div class="mhead">Light assignment per frame</div>
+      <div class="bar off" data-v="2.45" data-label="2.45 ms"></div>
+      <div class="bar on" data-v="0.15" data-label="0.13–0.18 ms"></div>
+    </div>
+    <div class="metric" data-max="11210">
+      <div class="mhead">Draw calls, midday sun</div>
+      <div class="bar off" data-v="11210" data-label="11,210"></div>
+      <div class="bar on" data-v="8578" data-label="8,578"></div>
+    </div>
+    <div class="metric" data-max="1.51">
+      <div class="mhead">Skylighting / precipitation map per frame</div>
+      <div class="bar off" data-v="1.51" data-label="1.51 ms"></div>
+      <div class="bar on" data-v="1.33" data-label="1.28–1.39 ms"></div>
+    </div>
+    <div class="note">All draw-call optimizations together: about 26 % fewer draw calls.<br>Sun shadow accumulation: 0.7–0.8 ms less per frame.</div>
+  </section>
+</div>
+
+<footer>
+  <span>Ryzen 7 5700X · RTX 4070 12 GB · 1920×1200 · Skyrim AE 1.6.1170 · ~380 plugins · Community Shaders (DLSS + FG)</span>
+  <span>Results depend on load order, textures and hardware</span>
+</footer>
+
+<script>
+  document.querySelectorAll('.metric').forEach(m => {
+    const max = parseFloat(m.dataset.max);
+    m.querySelectorAll('.bar').forEach(b => {
+      const pct = Math.max(1, Math.min(100, parseFloat(b.dataset.v) / max * 100));
+      b.innerHTML = '<div class="track"><div class="fill" style="width:calc(' + pct + '% - ' + (pct * 2.2) + 'px)"></div><span class="val">' + b.dataset.label + '</span></div>';
+    });
+  });
+</script>
+</body>
+</html>
