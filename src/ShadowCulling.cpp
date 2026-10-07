@@ -15,11 +15,18 @@ namespace ShadowCulling
 	{
 		constexpr std::size_t kMaxCascades = 4;
 		constexpr std::size_t kMaxPointCameras = 48;  // Schattenkarten-Kameras aller aktiven Punkt-/Spotlichter
+#ifdef SPS_VR
+		// VR: jeder Schattenkarten-Deskriptor hat zwei Kameras (ShadowmapDescriptorVR::camera[2])
+		constexpr std::size_t kCamsPerDesc = 2;
+#else
+		constexpr std::size_t kCamsPerDesc = 1;
+#endif
+		constexpr std::size_t kSunCameraSlots = kMaxCascades * kCamsPerDesc;
 
 		// Vom Main-Thread pro Frame gesetzt, von den Culling-Jobs (Worker-Threads) gelesen.
 		// Zuordnung ueber die Kamera: parallele Culling-Jobs nutzen eigene Culler-Instanzen,
 		// aber dieselbe Kamera wie der Schattenkarten-Deskriptor.
-		std::array<std::atomic<const RE::NiCamera*>, kMaxCascades>     g_sunCameras{};
+		std::array<std::atomic<const RE::NiCamera*>, kSunCameraSlots>  g_sunCameras{};  // Kaskade i: Slots i*kCamsPerDesc ...
 		std::array<std::atomic<const RE::NiCamera*>, kMaxPointCameras> g_pointCameras{};
 		std::atomic<std::uint32_t>                                     g_pointCameraCount{ 0 };
 		std::atomic<const RE::NiCamera*>                               g_mainCamera{ nullptr };
@@ -257,9 +264,9 @@ namespace ShadowCulling
 			if (!camera) {
 				return Kind::kOther;
 			}
-			for (std::uint32_t i = 0; i < kMaxCascades; ++i) {
+			for (std::uint32_t i = 0; i < kSunCameraSlots; ++i) {
 				if (g_sunCameras[i].load(std::memory_order_relaxed) == camera) {
-					a_cascade = i;
+					a_cascade = i / static_cast<std::uint32_t>(kCamsPerDesc);
 					return Kind::kSun;
 				}
 			}
@@ -738,6 +745,12 @@ namespace ShadowCulling
 		REL::Relocation<std::uintptr_t> parabolicVtbl{ RE::VTABLE_BSParabolicCullingProcess[0] };
 		AppendVirtualParabolic::func = parabolicVtbl.write_vfunc(0x18, AppendVirtualParabolic::thunk);
 		logger::info("Hook installed: BSParabolicCullingProcess::AppendVirtual (vfunc 0x18)");
+#ifdef SPS_VR
+		// VR: nur das Culling einzelner Meshes (AppendVirtual, vtable-Eintrag offline gegen VR 1.4.15 verglichen: gleich).
+		// Teilbaeume (Process 0x16 weicht in VR ab), Skylighting/Decals und Tiefenvorpass bleiben aus.
+		Features::Report("Shadow culling (VR)", "Schatten-Culling (VR)", true);
+		return;
+#endif
 
 		// Teilbaeume ueberspringen: Process (vfunc 0x16) der drei Culler-Arten
 		REL::Relocation<std::uintptr_t> geomListVtbl{ RE::VTABLE_BSGeometryListCullingProcess[0] };
@@ -1277,8 +1290,8 @@ namespace ShadowCulling
 			g_pointCullAllowed.store(!cell || !cell->IsInteriorCell() || Config::pointLightInteriors.load(std::memory_order_relaxed), std::memory_order_relaxed);
 		}
 
-		std::array<const RE::NiCamera*, kMaxCascades> cameras{};
-		std::uint32_t                                 pointCount = 0;
+		std::array<const RE::NiCamera*, kSunCameraSlots> cameras{};
+		std::uint32_t                                    pointCount = 0;
 		g_descCullers = {};
 		g_descCount = 0;
 		if (const auto ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]) {
@@ -1290,31 +1303,61 @@ namespace ShadowCulling
 				const float sunSin = len > 0.0f ? std::clamp(std::abs(v.z) / len, kMinSunSin, 1.0f) : 1.0f;
 				g_sunSin.store(sunSin, std::memory_order_relaxed);
 				g_sunCullAllowed.store(sunSin >= std::sin(Config::sunMinElevation.load(std::memory_order_relaxed) * 0.0174533f), std::memory_order_relaxed);
+#ifdef SPS_VR
+				const auto& descriptors = sun->GetVRRuntimeData().shadowmapDescriptors;
+				g_descCount = descriptors.size();
+				for (std::uint32_t i = 0; i < descriptors.size() && i < kMaxCascades; ++i) {
+					for (std::uint32_t e = 0; e < kCamsPerDesc; ++e) {
+						cameras[i * kCamsPerDesc + e] = descriptors[i].camera[e].get();
+					}
+				}
+#else
 				const auto& descriptors = sun->GetRuntimeData().shadowmapDescriptors;
 				g_descCount = descriptors.size();
 				for (std::uint32_t i = 0; i < descriptors.size() && i < kMaxCascades; ++i) {
 					cameras[i] = descriptors[i].camera.get();
 					g_descCullers[i] = descriptors[i].cullingProcess;
 				}
+#endif
 			}
 			for (const auto& light : ssnData.activeShadowLights) {
 				if (!light || light.get() == sun) {
 					continue;
 				}
+#ifdef SPS_VR
+				for (const auto& desc : light->GetVRRuntimeData().shadowmapDescriptors) {
+					for (const auto& cam : desc.camera) {
+						if (pointCount < kMaxPointCameras && cam) {
+							g_pointCameras[pointCount++].store(cam.get(), std::memory_order_relaxed);
+						}
+					}
+				}
+#else
 				for (const auto& desc : light->GetRuntimeData().shadowmapDescriptors) {
 					if (pointCount < kMaxPointCameras && desc.camera) {
 						g_pointCameras[pointCount++].store(desc.camera.get(), std::memory_order_relaxed);
 					}
 				}
+#endif
 			}
 		}
-		for (std::size_t i = 0; i < kMaxCascades; ++i) {
+		for (std::size_t i = 0; i < kSunCameraSlots; ++i) {
 			g_sunCameras[i].store(cameras[i], std::memory_order_relaxed);
 		}
 		g_pointCameraCount.store(pointCount, std::memory_order_relaxed);
 
+#ifdef SPS_VR
+		if (++g_frameCounter % 600 == 0 && Config::analysis.load(std::memory_order_relaxed)) {
+			logger::info("[ShadowCulling-Diag] VR: sun descriptors {} | sun cameras {} {} / {} {} | point light cameras {} | sun elevation sin={:.2f}", g_descCount,
+				static_cast<const void*>(cameras[0]), static_cast<const void*>(cameras[1]), static_cast<const void*>(cameras[2]), static_cast<const void*>(cameras[3]),
+				pointCount, g_sunSin.load());
+			ReportCulled();
+		}
+		if (false) {
+#else
 		// Diagnose alle ~600 Frames ins Log - nur mit dem Analyse-Protokoll
 		if (++g_frameCounter % 600 == 0 && Config::analysis.load(std::memory_order_relaxed)) {
+#endif
 			logger::info("[ShadowCulling-Diag] sun descriptors: {} | point light cameras: {} | sun elevation sin={:.2f} (~{:.0f} deg, shadow factor {:.1f})",
 				g_descCount, pointCount, g_sunSin.load(), std::asin(g_sunSin.load()) * 57.2958f, 1.0f / g_sunSin.load());
 			// Kaskaden-Cache: Ziel-Textur und Slice aller Schattenkarten (Sonne + Punktlichter) - teilen sie sich etwas?

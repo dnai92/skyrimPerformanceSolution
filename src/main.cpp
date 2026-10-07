@@ -106,7 +106,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	}
 
 #ifdef SPS_VR
-	logger::info("SPS VR build (beta): texture streaming only - patch sites verified offline against Skyrim VR 1.4.15");
+	logger::info("SPS VR build (beta): texture streaming + shadow culling of small objects - patch sites verified offline against Skyrim VR 1.4.15");
 #endif
 	if (!Features::TestedVersion() && !REL::Module::IsVR()) {
 		if (Features::VerifiedVersion()) {
@@ -119,8 +119,8 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	Stats::Init();
 	Config::Load();
 	Hooks::Install();
+	ShadowCulling::Install();  // VR: nur AppendVirtual (Sonnen-, Fackel-, Figuren-Schatten kleiner Objekte)
 #ifndef SPS_VR
-	ShadowCulling::Install();
 	InstancingAnalysis::Install();
 	LightGather::Install();
 #endif

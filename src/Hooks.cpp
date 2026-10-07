@@ -95,9 +95,8 @@ namespace Hooks
 				FrameMark;
 				Stats::OnFrame();
 #ifdef SPS_VR
-				// VR-Build: nur Textur-Streaming (Schatten-/Instancing-Eingriffe fuer VR nicht verifiziert)
-				Config::ReloadIfChanged();
-				TextureStream::OnFrame();
+				// VR-Build: Textur-Streaming + Schatten-Culling einzelner Meshes (ruft ReloadIfChanged und TextureStream::OnFrame)
+				ShadowCulling::OnFrame();
 #else
 				ShadowCulling::OnFrame();
 				InstancingAnalysis::OnFrame();
