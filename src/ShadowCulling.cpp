@@ -892,6 +892,19 @@ namespace ShadowCulling
 			if (mode == 4) {
 				s.n = en;
 				s.f = ef;
+			} else if (mode == 6 || mode == 7) {
+				// Diagnose: eine Ebene wie die Engine, die andere festgehalten
+				const float heldN = std::max(1.0f, QuantDown(en - 0.25f * cfg.depthStep, cfg.depthStep));
+				const float heldF = QuantUp(ef + 0.25f * cfg.depthStep, cfg.depthStep);
+				if (changed || s.n == 0.0f || s.f == 0.0f || en < s.n || ef > s.f) {
+					s.n = heldN;
+					s.f = heldF;
+				}
+				if (mode == 6) {
+					s.n = en;  // nah (zur Sonne) wie Engine, fern festgehalten
+				} else {
+					s.f = ef;  // fern wie Engine, nah festgehalten
+				}
 			} else if (changed || en < s.n || ef > s.f || (s.f - s.n) > (ef - en) * 1.2f + 2.0f * cfg.depthStep) {
 				s.n = std::max(1.0f, QuantDown(en - 0.25f * cfg.depthStep, cfg.depthStep));
 				s.f = QuantUp(ef + 0.25f * cfg.depthStep, cfg.depthStep);
