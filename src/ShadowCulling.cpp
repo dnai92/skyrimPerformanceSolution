@@ -1038,6 +1038,12 @@ namespace ShadowCulling
 					frame, i, f.fLeft, f.fRight, f.fTop, f.fBottom, f.fNear, f.fFar, f.bOrtho, w.translate.x, w.translate.y, w.translate.z,
 					w.rotate.entry[0][0], w.rotate.entry[1][0], w.rotate.entry[2][0], d.unitsPerTexel, port[0], port[1], port[2], port[3],
 					m[0][0], m[0][1], m[0][2], m[0][3], m[1][0], m[1][1], m[1][2], m[1][3], m[2][0], m[2][1], m[2][2], m[2][3], m[3][0], m[3][1], m[3][2], m[3][3]);
+				// Volle Drehung (Spalten 0/1/2) und worldToCam: Achsen-Zuordnung von left/right bzw. top/bottom pruefen
+				const auto& r = w.rotate.entry;
+				const auto& wc = cam->GetRuntimeData().worldToCam;
+				logger::info("[Cascade-Dump] {} C{} rot | {:.5f} {:.5f} {:.5f} / {:.5f} {:.5f} {:.5f} / {:.5f} {:.5f} {:.5f} | w2c {:.7f} {:.7f} {:.7f} {:.4f} / {:.7f} {:.7f} {:.7f} {:.4f} / {:.7f} {:.7f} {:.7f} {:.4f} / {:.7f} {:.7f} {:.7f} {:.4f}",
+					frame, i, r[0][0], r[0][1], r[0][2], r[1][0], r[1][1], r[1][2], r[2][0], r[2][1], r[2][2],
+					wc[0][0], wc[0][1], wc[0][2], wc[0][3], wc[1][0], wc[1][1], wc[1][2], wc[1][3], wc[2][0], wc[2][1], wc[2][2], wc[2][3], wc[3][0], wc[3][1], wc[3][2], wc[3][3]);
 			}
 			if (g_cascadeDump.fetch_sub(1, std::memory_order_relaxed) == 1) {
 				logger::info("[Cascade-Dump] end");
