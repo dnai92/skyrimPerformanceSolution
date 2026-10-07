@@ -70,9 +70,12 @@ namespace Config
 	{
 		bool  enabled = false;        // Standard AUS (Test)
 		float maxAngleDeg = 0.15f;    // Sonnenrichtung erst nachfuehren, wenn sie um mehr als diesen Winkel abweicht
-		float extentStep = 1024.0f;   // Ausschnitt-Groesse in diesen Schritten (Einheiten)
-		float margin = 512.0f;        // Spielraum um den Engine-Ausschnitt, bevor neu ausgerichtet wird
-		float depthStep = 2048.0f;    // Tiefenbereich in diesen Schritten
+		// Reserven klein halten: der Tiefen-Versatz der Engine (Shadow Bias) waechst mit Tiefenbereich und Texelgroesse -
+		// mit ~1,4x groesserem Ausschnitt/Bereich fehlten kurze Schatten (Dachueberstand auf Hauswand, Test 1.0.10)
+		float extentStep = 512.0f;    // Ausschnitt-Groesse in diesen Schritten (Einheiten)
+		float extentFactor = 1.05f;   // Ausschnitt = (Engine-Ausschnitt + margin) * Faktor
+		float margin = 256.0f;        // Spielraum um den Engine-Ausschnitt, bevor neu ausgerichtet wird
+		float depthStep = 1024.0f;    // Tiefenbereich in diesen Schritten
 	};
 	inline StableCascade stableCascade;  // [ShadowStableCascade]
 

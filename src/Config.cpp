@@ -192,9 +192,10 @@ namespace Config
 		st.maxAngleDeg = static_cast<float>(ini.GetDoubleValue("ShadowStableCascade", "fMaxAngleDeg", st.maxAngleDeg));
 		st.extentStep = std::max(64.0f, static_cast<float>(ini.GetDoubleValue("ShadowStableCascade", "fExtentStep", st.extentStep)));
 		st.margin = std::max(0.0f, static_cast<float>(ini.GetDoubleValue("ShadowStableCascade", "fMargin", st.margin)));
+		st.extentFactor = std::clamp(static_cast<float>(ini.GetDoubleValue("ShadowStableCascade", "fExtentFactor", st.extentFactor)), 1.0f, 2.0f);
 		st.depthStep = std::max(64.0f, static_cast<float>(ini.GetDoubleValue("ShadowStableCascade", "fDepthStep", st.depthStep)));
-		logger::info("ShadowStableCascade: {} | sun step {:.2f} deg | extent step {:.0f} | margin {:.0f} | depth step {:.0f}",
-			st.enabled ? "ON" : "OFF", st.maxAngleDeg, st.extentStep, st.margin, st.depthStep);
+		logger::info("ShadowStableCascade: {} | sun step {:.2f} deg | extent step {:.0f} x{:.2f} | margin {:.0f} | depth step {:.0f}",
+			st.enabled ? "ON" : "OFF", st.maxAngleDeg, st.extentStep, st.extentFactor, st.margin, st.depthStep);
 
 		auto& si = shadowInstancing;
 		si.enabled = ini.GetBoolValue("ShadowInstancing", "bEnabled", si.enabled);

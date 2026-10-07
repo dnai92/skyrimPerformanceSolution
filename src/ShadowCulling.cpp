@@ -861,12 +861,12 @@ namespace ShadowCulling
 
 			// Groesse: erst bei zu klein oder deutlich zu gross neu (Stufen von extentStep)
 			const float needX = ehx + cfg.margin, needY = ehy + cfg.margin;
-			if (s.hx < needX || s.hx > needX * 1.5f) {
-				s.hx = QuantUp(needX * 1.15f, cfg.extentStep);
+			if (s.hx < needX || s.hx > needX * 1.25f) {
+				s.hx = QuantUp(needX * cfg.extentFactor, cfg.extentStep);
 				changed = true;
 			}
-			if (s.hy < needY || s.hy > needY * 1.5f) {
-				s.hy = QuantUp(needY * 1.15f, cfg.extentStep);
+			if (s.hy < needY || s.hy > needY * 1.25f) {
+				s.hy = QuantUp(needY * cfg.extentFactor, cfg.extentStep);
 				changed = true;
 			}
 			// Mitte: nur verschieben, wenn der Engine-Ausschnitt nicht mehr hineinpasst - dann auf Texel gerundet
@@ -878,9 +878,9 @@ namespace ShadowCulling
 				changed = true;
 			}
 			// Tiefe: Engine-Bereich muss hineinpassen, nicht unnoetig gross
-			if (changed || en < s.n || ef > s.f || (s.f - s.n) > (ef - en) * 1.5f + 2.0f * cfg.depthStep) {
-				s.n = std::max(1.0f, QuantDown(en - 0.5f * cfg.depthStep, cfg.depthStep));
-				s.f = QuantUp(ef + 0.5f * cfg.depthStep, cfg.depthStep);
+			if (changed || en < s.n || ef > s.f || (s.f - s.n) > (ef - en) * 1.2f + 2.0f * cfg.depthStep) {
+				s.n = std::max(1.0f, QuantDown(en - 0.25f * cfg.depthStep, cfg.depthStep));
+				s.f = QuantUp(ef + 0.25f * cfg.depthStep, cfg.depthStep);
 				changed = true;
 			}
 			if (changed) {
