@@ -1045,6 +1045,14 @@ namespace ShadowCulling
 		}
 	}
 
+	// Mit stabiler Kaskade ist die Projektion im Cache-Frame dieselbe - die Engine-Matrix des aktuellen Frames passt dann
+	// zur alten Karte. Die alte Matrix einzusetzen waere falsch: sie enthaelt den Kamera-Versatz des Vorframes
+	// (kamera-relative Darstellung) -> Schatten zuckten beim Bewegen in jedem 2. Frame (Test 1.0.10).
+	bool FreezeMatrix() noexcept
+	{
+		return Config::cascadeCache.freezeMatrix && !Config::stableCascade.enabled;
+	}
+
 	void AfterSunRender() noexcept
 	{
 		if (g_cacheLight && g_cascadeDump.load(std::memory_order_relaxed) > 0) {
@@ -1071,7 +1079,7 @@ namespace ShadowCulling
 					++g_renderChangedMatrix;
 					g_renderChangedMax = std::max(g_renderChangedMax, diff);
 				}
-				if (skipNow && cfg.freezeMatrix && c.finalValid) {
+				if (skipNow && FreezeMatrix() && c.finalValid) {
 					descs[i].lightTransform = c.lightTransformFinal;  // gilt fuer alle spaeteren Leser (CS Deferred)
 				} else if (!skipNow) {
 					c.lightTransformFinal = descs[i].lightTransform;
@@ -1141,7 +1149,7 @@ namespace ShadowCulling
 			auto& d = descs[i];
 			auto& c = g_cached[i];
 			c.clearTouched = false;
-			if (skip && cfg.freezeMatrix && c.finalValid) {
+			if (skip && FreezeMatrix() && c.finalValid) {
 				c.lightTransformAfterAccum = c.lightTransformFinal;  // Vergleich nach Render gegen den eingefrorenen Wert
 			} else {
 				c.lightTransformAfterAccum = d.lightTransform;
@@ -1154,7 +1162,7 @@ namespace ShadowCulling
 					continue;
 				}
 				Compare(g_diffCache, d, c, a_light);
-				if (cfg.freezeMatrix) {
+				if (FreezeMatrix()) {
 					d.lightTransform = c.finalValid ? c.lightTransformFinal : c.lightTransform;  // alte Matrix passend zum alten Inhalt
 				}
 				if (cfg.freezeCamera) {

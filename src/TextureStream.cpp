@@ -994,8 +994,10 @@ namespace TextureStream
 					changed = true;
 				}
 				const auto result = func(a_device, a_stream, a_out, a_header, a_maxSize, a_6);
-				if (result >= 0 && a_out) {
-					MarkFileTexture(*a_out);
+				// a_out ist das Textur-Objekt der Engine (BSGraphics::Texture, Aufrufer AE 77301 setzt danach +0x20) -
+				// gemerkt wird das darin angelegte D3D-Objekt
+				if (result >= 0 && a_out && *a_out) {
+					MarkFileTexture(static_cast<RE::BSGraphics::Texture*>(*a_out)->texture);
 				}
 				// Sicherheitsnetz: schlaegt das Laden mit unserer Groesse fehl, diese Textur nie wieder verkleinert laden
 				// (0.20.5: zwei Ladenschilder mit krummen Massen -> nicht durch 4 teilbar -> ohne Textur)
