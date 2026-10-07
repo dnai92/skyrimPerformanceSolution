@@ -1293,6 +1293,12 @@ namespace TextureStream
 				return;
 			}
 			float need = a_forceNeed;
+			// Figuren (geskinnt: Koerper, Haare, Kleidung) nie verkleinern: ihre Huelle ist oft veraltet (Animation bewegt
+			// die Figur, die Huelle bleibt am Ausgangspunkt - besonders bei sitzenden NPCs). Snilf in Rifton: Haare galten
+			// als 9 px gross und wurden verkleinert -> flaechig blaue Haare (1.0.4). Volle Groesse auch fuer Stufe 3 merken.
+			if (need <= 0 && a_geom->GetGeometryRuntimeData().skinInstance) {
+				need = 1.0e6f;
+			}
 			if (need <= 0) {
 				const auto& b = a_geom->worldBound;
 				const float dx = b.center.x - g_camX, dy = b.center.y - g_camY, dz = b.center.z - g_camZ;
