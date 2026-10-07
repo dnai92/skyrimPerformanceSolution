@@ -792,8 +792,10 @@ namespace ShadowCulling
 		// Die Engine richtet jede Kaskade in jedem Frame neu aus (UpdateCamera, AE ID 108496): Lage folgt der Sonne,
 		// Ausschnitt (Ortho-Frustum l/r/t/b) dem Blick, Tiefenbereich den Objekten. Fuer die ferne Kaskade halten wir
 		// stattdessen einen Bezugsrahmen (Drehung + Position) und einen Ausschnitt fest, der den Engine-Ausschnitt
-		// umschliesst, und richten nur neu aus, wenn er nicht mehr passt. Kamera-Achsen (Gamebryo): Spalte 0 = Blick-
-		// richtung, 1 = oben (top/bottom), 2 = rechts (left/right). Engine-Weg: SetViewFrustum (ID 70626) + Update (70251).
+		// umschliesst, und richten nur neu aus, wenn er nicht mehr passt. Kamera-Achsen: Spalte 0 = Blickrichtung,
+		// left/right laufen entlang -Spalte 2, top/bottom entlang -Spalte 1 (gespiegelt, per worldToCam nachgemessen:
+		// Kameraposition lag bei clip x = +0,81 statt -0,81). Mit +Spalten wanderte der Ausschnitt beim Gehen doppelt so
+		// weit in die falsche Richtung -> fehlende Schatten (Test 1.0.10). Engine-Weg: SetViewFrustum (70626) + Update (70251).
 		struct StableState
 		{
 			bool          valid = false;
@@ -832,7 +834,7 @@ namespace ShadowCulling
 			}
 			const RE::NiMatrix3 rotE = cam->world.rotate;
 			const RE::NiPoint3  posE = cam->world.translate;
-			const RE::NiPoint3  dirE = Col(rotE, 0), upE = Col(rotE, 1), rightE = Col(rotE, 2);
+			const RE::NiPoint3  dirE = Col(rotE, 0), upE = -Col(rotE, 1), rightE = -Col(rotE, 2);
 			// Engine-Ausschnitt: Mitte als Weltpunkt, halbe Breite/Hoehe, Tiefenbereich
 			const float         exc = 0.5f * (fr.fLeft + fr.fRight), eyc = 0.5f * (fr.fTop + fr.fBottom);
 			const float         ehx = 0.5f * (fr.fRight - fr.fLeft), ehy = 0.5f * (fr.fTop - fr.fBottom);
@@ -853,7 +855,7 @@ namespace ShadowCulling
 				++g_stableReanchor;
 				changed = true;
 			}
-			const RE::NiPoint3 dirS = Col(s.rot, 0), upS = Col(s.rot, 1), rightS = Col(s.rot, 2);
+			const RE::NiPoint3 dirS = Col(s.rot, 0), upS = -Col(s.rot, 1), rightS = -Col(s.rot, 2);
 			const RE::NiPoint3 rel = centerW - s.pos;
 			const float        x = Dot3(rel, rightS), y = Dot3(rel, upS);
 			const float        depthOff = Dot3(posE - s.pos, dirS);
