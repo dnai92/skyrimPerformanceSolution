@@ -25,7 +25,7 @@ so you can compare with and without the plugin at any time.
 | **Character shadow culling** | Characters and creatures far away (default 50 m, min. 30 m) do not cast shadows. | ON |
 | **Skylighting culling** | Small objects are left out of the Community Shaders skylighting / precipitation occlusion map. | ON |
 | **Decal culling** | Footprint-sized decals (radius < 32, e.g. Dynamic Footprints) farther than ~21 m are not drawn. Larger decals such as plaster patches on walls stay. | ON |
-| **Shadow instancing** | Identical simple meshes in the sun shadow pass are drawn with one instanced draw call. | ON |
+| **Shadow instancing** | Identical simple meshes in the sun shadow pass are drawn with one instanced draw call. Small gain, AE only. | OFF |
 | **Light assignment throttle** | Moving lights (torches, flickering lights) only re-search the geometry they light when they actually moved — the engine does this for every dynamic light every frame. | ON |
 | **Subtree pruning** | Whole scene-graph branches are skipped in the sun shadow and skylighting passes when the branch as a whole already meets the culling rule. Same result, less traversal. | ON |
 | **In-game menu** | All switches and sliders via SKSE Menu Framework, English and German, saved automatically. | — |

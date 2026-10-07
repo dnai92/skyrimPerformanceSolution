@@ -66,7 +66,7 @@ namespace Config
 	// Instancing der Sonnenschatten (Schritt 2): gleiche einfache Meshes eines Batches in einem Draw Call
 	struct ShadowInstancing
 	{
-		bool          enabled = true;         // im Markt-Test nur ~0,1 ms, in anderen Szenen evtl. mehr
+		bool          enabled = false;        // im Markt-Test nur ~0,1 ms; ab 1.0.6 Standard aus (zeichnet selbst - Flackern auf GOG gemeldet)
 		bool          verify = false;         // Pruefmodus: Engine zeichnet alles, Instanzen werden ZUSAETZLICH gezeichnet
 		float         debugOffsetZ = 0.0f;    // Pruefmodus: Instanzen um diesen Wert nach oben versetzen (sichtbarer Beweis)
 		std::uint32_t technique = 0xC046;     // erste Technik der Liste (Kompatibilitaet)

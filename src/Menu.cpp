@@ -251,7 +251,7 @@ namespace Menu
 			Toggle(T("Decal culling", "Ferne Bodendetails weglassen"), Config::decalCulling.enabled,
 				T("Small decals (footprints, blood, dirt) far away are not drawn.", "Kleine Bodendetails (Fußspuren, Blut, Schmutz) in der Ferne werden nicht gezeichnet."));
 			Toggle(T("Shadow instancing", "Gleiche Schatten bündeln"), Config::shadowInstancing.enabled,
-				T("Draws identical simple meshes in sun shadows with one draw call.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang."));
+				T("Draws identical simple meshes in sun shadows with one draw call. Small gain, off by default - switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn, standardmäßig aus - bei flackernden Schatten oder Objekten wieder ausschalten."));
 			Toggle(T("Light assignment throttle", "Licht-Zuordnung drosseln"), Config::lightGather.enabled,
 				T("Moving lights (torches, flickering lights) only search for the objects they light when they really moved.",
 					"Bewegte Lichter (Fackeln, flackernde Lichter) suchen die beleuchteten Objekte nur neu, wenn sie sich wirklich bewegt haben."));
@@ -312,7 +312,7 @@ namespace Menu
 
 			MenuApi::SeparatorText(T("Shadow instancing", "Gleiche Schatten bündeln"));
 			Toggle(T("Enabled##inst", "Aktiv##inst"), Config::shadowInstancing.enabled,
-				T("Draws identical simple meshes in sun shadows with one draw call.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang."));
+				T("Draws identical simple meshes in sun shadows with one draw call. Small gain, off by default - switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn, standardmäßig aus - bei flackernden Schatten oder Objekten wieder ausschalten."));
 		}
 
 		void __stdcall RenderScene()
