@@ -872,11 +872,11 @@ namespace ShadowCulling
 
 			// Groesse: erst bei zu klein oder deutlich zu gross neu (Stufen von extentStep)
 			const float needX = ehx + cfg.margin, needY = ehy + cfg.margin;
-			if (s.hx < needX || s.hx > needX * 1.25f) {
+			if (s.hx < needX || s.hx > needX + 2.0f * cfg.margin + cfg.extentStep) {
 				s.hx = QuantUp(needX * cfg.extentFactor, cfg.extentStep);
 				changed = true;
 			}
-			if (s.hy < needY || s.hy > needY * 1.25f) {
+			if (s.hy < needY || s.hy > needY + 2.0f * cfg.margin + cfg.extentStep) {
 				s.hy = QuantUp(needY * cfg.extentFactor, cfg.extentStep);
 				changed = true;
 			}
@@ -905,9 +905,10 @@ namespace ShadowCulling
 				} else {
 					s.f = ef;  // fern wie Engine, nah festgehalten
 				}
-			} else if (changed || en < s.n || ef > s.f || (s.f - s.n) > (ef - en) * 1.2f + 2.0f * cfg.depthStep) {
-				s.n = std::max(1.0f, QuantDown(en - 0.25f * cfg.depthStep, cfg.depthStep));
-				s.f = QuantUp(ef + 0.25f * cfg.depthStep, cfg.depthStep);
+			} else if (changed || en < s.n || ef > s.f || (s.f - s.n) > (ef - en) + 4.0f * cfg.depthStep) {
+				// eng an der Engine: nur depthStep Spielraum je Seite (Zittern im Stand), sonst sofort nachfuehren
+				s.n = std::max(1.0f, en - cfg.depthStep);
+				s.f = ef + cfg.depthStep;
 				changed = true;
 			}
 			if (changed) {

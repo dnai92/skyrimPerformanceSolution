@@ -72,10 +72,13 @@ namespace Config
 		float maxAngleDeg = 0.15f;    // Sonnenrichtung erst nachfuehren, wenn sie um mehr als diesen Winkel abweicht
 		// Reserven klein halten: der Tiefen-Versatz der Engine (Shadow Bias) waechst mit Tiefenbereich und Texelgroesse -
 		// mit ~1,4x groesserem Ausschnitt/Bereich fehlten kurze Schatten (Dachueberstand auf Hauswand, Test 1.0.10)
-		float extentStep = 512.0f;    // Ausschnitt-Groesse in diesen Schritten (Einheiten)
-		float extentFactor = 1.05f;   // Ausschnitt = (Engine-Ausschnitt + margin) * Faktor
-		float margin = 256.0f;        // Spielraum um den Engine-Ausschnitt, bevor neu ausgerichtet wird
-		float depthStep = 1024.0f;    // Tiefenbereich in diesen Schritten
+		// Auch 1,1x sind zu viel: Community Shaders bemisst weiche Schatten am Tiefenabstand relativ zum Bereich der
+		// Kaskade - jede Vergroesserung macht kurze Schatten blasser (Diagnose-Modi 4-7). Deshalb nur winzige Toleranzen:
+		// festgehalten wird nur gegen das Zittern der Engine-Werte im Stand.
+		float extentStep = 64.0f;     // Ausschnitt-Groesse in diesen Schritten (Einheiten)
+		float extentFactor = 1.0f;    // Ausschnitt = (Engine-Ausschnitt + margin) * Faktor
+		float margin = 48.0f;         // Spielraum um den Engine-Ausschnitt, bevor neu ausgerichtet wird
+		float depthStep = 64.0f;      // Tiefen-Spielraum je Seite (Einheiten)
 		// Diagnose (Menue): 0 normal | 1 nur rechnen, nichts setzen | 2 Engine-Werte ueber unseren Weg setzen (Update) |
 		// 3 normal ohne Kamera-Update | 4 normal mit Engine-Tiefenbereich | 5 ohne Festhalten von Drehung/Position
 		float debugMode = 0.0f;
