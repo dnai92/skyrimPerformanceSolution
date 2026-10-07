@@ -64,6 +64,18 @@ namespace Config
 	};
 	inline CascadeCache cascadeCache;  // [ShadowCascadeCache]
 
+	// Stabile ferne Sonnenkaskade (Stufe 1 fuer den Kaskaden-Cache): Lage, Ausschnitt und Tiefenbereich der fernen
+	// Kaskade aendern sich nur noch in Schritten statt in jedem Frame (Engine passt sie sonst laufend an Blick und Sonne an)
+	struct StableCascade
+	{
+		bool  enabled = false;        // Standard AUS (Test)
+		float maxAngleDeg = 0.15f;    // Sonnenrichtung erst nachfuehren, wenn sie um mehr als diesen Winkel abweicht
+		float extentStep = 1024.0f;   // Ausschnitt-Groesse in diesen Schritten (Einheiten)
+		float margin = 512.0f;        // Spielraum um den Engine-Ausschnitt, bevor neu ausgerichtet wird
+		float depthStep = 2048.0f;    // Tiefenbereich in diesen Schritten
+	};
+	inline StableCascade stableCascade;  // [ShadowStableCascade]
+
 	// Instancing der Sonnenschatten (Schritt 2): gleiche einfache Meshes eines Batches in einem Draw Call
 	struct ShadowInstancing
 	{

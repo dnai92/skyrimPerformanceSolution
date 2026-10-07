@@ -786,11 +786,137 @@ namespace ShadowCulling
 		g_inSunAccumulate = a_in;
 	}
 
+	namespace
+	{
+		// ---------------- Stabile ferne Kaskade ----------------
+		// Die Engine richtet jede Kaskade in jedem Frame neu aus (UpdateCamera, AE ID 108496): Lage folgt der Sonne,
+		// Ausschnitt (Ortho-Frustum l/r/t/b) dem Blick, Tiefenbereich den Objekten. Fuer die ferne Kaskade halten wir
+		// stattdessen einen Bezugsrahmen (Drehung + Position) und einen Ausschnitt fest, der den Engine-Ausschnitt
+		// umschliesst, und richten nur neu aus, wenn er nicht mehr passt. Kamera-Achsen (Gamebryo): Spalte 0 = Blick-
+		// richtung, 1 = oben (top/bottom), 2 = rechts (left/right). Engine-Weg: SetViewFrustum (ID 70626) + Update (70251).
+		struct StableState
+		{
+			bool          valid = false;
+			RE::NiMatrix3 rot{};
+			RE::NiPoint3  pos{};
+			float         cx = 0.0f, cy = 0.0f, hx = 0.0f, hy = 0.0f, n = 0.0f, f = 0.0f;
+		};
+		StableState   g_stable{};
+		std::uint32_t g_stableFrames = 0, g_stableChanged = 0, g_stableReanchor = 0;
+
+		RE::NiPoint3 Col(const RE::NiMatrix3& a_m, int a_c) noexcept { return { a_m.entry[0][a_c], a_m.entry[1][a_c], a_m.entry[2][a_c] }; }
+		float        Dot3(const RE::NiPoint3& a_a, const RE::NiPoint3& a_b) noexcept { return a_a.x * a_b.x + a_a.y * a_b.y + a_a.z * a_b.z; }
+		float        QuantUp(float a_v, float a_step) noexcept { return std::ceil(a_v / a_step) * a_step; }
+		float        QuantDown(float a_v, float a_step) noexcept { return std::floor(a_v / a_step) * a_step; }
+
+		void StabilizeFarCascade(RE::BSShadowDirectionalLight* a_light) noexcept
+		{
+			const auto& cfg = Config::stableCascade;
+			if (!cfg.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+				g_stable.valid = false;
+				return;
+			}
+			auto&      descs = a_light->GetRuntimeData().shadowmapDescriptors;
+			const auto idx = Config::cascadeCache.cascade;
+			if (idx >= descs.size()) {
+				return;
+			}
+			auto&      desc = descs[idx];
+			const auto cam = desc.camera.get();
+			if (!cam) {
+				return;
+			}
+			auto& fr = cam->GetRuntimeData2().viewFrustum;
+			if (!fr.bOrtho || fr.fRight <= fr.fLeft || fr.fTop <= fr.fBottom) {
+				return;
+			}
+			const RE::NiMatrix3 rotE = cam->world.rotate;
+			const RE::NiPoint3  posE = cam->world.translate;
+			const RE::NiPoint3  dirE = Col(rotE, 0), upE = Col(rotE, 1), rightE = Col(rotE, 2);
+			// Engine-Ausschnitt: Mitte als Weltpunkt, halbe Breite/Hoehe, Tiefenbereich
+			const float         exc = 0.5f * (fr.fLeft + fr.fRight), eyc = 0.5f * (fr.fTop + fr.fBottom);
+			const float         ehx = 0.5f * (fr.fRight - fr.fLeft), ehy = 0.5f * (fr.fTop - fr.fBottom);
+			const RE::NiPoint3  centerW = posE + rightE * exc + upE * eyc;
+
+			auto& s = g_stable;
+			++g_stableFrames;
+			bool changed = false;
+			bool reanchor = !s.valid;
+			if (s.valid) {
+				reanchor = Dot3(dirE, Col(s.rot, 0)) < std::cos(cfg.maxAngleDeg * 0.017453292f);
+			}
+			if (reanchor) {
+				s = {};
+				s.valid = true;
+				s.rot = rotE;
+				s.pos = posE;
+				++g_stableReanchor;
+				changed = true;
+			}
+			const RE::NiPoint3 dirS = Col(s.rot, 0), upS = Col(s.rot, 1), rightS = Col(s.rot, 2);
+			const RE::NiPoint3 rel = centerW - s.pos;
+			const float        x = Dot3(rel, rightS), y = Dot3(rel, upS);
+			const float        depthOff = Dot3(posE - s.pos, dirS);
+			const float        en = fr.fNear + depthOff, ef = fr.fFar + depthOff;
+
+			// Groesse: erst bei zu klein oder deutlich zu gross neu (Stufen von extentStep)
+			const float needX = ehx + cfg.margin, needY = ehy + cfg.margin;
+			if (s.hx < needX || s.hx > needX * 1.5f) {
+				s.hx = QuantUp(needX * 1.15f, cfg.extentStep);
+				changed = true;
+			}
+			if (s.hy < needY || s.hy > needY * 1.5f) {
+				s.hy = QuantUp(needY * 1.15f, cfg.extentStep);
+				changed = true;
+			}
+			// Mitte: nur verschieben, wenn der Engine-Ausschnitt nicht mehr hineinpasst - dann auf Texel gerundet
+			if (changed || std::abs(x - s.cx) + ehx > s.hx || std::abs(y - s.cy) + ehy > s.hy) {
+				const float texX = 2.0f * s.hx / static_cast<float>(std::max(1, std::abs(desc.port.GetWidth())));
+				const float texY = 2.0f * s.hy / static_cast<float>(std::max(1, std::abs(desc.port.GetHeight())));
+				s.cx = std::round(x / texX) * texX;
+				s.cy = std::round(y / texY) * texY;
+				changed = true;
+			}
+			// Tiefe: Engine-Bereich muss hineinpassen, nicht unnoetig gross
+			if (changed || en < s.n || ef > s.f || (s.f - s.n) > (ef - en) * 1.5f + 2.0f * cfg.depthStep) {
+				s.n = std::max(1.0f, QuantDown(en - 0.5f * cfg.depthStep, cfg.depthStep));
+				s.f = QuantUp(ef + 0.5f * cfg.depthStep, cfg.depthStep);
+				changed = true;
+			}
+			if (changed) {
+				++g_stableChanged;
+			}
+
+			// Anwenden: Lage + Frustum setzen, Kamera neu berechnen lassen (worldToCam) - wie die Engine selbst
+			cam->local.rotate = s.rot;
+			cam->local.translate = s.pos;
+			cam->world.rotate = s.rot;
+			cam->world.translate = s.pos;
+			fr.fLeft = s.cx - s.hx;
+			fr.fRight = s.cx + s.hx;
+			fr.fTop = s.cy + s.hy;
+			fr.fBottom = s.cy - s.hy;
+			fr.fNear = s.n;
+			fr.fFar = s.f;
+			RE::NiUpdateData ud{};
+			cam->Update(ud);
+
+			static auto lastLog = std::chrono::steady_clock::now();
+			if (std::chrono::steady_clock::now() - lastLog >= std::chrono::seconds(10)) {
+				lastLog = std::chrono::steady_clock::now();
+				logger::info("[StableCascade] {} frames | changed {} | sun re-anchored {} | window {:.0f} x {:.0f} (engine {:.0f} x {:.0f}) | depth {:.0f}-{:.0f} (engine {:.0f}-{:.0f})",
+					g_stableFrames, g_stableChanged, g_stableReanchor, 2.0f * s.hx, 2.0f * s.hy, 2.0f * ehx, 2.0f * ehy, s.n, s.f, en, ef);
+				g_stableFrames = g_stableChanged = g_stableReanchor = 0;
+			}
+		}
+	}
+
 	void AfterSunUpdateCamera(RE::BSShadowDirectionalLight* a_light) noexcept
 	{
 		if (!a_light) {
 			return;
 		}
+		StabilizeFarCascade(a_light);
 		const auto& cfg = Config::cascadeCache;
 		auto&       descs = a_light->GetRuntimeData().shadowmapDescriptors;
 		bool        same = g_projReferenceValid;

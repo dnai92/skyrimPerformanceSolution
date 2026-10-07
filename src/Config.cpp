@@ -67,6 +67,7 @@ namespace Config
 			f("DecalCulling", "fMaxDistance", decalCulling.maxDistance);
 			f("DecalCulling", "fMaxRadius", decalCulling.maxRadius);
 			b("ShadowCascadeCache", "bEnabled", cascadeCache.enabled);
+			b("ShadowStableCascade", "bEnabled", stableCascade.enabled);
 			b("ShadowInstancing", "bEnabled", shadowInstancing.enabled);
 			b("ActorShadowCulling", "bEnabled", actorShadowCulling.enabled);
 			f("ActorShadowCulling", "fMinDistance", actorShadowCulling.minDistance);
@@ -185,6 +186,15 @@ namespace Config
 		cc.restoreVolumetric = ini.GetBoolValue("ShadowCascadeCache", "bRestoreVolumetric", cc.restoreVolumetric);
 		logger::info("ShadowCascadeCache: {} | from cascade {} | redraw every {}. frame | matrix {} | camera {} | splits {} | clear off {} | copy shadow {} | copy volumetric {} | skip draws {} | only with same projection {} (eps {})",
 			cc.enabled ? "ON" : "OFF", cc.cascade, cc.interval, cc.freezeMatrix, cc.freezeCamera, cc.freezeSplits, cc.noClear, cc.restoreShadowmap, cc.restoreVolumetric, cc.skipDraws, cc.requireSameProjection, cc.projectionEpsilon);
+
+		auto& st = stableCascade;
+		st.enabled = ini.GetBoolValue("ShadowStableCascade", "bEnabled", st.enabled);
+		st.maxAngleDeg = static_cast<float>(ini.GetDoubleValue("ShadowStableCascade", "fMaxAngleDeg", st.maxAngleDeg));
+		st.extentStep = std::max(64.0f, static_cast<float>(ini.GetDoubleValue("ShadowStableCascade", "fExtentStep", st.extentStep)));
+		st.margin = std::max(0.0f, static_cast<float>(ini.GetDoubleValue("ShadowStableCascade", "fMargin", st.margin)));
+		st.depthStep = std::max(64.0f, static_cast<float>(ini.GetDoubleValue("ShadowStableCascade", "fDepthStep", st.depthStep)));
+		logger::info("ShadowStableCascade: {} | sun step {:.2f} deg | extent step {:.0f} | margin {:.0f} | depth step {:.0f}",
+			st.enabled ? "ON" : "OFF", st.maxAngleDeg, st.extentStep, st.margin, st.depthStep);
 
 		auto& si = shadowInstancing;
 		si.enabled = ini.GetBoolValue("ShadowInstancing", "bEnabled", si.enabled);
