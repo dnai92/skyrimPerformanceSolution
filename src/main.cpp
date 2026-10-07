@@ -54,9 +54,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	SKSE::Init(a_skse, info);
 
 	#ifdef TRACY_ENABLE
-	logger::info("SPS {} loaded (developer build with Tracy profiler)", SKSE::GetPluginVersion().string());
+	logger::info("SPS {} loaded (developer build with Tracy profiler)", SPS_VERSION);
 #else
-	logger::info("SPS {} loaded", SKSE::GetPluginVersion().string());
+	logger::info("SPS {} loaded", SPS_VERSION);
 #endif
 	logger::info("Skyrim base address 0x{:X} (for tools/resolve_rva.py)", REL::Module::get().base());
 
@@ -64,17 +64,6 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	// die fuer alle Eingriffe per Code-Muster ermittelt wurden (RELOCATION_ID). Eingriffe mitten in Funktionen pruefen
 	// den Code an ihrer Stelle selbst und schalten bei Abweichung nur sich ab (Features.h). Aeltere SE / VR: inaktiv.
 	// Alte Version unter dem frueheren Namen noch installiert? Beide zusammen wuerden dieselben Stellen doppelt patchen.
-	if (GetModuleHandleW(L"SkyrimPerf.dll")) {
-		logger::error("SkyrimPerf.dll (old name) is also loaded - SPS stays inactive. Please remove the old mod.");
-		SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
-			if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
-				RE::DebugMessageBox(Menu::IsGerman() ? "Skyrim Performance Solution: Die alte Version (SkyrimPerf) ist noch installiert. Bitte entfernen - SPS bleibt bis dahin inaktiv." :
-				                                       "Skyrim Performance Solution: the old version (SkyrimPerf) is still installed. Please remove it - SPS stays inactive until then.");
-			}
-		});
-		return true;
-	}
-
 	const auto version = REL::Module::get().version();
 #ifdef SPS_VR
 	const bool supported = version == REL::Version{ 1, 4, 15, 0 };  // eigener VR-Build: nur Skyrim VR 1.4.15
@@ -87,11 +76,30 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 #else
 		logger::warn("Game version {} is not supported (1.5.97 and Anniversary Edition 1.6.x / 1.7.x only) - SPS stays inactive", version.string());
 #endif
+		// Kein Spiel-Aufruf (DebugMessageBox, Spracheinstellung): bei falschem Build/falscher Version fehlt evtl. die
+		// passende Adress-Bibliothek - der Zugriff darauf liess das Spiel beim Laden haengen (VR-Build in SE, 1.0.10).
+		// Stattdessen ein Windows-Hinweis jetzt beim Start, bevor das Spielfenster da ist.
+#ifdef SPS_VR
+		const auto text = std::format(L"Skyrim Performance Solution (SPS): this is the VR build (Skyrim VR 1.4.15 only), but the game version is {}. "
+									  L"SPS stays inactive - please install the normal SPS file instead.\n\nDies ist die VR-Version von SPS, "
+									  L"das Spiel hat aber Version {}. SPS bleibt inaktiv - bitte die normale SPS-Datei installieren.",
+			std::wstring(version.wstring()), std::wstring(version.wstring()));
+#else
+		const auto text = std::format(L"Skyrim Performance Solution (SPS): game version {} is not supported (1.5.97 and Anniversary Edition 1.6.x / 1.7.x only; "
+									  L"Skyrim VR needs the separate VR file). SPS stays inactive.\n\nSpielversion {} wird nicht unterstützt (nur 1.5.97 "
+									  L"und Anniversary Edition 1.6.x / 1.7.x; Skyrim VR braucht die eigene VR-Datei). SPS bleibt inaktiv.",
+			std::wstring(version.wstring()), std::wstring(version.wstring()));
+#endif
+		MessageBoxW(nullptr, text.c_str(), L"Skyrim Performance Solution", MB_OK | MB_ICONWARNING | MB_TOPMOST);
+		return true;
+	}
+
+	if (GetModuleHandleW(L"SkyrimPerf.dll")) {
+		logger::error("SkyrimPerf.dll (old name) is also loaded - SPS stays inactive. Please remove the old mod.");
 		SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
 			if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
-				const auto v = REL::Module::get().version().string();
-				RE::DebugMessageBox((Menu::IsGerman() ? std::format("SPS: Spielversion {} wird nicht unterstützt (nur 1.5.97 und Anniversary Edition 1.6.x / 1.7.x). Das Plugin bleibt inaktiv.", v) :
-				                                        std::format("SPS: game version {} is not supported (1.5.97 and Anniversary Edition 1.6.x / 1.7.x only). The plugin stays inactive.", v)).c_str());
+				RE::DebugMessageBox(Menu::IsGerman() ? "Skyrim Performance Solution: Die alte Version (SkyrimPerf) ist noch installiert. Bitte entfernen - SPS bleibt bis dahin inaktiv." :
+				                                       "Skyrim Performance Solution: the old version (SkyrimPerf) is still installed. Please remove it - SPS stays inactive until then.");
 			}
 		});
 		return true;

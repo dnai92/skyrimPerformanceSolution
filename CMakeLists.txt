@@ -60,6 +60,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE src extern/tracy/public)
 # (Firewall-Abfrage bei Nutzern, 1.0.3). Ohne TRACY_ENABLE sind alle Tracy-Makros leer.
 option(SPS_TRACY "Tracy-Profiler einbauen (Entwicklung)" OFF)
 target_compile_definitions(${PROJECT_NAME} PRIVATE TRACY_ON_DEMAND TRACY_NO_CRASH_HANDLER NOMINMAX)
+target_compile_definitions(${PROJECT_NAME} PRIVATE SPS_VERSION="${PROJECT_VERSION}")
 if(SPS_VR)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE SPS_VR=1)
 endif()
