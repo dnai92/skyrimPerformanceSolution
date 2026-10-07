@@ -210,6 +210,11 @@ namespace TextureStream
 		};
 
 		std::unordered_map<RE::BSGraphics::Texture*, TexState> g_tex;
+		// Schuetzt g_tex und den ganzen Main-Thread-Zustand: ApplyResults/PreviewTick laufen als SKSE-Task auf einem
+		// anderen Thread als OnFrame (PlayerCharacter::Update), Reset kommt aus Event-Sinks. Gleichzeitige Zugriffe
+		// beschaedigten die Tabelle -> Spiel hing nach dem Ladebildschirm (Rifton, 1.0.4). Rekursiv: OnFrame ruft
+		// ApplyResults selbst auf. Der Worker- und die Lade-Threads nehmen diese Sperre nie.
+		std::recursive_mutex g_stateLock;
 
 		W::ID3D11Device*        g_device = nullptr;
 		W::ID3D11DeviceContext* g_context = nullptr;
@@ -666,9 +671,7 @@ namespace TextureStream
 						std::scoped_lock lock(g_qLock);
 						g_results.push_back(std::move(res));
 					}
-					if (const auto tasks = SKSE::GetTaskInterface()) {
-						tasks->AddTask([] { ApplyResults(); });
-					}
+					// Uebernommen wird in OnFrame (Haupt-Thread) bzw. PreviewTick (Menues) - nicht mehr per eigener Task
 				}
 				if (Clock::now() - lastGpu >= 1s) {
 					lastGpu = Clock::now();
@@ -1180,6 +1183,7 @@ namespace TextureStream
 
 		void ApplyResults()
 		{
+			std::scoped_lock state(g_stateLock);
 			std::vector<Result> results;
 			{
 				std::scoped_lock lock(g_qLock);
@@ -1565,6 +1569,7 @@ namespace TextureStream
 
 		void PreviewTick()
 		{
+			std::scoped_lock state(g_stateLock);
 			ApplyResults();
 			const auto ui = RE::UI::GetSingleton();
 			if (!ui) {
@@ -1761,6 +1766,7 @@ namespace TextureStream
 
 	void Reset(const char* a_reason)
 	{
+		std::scoped_lock state(g_stateLock);
 		std::size_t jobs = 0;
 		{
 			std::scoped_lock lock(g_qLock);
@@ -1847,6 +1853,7 @@ namespace TextureStream
 
 	void OnFrame()
 	{
+		std::scoped_lock state(g_stateLock);
 		static Clock::time_point lastSave = Clock::now();
 		if (Clock::now() - lastSave >= 300s) {
 			lastSave = Clock::now();
