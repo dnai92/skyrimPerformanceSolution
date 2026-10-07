@@ -49,7 +49,7 @@ namespace EngineTimers
 			Features::Report("Timing: rain/sky map", "Zeitmessung: Regen-/Himmelskarte", false, std::format("Detours error {}", err));
 		}
 		// Nur AE: Aufrufstelle fuer SE 1.5.97 nicht ermittelt (reine Zeitmessung)
-		if (REL::Module::IsSE()) {
+		if (!REL::Module::IsAE()) {
 			Features::Report("Timing: main camera culling", "Zeitmessung: Hauptkamera", false, "Anniversary Edition only (diagnostics)", true);
 			return;
 		}

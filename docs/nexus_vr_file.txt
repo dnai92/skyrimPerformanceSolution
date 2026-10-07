@@ -1,0 +1,30 @@
+=== Nexus: separate main file "SPS VR (beta)" ===
+
+FILE NAME
+SPS VR (beta)
+
+FILE DESCRIPTION (short)
+Skyrim VR 1.4.15 only. Beta: texture streaming (VRAM budget, refill, load at remembered size, RAM buffer). The shadow/draw-call features are not available in VR yet. Do NOT install together with the normal SPS file.
+
+--- Text for the mod page (BBCode) ---
+
+[size=4][b]Skyrim VR (beta)[/b][/size]
+There is a separate file [b]SPS VR (beta)[/b] for [b]Skyrim VR 1.4.15[/b]. It contains the [b]texture streaming[/b] only - in VR the high headset resolution makes VRAM run full even faster, so this is where SPS helps most:
+[list]
+[*]Distance-based texture size, VRAM budget mode (85 %), VRAM refill
+[*]Load at remembered size, RAM buffer
+[/list]
+The shadow, draw-call and engine features of the flat version are [b]not active in VR[/b] yet - VR renders differently and they are not verified there. They will be enabled step by step after testing.
+
+[b]VR requirements[/b]
+[list]
+[*]Skyrim VR [b]1.4.15[/b]
+[*][url=https://skse.silverlock.org/]SKSEVR[/url] (2.0.12)
+[*][url=https://www.nexusmods.com/skyrimspecialedition/mods/58101]VR Address Library for SKSEVR[/url]
+[/list]
+Settings: [i]Data\SKSE\Plugins\SPS.ini[/i] (SKSE Menu Framework is not available for VR). Hotkey: Page Up on the keyboard.
+Log: [i]Documents\My Games\Skyrim VR\SKSE\SPS.log[/i]
+
+[b]VR testers wanted![/b] The VR build was verified against the game code but not yet tested in a headset. Please report how it runs and attach your SPS.log.
+
+Install only ONE of the two files: the normal SPS for Skyrim SE/AE, or SPS VR for Skyrim VR.

@@ -96,6 +96,21 @@ and depth passes, and sun shadows alone cost ~12–14 ms of CPU time per frame.
 | [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352) | optional | In-game menu. Without it, everything is configured in `SPS.ini`. |
 | [Community Shaders](https://www.nexusmods.com/skyrimspecialedition/mods/86492) | optional | Skylighting culling only has an effect with CS skylighting. |
 
+## Skyrim VR (beta)
+
+A separate build for **Skyrim VR 1.4.15** (`SPS-VR-<version>.zip`, own Nexus file). It contains the **texture streaming
+only** (budget mode, refill, load at remembered size, RAM buffer). The shadow, draw-call and engine features are not
+active in VR yet - VR renders differently and they are not verified there. Install only one of the two files.
+
+| VR dependency | Required | Notes |
+|---|---|---|
+| Skyrim VR **1.4.15** | yes | |
+| [SKSEVR](https://skse.silverlock.org/) | yes | 2.0.12 |
+| [VR Address Library for SKSEVR](https://www.nexusmods.com/skyrimspecialedition/mods/58101) | yes | |
+
+Settings via `SPS.ini` (SKSE Menu Framework is not available for VR), hotkey *Page Up*. Log:
+`Documents\My Games\Skyrim VR\SKSE\SPS.log`. Building: `build.cmd vr` and `powershell -File package.ps1 -Vr`.
+
 ## Tips
 
 - **Short hitches when walking through doors** are usually the autosave on travel together with RaceMenu, whose

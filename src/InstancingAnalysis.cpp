@@ -193,7 +193,7 @@ namespace InstancingAnalysis
 		{
 			const auto& cfg = Config::shadowInstancing;
 			// SE 1.5.97: Shader-/Konstantenpuffer-Interna nicht geprueft -> nie
-			if (!cfg.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || g_instInitFailed || REL::Module::IsSE()) {
+			if (!cfg.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || g_instInitFailed || !REL::Module::IsAE()) {
 				return false;
 			}
 			if (!InstancedDraw::Ready()) {
@@ -723,7 +723,7 @@ namespace InstancingAnalysis
 			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", false, std::format("Detours error {} at RenderBatches", err));
 		} else {
 			logger::info("Detour installed: BSBatchRenderer::RenderBatches (instancing analysis, batch boundaries)");
-			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", !REL::Module::IsSE(), REL::Module::IsSE() ? "Anniversary Edition only" : "", REL::Module::IsSE());
+			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", REL::Module::IsAE(), REL::Module::IsAE() ? "" : "Anniversary Edition only", !REL::Module::IsAE());
 		}
 
 		REL::Relocation<std::uintptr_t> utilVtbl{ RE::VTABLE_BSUtilityShader[0] };

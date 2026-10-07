@@ -94,9 +94,15 @@ namespace Hooks
 			{
 				FrameMark;
 				Stats::OnFrame();
+#ifdef SPS_VR
+				// VR-Build: nur Textur-Streaming (Schatten-/Instancing-Eingriffe fuer VR nicht verifiziert)
+				Config::ReloadIfChanged();
+				TextureStream::OnFrame();
+#else
 				ShadowCulling::OnFrame();
 				InstancingAnalysis::OnFrame();
 				ReportEngineWaits();
+#endif
 				ZoneScopedN("Player Update");
 				Stats::ScopedTimer timer{ Stats::Zone::PlayerUpdate };
 				func(a_this, a_delta);
@@ -160,6 +166,11 @@ namespace Hooks
 
 	void Install()
 	{
+#ifdef SPS_VR
+		// Skyrim VR 1.4.15: Actor::Update liegt zwei vtable-Plaetze weiter (0xAF statt 0xAD) - offline gegen den
+		// Spielcode geprueft (gleicher Code wie SE 1.5.97). Nur der Frame-Takt, keine Statistik-Hooks.
+		WriteVfunc<PlayerUpdate>(RE::VTABLE_PlayerCharacter[0], 0xAF, "PlayerCharacter::Update (VR)");
+#else
 		const auto& vmVtbl = RE::VTABLE_BSScript__Internal__VirtualMachine[0];
 		WriteVfunc<VMUpdate>(vmVtbl, 0x04, "VirtualMachine::Update");
 		WriteVfunc<VMUpdateTasklets>(vmVtbl, 0x05, "VirtualMachine::UpdateTasklets");
@@ -167,6 +178,7 @@ namespace Hooks
 
 		WriteVfunc<PlayerUpdate>(RE::VTABLE_PlayerCharacter[0], 0xAD, "PlayerCharacter::Update");
 		WriteVfunc<CharacterUpdate>(RE::VTABLE_Character[0], 0xAD, "Character::Update");
+#endif
 	}
 
 	void RegisterEvents()

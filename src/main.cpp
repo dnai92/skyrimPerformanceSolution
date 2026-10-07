@@ -32,7 +32,9 @@ namespace
 			TextureStream::Reset("new game");
 		} else if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
+#ifndef SPS_VR
 			ShadowCulling::InstallLate();
+#endif
 			if (Config::engineProbes) {
 				EngineTimers::Install();  // nur Zeitmessung; nach Community Shaders (Detours verkettet sich dahinter)
 			}
@@ -74,9 +76,17 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	}
 
 	const auto version = REL::Module::get().version();
+#ifdef SPS_VR
+	const bool supported = version == REL::Version{ 1, 4, 15, 0 };  // eigener VR-Build: nur Skyrim VR 1.4.15
+#else
 	const bool supported = version == REL::Version{ 1, 5, 97, 0 } || (version >= REL::Version{ 1, 6, 317, 0 } && version < REL::Version{ 1, 8, 0, 0 });
+#endif
 	if (!supported) {
+#ifdef SPS_VR
+		logger::warn("Game version {} is not supported by the SPS VR build (Skyrim VR 1.4.15 only) - SPS stays inactive", version.string());
+#else
 		logger::warn("Game version {} is not supported (1.5.97 and Anniversary Edition 1.6.x / 1.7.x only) - SPS stays inactive", version.string());
+#endif
 		SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
 			if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 				const auto v = REL::Module::get().version().string();
@@ -87,7 +97,10 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 		return true;
 	}
 
-	if (!Features::TestedVersion()) {
+#ifdef SPS_VR
+	logger::info("SPS VR build (beta): texture streaming only - patch sites verified offline against Skyrim VR 1.4.15");
+#endif
+	if (!Features::TestedVersion() && !REL::Module::IsVR()) {
 		if (Features::VerifiedVersion()) {
 			logger::info("Game version {}: all patch sites verified offline against this version's game code (in-game testing so far on 1.6.1170)", version.string());
 		} else {
@@ -98,9 +111,11 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	Stats::Init();
 	Config::Load();
 	Hooks::Install();
+#ifndef SPS_VR
 	ShadowCulling::Install();
 	InstancingAnalysis::Install();
 	LightGather::Install();
+#endif
 	TextureStream::Install();
 
 	SKSE::GetMessagingInterface()->RegisterListener(OnMessage);

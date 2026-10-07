@@ -1848,7 +1848,7 @@ namespace TextureStream
 	{
 		LoadSizes();
 		// DDS-Lader (DirectXTK-Variante): AE ID 77533, SE 1.5.97 ID 75721 (per DDS-Magic + einzigem Aufrufer gefunden)
-		LoadDDS::func = reinterpret_cast<decltype(LoadDDS::func)>(REL::Relocation<std::uintptr_t>{ RELOCATION_ID(75721, 77533) }.address());
+		LoadDDS::func = reinterpret_cast<decltype(LoadDDS::func)>(REL::Relocation<std::uintptr_t>{ REL::VariantID(75721, 77533, 0xDD2B60) }.address());  // VR-Offset per Code-Muster aus SE 1.5.97
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&LoadDDS::func), reinterpret_cast<void*>(&LoadDDS::thunk)); err != 0) {
 			logger::warn("TextureStream: Detours error {} at ID 77533 - stage 3 inactive", err);
 			LoadDDS::func = nullptr;

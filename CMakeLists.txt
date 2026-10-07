@@ -9,9 +9,21 @@ project(
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# CommonLibSSE-NG als Submodul; nur SE/AE, keine Tests
+# CommonLibSSE-NG als Submodul, keine Tests. Zwei getrennte Builds aus demselben Code:
+#  - Standard (Preset "release"): SE + AE
+#  - VR (Preset "vr", -DSPS_VR=ON): nur Skyrim VR 1.4.15 - eigene DLL/eigenes Nexus-Paket, damit VR-Aenderungen
+#    die funktionierende SE/AE-Version nicht beruehren
+option(SPS_VR "Build fuer Skyrim VR" OFF)
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(ENABLE_SKYRIM_VR OFF CACHE BOOL "" FORCE)
+if(SPS_VR)
+	set(ENABLE_SKYRIM_SE OFF CACHE BOOL "" FORCE)
+	set(ENABLE_SKYRIM_AE OFF CACHE BOOL "" FORCE)
+	set(ENABLE_SKYRIM_VR ON CACHE BOOL "" FORCE)
+else()
+	set(ENABLE_SKYRIM_SE ON CACHE BOOL "" FORCE)
+	set(ENABLE_SKYRIM_AE ON CACHE BOOL "" FORCE)
+	set(ENABLE_SKYRIM_VR OFF CACHE BOOL "" FORCE)
+endif()
 add_subdirectory(extern/CommonLibSSE-NG EXCLUDE_FROM_ALL)
 include(extern/CommonLibSSE-NG/cmake/CommonLibSSE.cmake)  # add_commonlibsse_plugin() - beim Source-Build nicht automatisch geladen
 
@@ -48,6 +60,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE src extern/tracy/public)
 # (Firewall-Abfrage bei Nutzern, 1.0.3). Ohne TRACY_ENABLE sind alle Tracy-Makros leer.
 option(SPS_TRACY "Tracy-Profiler einbauen (Entwicklung)" OFF)
 target_compile_definitions(${PROJECT_NAME} PRIVATE TRACY_ON_DEMAND TRACY_NO_CRASH_HANDLER NOMINMAX)
+if(SPS_VR)
+	target_compile_definitions(${PROJECT_NAME} PRIVATE SPS_VR=1)
+endif()
 if(SPS_TRACY)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE TRACY_ENABLE)
 endif()

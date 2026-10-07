@@ -1,10 +1,15 @@
-# Packt build\release\SPS.dll als Vortex-installierbares Archiv nach dist\SPS-<version>.zip
+# Packt SPS.dll als Vortex-installierbares Archiv:
+#   package.ps1      -> build\release\SPS.dll -> dist\SPS-<version>.zip     (Skyrim SE/AE)
+#   package.ps1 -Vr  -> build\vr\SPS.dll      -> dist\SPS-VR-<version>.zip  (Skyrim VR, eigene Nexus-Datei)
+param([switch]$Vr)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $version = (Get-Content "$root\vcpkg.json" -Raw | ConvertFrom-Json).'version-semver'
+$build = if ($Vr) { "$root\build\vr" } else { "$root\build\release" }
+$name = if ($Vr) { "SPS-VR-$version" } else { "SPS-$version" }
 # Sperre: Release-DLL darf weder Netzwerk-Bibliotheken noch den Tracy-Profiler enthalten (1.0.3 oeffnete einen
 # Netzwerk-Port -> Firewall-Abfrage bei Nutzern). Entwickler-Builds mit -DSPS_TRACY=ON werden hier abgewiesen.
-$dllText = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes("$root\build\release\SPS.dll"))
+$dllText = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes("$build\SPS.dll"))
 foreach ($bad in 'ws2_32', 'wsock32', 'wininet', 'winhttp', 'urlmon', 'mswsock', 'dnsapi', 'iphlpapi', 'Tracy') {
     if ($dllText.IndexOf($bad, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
         throw "SPS.dll enthaelt '$bad' - Netzwerk/Tracy darf nicht ins Release (mit SPS_TRACY=OFF neu bauen)"
@@ -13,9 +18,9 @@ foreach ($bad in 'ws2_32', 'wsock32', 'wininet', 'winhttp', 'urlmon', 'mswsock',
 $stage = Join-Path $root 'dist\stage'
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$stage\SKSE\Plugins" | Out-Null
-# PDB (~150 MB, nur fuer Absturzanalyse) nicht ins Mod-Paket - separat als dist\SPS-<version>-pdb.zip
-Copy-Item "$root\build\release\SPS.dll", "$root\package\SPS.ini" "$stage\SKSE\Plugins"
-$zip = Join-Path $root "dist\SPS-$version.zip"
+# PDB (~150 MB, nur fuer Absturzanalyse) nicht ins Mod-Paket - separat als dist\<name>-pdb.zip
+Copy-Item "$build\SPS.dll", "$root\package\SPS.ini" "$stage\SKSE\Plugins"
+$zip = Join-Path $root "dist\$name.zip"
 Remove-Item $zip -ErrorAction SilentlyContinue
 # Eintraege mit "/" (Compress-Archive in PowerShell 5.1 schreibt "\" - manche Mod-Manager/Tools stolpern darueber)
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
@@ -30,7 +35,7 @@ try {
 }
 Remove-Item $stage -Recurse -Force
 Write-Host "Paket: $zip"
-$pdbZip = Join-Path $root "dist\SPS-$version-pdb.zip"
+$pdbZip = Join-Path $root "dist\$name-pdb.zip"
 Remove-Item $pdbZip -ErrorAction SilentlyContinue
-Compress-Archive -Path "$root\build\release\SPS.pdb" -DestinationPath $pdbZip
+Compress-Archive -Path "$build\SPS.pdb" -DestinationPath $pdbZip
 Write-Host "Debug-Symbole: $pdbZip"
