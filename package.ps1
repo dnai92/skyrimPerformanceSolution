@@ -2,6 +2,14 @@
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $version = (Get-Content "$root\vcpkg.json" -Raw | ConvertFrom-Json).'version-semver'
+# Sperre: Release-DLL darf weder Netzwerk-Bibliotheken noch den Tracy-Profiler enthalten (1.0.3 oeffnete einen
+# Netzwerk-Port -> Firewall-Abfrage bei Nutzern). Entwickler-Builds mit -DSPS_TRACY=ON werden hier abgewiesen.
+$dllText = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes("$root\build\release\SPS.dll"))
+foreach ($bad in 'ws2_32', 'wsock32', 'wininet', 'winhttp', 'urlmon', 'mswsock', 'dnsapi', 'iphlpapi', 'Tracy') {
+    if ($dllText.IndexOf($bad, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        throw "SPS.dll enthaelt '$bad' - Netzwerk/Tracy darf nicht ins Release (mit SPS_TRACY=OFF neu bauen)"
+    }
+}
 $stage = Join-Path $root 'dist\stage'
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$stage\SKSE\Plugins" | Out-Null
