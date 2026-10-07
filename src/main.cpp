@@ -16,6 +16,12 @@ namespace
 	void OnMessage(SKSE::MessagingInterface::Message* a_msg)
 	{
 		if (a_msg->type == SKSE::MessagingInterface::kPostLoad) {
+			// Messwerkzeug: biegt Warte-Funktionen von FSMP/CBPC/Spiel um. Nur mit Analyse-Protokoll beim Start -
+			// im Normalbetrieb sollen fremde Mods nicht durch SPS laufen (Haenger-Analyse Rifton 1.0.6).
+			if (!Config::analysis.load(std::memory_order_relaxed)) {
+				logger::info("WaitProbe: off (only with analysis logging at game start)");
+				return;
+			}
 			WaitProbe::ModuleResult fsmp, cbpc, game;
 			WaitProbe::Install(fsmp, cbpc, game);
 			logger::info("WaitProbe: FSMP (hdtsmp64.dll) {} - {} import entries redirected | CBPC (cbp.dll) {} - {} redirected | SkyrimSE.exe {} redirected",
@@ -27,7 +33,9 @@ namespace
 		} else if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
 			ShadowCulling::InstallLate();
-			EngineTimers::Install();  // nach Community Shaders (Detours verkettet sich dahinter)
+			if (Config::analysis.load(std::memory_order_relaxed)) {
+				EngineTimers::Install();  // nur Zeitmessung; nach Community Shaders (Detours verkettet sich dahinter)
+			}
 			Hotkey::Register();
 			Menu::Register();
 			TextureStream::InstallLate();
