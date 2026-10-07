@@ -136,7 +136,7 @@ namespace Config
 		float       safetyFactor = 2.0f;  // benoetigte Aufloesung = Bildschirmgroesse x Faktor
 		float       minEdge = 1024.0f;    // nie unter diese Kantenlaenge verkleinern (Zweierpotenz)
 		float       budgetMs = 0.4f;      // Zeit pro Frame fuer den Szenen-Durchlauf
-		std::string exclude = "interface\\,\\maps\\,mapmarker,\\lod\\,terrain\\,fonts\\,book,\\sky\\,effects\\,cubemaps\\";  // Pfadteile (kleingeschrieben), nie verkleinern
+		std::string exclude = "interface\\,\\maps\\,mapmarker,\\lod\\,terrain\\,fonts\\,book,\\sky\\,effects\\,cubemaps\\,actors\\character\\";  // Pfadteile (kleingeschrieben), nie verkleinern
 	};
 	inline TextureStream textureStream;  // [TextureStream]
 

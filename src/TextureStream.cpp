@@ -386,8 +386,44 @@ namespace TextureStream
 			}
 		}
 
+		// Texturen, die unveraendert aus einer DDS-Datei stammen (vom DDS-Lader des Spiels angelegt oder von uns aus der
+		// Datei neu geladen). Nur diese werden verkleinert: Mods, die Texturen zur Laufzeit erzeugen oder austauschen
+		// (RaceMenu-Overlays, Haut-/Gesichtstoenung ...), tragen oft trotzdem einen Dateinamen - ein Neuladen aus der
+		// Datei wuerde ihre Aenderung verwerfen (schwarze Gesichter/Texturen gemeldet, 1.0.10).
+		std::mutex                      g_fileTexLock;
+		std::unordered_set<const void*> g_fileTex;
+		std::atomic<bool>               g_fileTexTracking{ false };  // DDS-Lader-Hook aktiv
+
+		void MarkFileTexture(const void* a_obj)
+		{
+			if (a_obj) {
+				std::scoped_lock lock(g_fileTexLock);
+				g_fileTex.insert(a_obj);
+			}
+		}
+
+		void ForgetFileTexture(const void* a_obj)
+		{
+			if (a_obj) {
+				std::scoped_lock lock(g_fileTexLock);
+				g_fileTex.erase(a_obj);
+			}
+		}
+
+		bool IsFileTexture(const RE::BSGraphics::Texture* a_r)
+		{
+			if (!g_fileTexTracking.load(std::memory_order_relaxed)) {
+				return true;  // ohne Lader-Hook keine Merkliste - altes Verhalten
+			}
+			std::scoped_lock lock(g_fileTexLock);
+			return g_fileTex.contains(a_r->texture) || g_fileTex.contains(a_r->resourceView);
+		}
+
 		void Swap(RE::BSGraphics::Texture* a_r, W::ID3D11Texture2D* a_tex, W::ID3D11ShaderResourceView* a_srv, std::uint64_t a_oldBytes)
 		{
+			ForgetFileTexture(a_r->texture);
+			ForgetFileTexture(a_r->resourceView);
+			MarkFileTexture(a_tex);  // unser Ersatz stammt aus derselben Datei (Kopie oder Neuladen)
 			DeferRelease(a_r->texture, a_oldBytes);
 			DeferRelease(a_r->resourceView);
 			a_r->texture = a_tex;
@@ -800,6 +836,8 @@ namespace TextureStream
 		std::vector<std::string>   g_missSamples;
 		thread_local RE::NiSourceTexture*              t_loadingSrc = nullptr;
 
+		constexpr std::string_view kSizesHeader = "# SPS texture sizes v2";
+
 		std::filesystem::path SizesFile()
 		{
 			auto dir = SKSE::log::log_directory();
@@ -844,13 +882,19 @@ namespace TextureStream
 			std::ifstream in(SizesFile());
 			std::string   line;
 			std::size_t   n = 0;
+			// Formatkennung: Dateien aelterer Versionen (ohne Kennung) koennen Groessen von Figuren-Texturen aus der Zeit
+			// vor 1.0.5 enthalten -> einmal verwerfen und beim Spielen neu lernen
+			if (std::getline(in, line) && line != kSizesHeader) {
+				logger::info("TextureStream: remembered sizes of an older version discarded - they are learned again while playing");
+				return;
+			}
 			while (std::getline(in, line)) {
 				const auto bar = line.find('|');
 				if (bar == std::string::npos) {
 					continue;
 				}
 				const auto edge = static_cast<std::uint32_t>(std::strtoul(line.c_str(), nullptr, 10));
-				if (edge >= 64) {
+				if (edge >= 64 && !Excluded(line.substr(bar + 1))) {
 					g_loadEdge[line.substr(bar + 1)] = edge;
 					++n;
 				}
@@ -872,6 +916,7 @@ namespace TextureStream
 			const auto    file = SizesFile();
 			const auto    tmp = std::filesystem::path(file).concat(".tmp");
 			std::ofstream out(tmp, std::ios::trunc);
+			out << kSizesHeader << '\n';
 			for (const auto& [path, edge] : copy) {
 				out << edge << '|' << path << '\n';
 			}
@@ -949,6 +994,9 @@ namespace TextureStream
 					changed = true;
 				}
 				const auto result = func(a_device, a_stream, a_out, a_header, a_maxSize, a_6);
+				if (result >= 0 && a_out) {
+					MarkFileTexture(*a_out);
+				}
 				// Sicherheitsnetz: schlaegt das Laden mit unserer Groesse fehl, diese Textur nie wieder verkleinert laden
 				// (0.20.5: zwei Ladenschilder mit krummen Massen -> nicht durch 4 teilbar -> ohne Textur)
 				if (changed && result < 0 && !t_loadPath.empty()) {
@@ -1062,7 +1110,7 @@ namespace TextureStream
 					st.fi = InfoOf(st.format);
 					st.path = NormalizePath(a_src->name.c_str());
 					st.eligible = d.arraySize == 1 && d.sampleDesc.count == 1 && !(d.miscFlags & 0x4) && d.mipLevels > 1 && st.fi.bytes > 0 &&
-					              st.path.starts_with("textures\\") && st.path.ends_with(".dds") && !Excluded(st.path);
+					              st.path.starts_with("textures\\") && st.path.ends_with(".dds") && !Excluded(st.path) && IsFileTexture(r);
 					// Evtl. schon verkleinert geladen (Stufe 3) -> Originalgroesse sofort aus der Datei holen, damit
 					// ein naheliegendes Objekt gleich wieder die volle Groesse bekommt
 					if (st.eligible && !st.busy && HasRememberedEdge(st.path)) {
@@ -1859,7 +1907,8 @@ namespace TextureStream
 			LoadDDS::func = nullptr;
 			return;
 		}
-		logger::info("Hook installed: DDS loader (Detour) - load reduced");
+		g_fileTexTracking = true;
+		logger::info("Hook installed: DDS loader (Detour) - load reduced; only textures straight from DDS files are streamed");
 	}
 
 	void OnFrame()
