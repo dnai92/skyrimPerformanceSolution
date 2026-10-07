@@ -1591,7 +1591,12 @@ namespace TextureStream
 				return;
 			}
 			std::vector<RE::NiPointer<RE::NiAVObject>> stack;
+#ifdef SPS_VR
+			// VR: Eintraege 0x48 statt 0x20 Bytes (Drehung je Vorschau) - die flache Sicht las Muell als spModel (Absturz in IncRefCount)
+			for (const auto& model : mgr->GetVRRuntimeData().loadedModels) {
+#else
 			for (const auto& model : mgr->GetRuntimeData().loadedModels) {
+#endif
 				if (model.spModel) {
 					stack.push_back(model.spModel);
 				}
