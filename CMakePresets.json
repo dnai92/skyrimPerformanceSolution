@@ -21,10 +21,16 @@
       "name": "vr",
       "inherits": "base",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "SPS_VR": "ON" }
+    },
+    {
+      "name": "profile",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "SPS_TRACY": "ON" }
     }
   ],
   "buildPresets": [
     { "name": "release", "configurePreset": "release" },
-    { "name": "vr", "configurePreset": "vr" }
+    { "name": "vr", "configurePreset": "vr" },
+    { "name": "profile", "configurePreset": "profile" }
   ]
 }
