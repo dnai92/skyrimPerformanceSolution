@@ -147,6 +147,7 @@ namespace Config
 
 		// Werte einzeln setzen; die Culling-Jobs lesen parallel (einzelne Felder, kein Absturz-Risiko)
 		analysis.store(ini.GetBoolValue("General", "bAnalysis", analysis.load()), std::memory_order_relaxed);
+		engineProbes = ini.GetBoolValue("General", "bEngineProbes", engineProbes);
 		toggleKey.store(static_cast<std::uint32_t>(ini.GetLongValue("General", "iToggleKey", toggleKey.load())), std::memory_order_relaxed);
 
 		const auto readRule = [&](const char* a_section, CullRule& a_rule) {

@@ -5,6 +5,7 @@ namespace Config
 {
 	// Hauptschalter (Taste, siehe Hotkey) - wirkt auf ALLE Culling-Funktionen, unabhaengig von den einzelnen bEnabled
 	inline std::atomic<bool>          masterEnabled{ true };
+	inline bool                       engineProbes = false;  // nur INI, nur beim Start: WaitProbe + Engine-Zeitmessung (Entwickler)
 	inline std::atomic<bool>          analysis{ false };  // Diagnose-Auswertungen (Instancing-Analyse, Decal-/Culled-Listen, Kamera-Zaehler). Kosten Hauptthread-Zeit -> Standard AUS
 	inline std::atomic<std::uint32_t> toggleKey{ 0xC9 };  // DirectInput-Scancode, 0xC9 = Bild auf (Page Up)
 

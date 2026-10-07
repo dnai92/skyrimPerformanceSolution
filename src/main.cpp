@@ -16,10 +16,10 @@ namespace
 	void OnMessage(SKSE::MessagingInterface::Message* a_msg)
 	{
 		if (a_msg->type == SKSE::MessagingInterface::kPostLoad) {
-			// Messwerkzeug: biegt Warte-Funktionen von FSMP/CBPC/Spiel um. Nur mit Analyse-Protokoll beim Start -
-			// im Normalbetrieb sollen fremde Mods nicht durch SPS laufen (Haenger-Analyse Rifton 1.0.6).
-			if (!Config::analysis.load(std::memory_order_relaxed)) {
-				logger::info("WaitProbe: off (only with analysis logging at game start)");
+			// Messwerkzeug: biegt Warte-Funktionen von FSMP/CBPC/Spiel um. Nur mit Entwickler-Schalter bEngineProbes
+			// (INI, beim Start) - im Normalbetrieb sollen fremde Mods nicht durch SPS laufen (Haenger-Analyse Rifton 1.0.6).
+			if (!Config::engineProbes) {
+				logger::info("WaitProbe: off (developer option bEngineProbes)");
 				return;
 			}
 			WaitProbe::ModuleResult fsmp, cbpc, game;
@@ -33,7 +33,7 @@ namespace
 		} else if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
 			ShadowCulling::InstallLate();
-			if (Config::analysis.load(std::memory_order_relaxed)) {
+			if (Config::engineProbes) {
 				EngineTimers::Install();  // nur Zeitmessung; nach Community Shaders (Detours verkettet sich dahinter)
 			}
 			Hotkey::Register();
