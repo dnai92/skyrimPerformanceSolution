@@ -268,20 +268,17 @@ namespace Menu
 				T("Can make whole objects disappear. Default OFF.", "Kann ganze Objekte verschwinden lassen. Standard AUS."));
 			Toggle(T("Main view micro culling", "Winzige Objekte im Bild weglassen"), Config::mainViewCulling.enabled,
 				T("Tiny far objects are not drawn at all - can pop in. Default OFF.", "Winzige ferne Objekte werden gar nicht gezeichnet - können aufploppen. Standard AUS."));
-			Toggle(T("Far shadow cascade cache", "Cache ferne Schattenkaskade"), Config::cascadeCache.enabled,
-				T("Far sun shadows only every 2nd frame (test). Use together with 'Stable far shadow cascade' - without it, it flickers with a low sun. Default OFF.",
-					"Ferne Sonnenschatten nur jeden 2. Frame (Test). Zusammen mit 'Stabile ferne Schattenkaskade' nutzen - ohne flackert es bei tiefer Sonne. Standard AUS."));
-			Toggle(T("Stable far shadow cascade (test)", "Stabile ferne Schattenkaskade (Test)"), Config::stableCascade.enabled,
-				T("Keeps the far sun shadow cascade fixed and only realigns it in steps (sun moved, view left the area). Basis for the cascade cache. Far shadows slightly coarser. Default OFF.",
-					"Hält die ferne Sonnenschatten-Kaskade fest und richtet sie nur in Schritten neu aus (Sonne gewandert, Blick aus dem Bereich). Grundlage für den Kaskaden-Cache. Ferne Schatten etwas gröber. Standard AUS."));
-			Slider(T("Stable cascade diagnostic mode", "Stabile Kaskade: Diagnose-Modus"), Config::stableCascade.debugMode, 0.0f, 7.0f, "%.0f",
-				T("0 normal | 1 compute only | 2 game values via our path | 3 without camera update | 4 game depth range | 5 no holding of sun direction/position | 6 near plane from game | 7 far plane from game",
-					"0 normal | 1 nur rechnen | 2 Spielwerte über unseren Weg | 3 ohne Kamera-Update | 4 Tiefenbereich des Spiels | 5 Sonnenrichtung/Position nicht festhalten | 6 nahe Ebene vom Spiel | 7 ferne Ebene vom Spiel"));
-			if (MenuApi::Button(T("Log shadow cascades (300 frames)##cc","Schattenkaskaden protokollieren (300 Frames)##cc"))) {
-				ShadowCulling::RequestCascadeDump(300);
+			Toggle(T("Calmer far shadows (test)", "Ruhigere ferne Schatten (Test)"), Config::stableCascade.enabled,
+				T("Holds the far sun shadow cascade still instead of realigning it every frame - far shadows shimmer less when you move. They follow the sun in tiny steps. No performance gain. Default OFF.",
+					"Hält die ferne Sonnenschatten-Kaskade ruhig, statt sie jedes Frame neu auszurichten - ferne Schatten flimmern beim Bewegen weniger. Sie folgen der Sonne in kleinen Schritten. Kein Leistungsgewinn. Standard AUS."));
+			// Kaskaden-Cache (flackert, kaum Ersparnis - 10/2026 zurueckgestellt) und Kaskaden-Diagnose nur per INI bzw. mit Analyse-Protokoll
+			if (Config::analysis.load(std::memory_order_relaxed)) {
+				if (MenuApi::Button(T("Log shadow cascades (300 frames)##cc", "Schattenkaskaden protokollieren (300 Frames)##cc"))) {
+					ShadowCulling::RequestCascadeDump(300);
+				}
+				Tip(T("Diagnostics: writes how the game aligns the sun shadow cascades in each frame to SPS.log.",
+					"Diagnose: schreibt pro Frame, wie das Spiel die Sonnenschatten-Kaskaden ausrichtet, in SPS.log."));
 			}
-			Tip(T("Diagnostics: writes how the game aligns the sun shadow cascades in each frame to SPS.log.",
-				"Diagnose: schreibt pro Frame, wie das Spiel die Sonnenschatten-Kaskaden ausrichtet, in SPS.log."));
 
 			MenuApi::SeparatorText(T("Settings", "Einstellungen"));
 			if (MenuApi::Button(T("Reset to defaults", "Auf Standard zurücksetzen"))) {

@@ -69,7 +69,7 @@ namespace Config
 	struct StableCascade
 	{
 		bool  enabled = false;        // Standard AUS (Test)
-		float maxAngleDeg = 0.15f;    // Sonnenrichtung erst nachfuehren, wenn sie um mehr als diesen Winkel abweicht
+		float maxAngleDeg = 0.05f;    // Sonnenrichtung erst nachfuehren, wenn sie um mehr als diesen Winkel abweicht (0,15 = sichtbare Spruenge)
 		// Reserven klein halten: der Tiefen-Versatz der Engine (Shadow Bias) waechst mit Tiefenbereich und Texelgroesse -
 		// mit ~1,4x groesserem Ausschnitt/Bereich fehlten kurze Schatten (Dachueberstand auf Hauswand, Test 1.0.10)
 		// Auch 1,1x sind zu viel: Community Shaders bemisst weiche Schatten am Tiefenabstand relativ zum Bereich der
