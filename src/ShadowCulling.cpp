@@ -864,8 +864,60 @@ namespace ShadowCulling
 		g_cacheSkip.store(skip, std::memory_order_relaxed);
 	}
 
+	// Diagnose (Menue-Knopf): wie richtet die Engine die Kaskaden pro Frame aus? Je Frame und Kaskade eine Zeile mit
+	// Frustum (Tiefenbereich!), Kamera-Lage, unitsPerTexel und lightTransform - Grundlage fuer eine stabile ferne Kaskade.
+	std::atomic<int> g_cascadeDump{ 0 };
+	std::uint32_t    g_cascadeDumpFrame = 0;
+
+	void RequestCascadeDump(int a_frames) noexcept
+	{
+		g_cascadeDumpFrame = 0;
+		g_cascadeDump.store(a_frames, std::memory_order_relaxed);
+	}
+
+	namespace
+	{
+		void DumpCascades(RE::BSShadowDirectionalLight* a_light) noexcept
+		{
+			const auto frame = g_cascadeDumpFrame++;
+			if (frame == 0) {
+				logger::info("[Cascade-Dump] start (frame | cascade | frustum l r t b near far ortho | cam pos | cam dir | unitsPerTexel | port | lightTransform rows)");
+			}
+			if (const auto main = RE::Main::WorldRootCamera()) {
+				const auto& w = main->world;
+				const auto& dir = a_light->GetShadowDirectionalLightRuntimeData();
+				logger::info("[Cascade-Dump] {} main pos {:.1f} {:.1f} {:.1f} fwd {:.4f} {:.4f} {:.4f} | sun {:.5f} {:.5f} {:.5f} | splits {:.0f}-{:.0f} {:.0f}-{:.0f}",
+					frame, w.translate.x, w.translate.y, w.translate.z, w.rotate.entry[0][0], w.rotate.entry[1][0], w.rotate.entry[2][0],
+					dir.sunVector.x, dir.sunVector.y, dir.sunVector.z, dir.startSplitDistances[0], dir.endSplitDistances[0], dir.startSplitDistances[1], dir.endSplitDistances[1]);
+			}
+			auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
+			for (std::uint32_t i = 0; i < descs.size() && i < kMaxCascades; ++i) {
+				const auto& d = descs[i];
+				const auto  cam = d.camera.get();
+				if (!cam) {
+					continue;
+				}
+				const auto& f = cam->GetRuntimeData2().viewFrustum;
+				const auto& w = cam->world;
+				const auto& m = d.lightTransform.m;
+				const auto* port = reinterpret_cast<const std::int32_t*>(&d.port);  // left right top bottom (Felder protected)
+				logger::info("[Cascade-Dump] {} C{} | {:.2f} {:.2f} {:.2f} {:.2f} {:.1f} {:.1f} {} | {:.1f} {:.1f} {:.1f} | {:.5f} {:.5f} {:.5f} | {} | {} {} {} {} | "
+							 "{:.6f} {:.6f} {:.6f} {:.3f} / {:.6f} {:.6f} {:.6f} {:.3f} / {:.6f} {:.6f} {:.6f} {:.3f} / {:.6f} {:.6f} {:.6f} {:.3f}",
+					frame, i, f.fLeft, f.fRight, f.fTop, f.fBottom, f.fNear, f.fFar, f.bOrtho, w.translate.x, w.translate.y, w.translate.z,
+					w.rotate.entry[0][0], w.rotate.entry[1][0], w.rotate.entry[2][0], d.unitsPerTexel, port[0], port[1], port[2], port[3],
+					m[0][0], m[0][1], m[0][2], m[0][3], m[1][0], m[1][1], m[1][2], m[1][3], m[2][0], m[2][1], m[2][2], m[2][3], m[3][0], m[3][1], m[3][2], m[3][3]);
+			}
+			if (g_cascadeDump.fetch_sub(1, std::memory_order_relaxed) == 1) {
+				logger::info("[Cascade-Dump] end");
+			}
+		}
+	}
+
 	void AfterSunRender() noexcept
 	{
+		if (g_cacheLight && g_cascadeDump.load(std::memory_order_relaxed) > 0) {
+			DumpCascades(g_cacheLight);
+		}
 		const auto& cfg = Config::cascadeCache;
 		// clearRenderTarget der Engine zuruecksetzen (auch wenn der Cache inzwischen abgeschaltet wurde)
 		if (g_cacheLight) {

@@ -23,6 +23,8 @@ namespace ShadowCulling
 	// Nach BSShadowDirectionalLight::UpdateCamera: Projektion der fernen Kaskade mit dem gecachten Stand vergleichen
 	void AfterSunUpdateCamera(RE::BSShadowDirectionalLight* a_light) noexcept;
 	void SetInSunAccumulate(bool a_in) noexcept;
+	// Diagnose: die naechsten a_frames Frames die Kaskaden-Ausrichtung der Engine ins Log schreiben
+	void RequestCascadeDump(int a_frames) noexcept;
 
 	// Einmal pro Frame auf dem Main-Thread: Kamera-Position und Kaskaden-Culler der Sonne cachen
 	void OnFrame();

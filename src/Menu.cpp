@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include "Features.h"
+#include "ShadowCulling.h"
 #include "TextureStream.h"
 
 #include "MenuApi.h"
@@ -269,6 +270,11 @@ namespace Menu
 				T("Tiny far objects are not drawn at all - can pop in. Default OFF.", "Winzige ferne Objekte werden gar nicht gezeichnet - können aufploppen. Standard AUS."));
 			Toggle(T("Far shadow cascade cache", "Cache ferne Schattenkaskade"), Config::cascadeCache.enabled,
 				T("Far sun shadows only every 2nd frame - flickers with a low sun. Default OFF.", "Ferne Sonnenschatten nur jeden 2. Frame - flackert bei tiefer Sonne. Standard AUS."));
+			if (MenuApi::Button(T("Log shadow cascades (300 frames)##cc", "Schattenkaskaden protokollieren (300 Frames)##cc"))) {
+				ShadowCulling::RequestCascadeDump(300);
+			}
+			Tip(T("Diagnostics: writes how the game aligns the sun shadow cascades in each frame to SPS.log.",
+				"Diagnose: schreibt pro Frame, wie das Spiel die Sonnenschatten-Kaskaden ausrichtet, in SPS.log."));
 
 			MenuApi::SeparatorText(T("Settings", "Einstellungen"));
 			if (MenuApi::Button(T("Reset to defaults", "Auf Standard zurücksetzen"))) {
