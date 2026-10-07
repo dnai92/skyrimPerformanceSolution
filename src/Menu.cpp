@@ -274,6 +274,9 @@ namespace Menu
 			Toggle(T("Stable far shadow cascade (test)", "Stabile ferne Schattenkaskade (Test)"), Config::stableCascade.enabled,
 				T("Keeps the far sun shadow cascade fixed and only realigns it in steps (sun moved, view left the area). Basis for the cascade cache. Far shadows slightly coarser. Default OFF.",
 					"Hält die ferne Sonnenschatten-Kaskade fest und richtet sie nur in Schritten neu aus (Sonne gewandert, Blick aus dem Bereich). Grundlage für den Kaskaden-Cache. Ferne Schatten etwas gröber. Standard AUS."));
+			Slider(T("Stable cascade diagnostic mode", "Stabile Kaskade: Diagnose-Modus"), Config::stableCascade.debugMode, 0.0f, 5.0f, "%.0f",
+				T("0 normal | 1 compute only | 2 game values via our path | 3 without camera update | 4 game depth range | 5 no holding of sun direction/position",
+					"0 normal | 1 nur rechnen | 2 Spielwerte über unseren Weg | 3 ohne Kamera-Update | 4 Tiefenbereich des Spiels | 5 Sonnenrichtung/Position nicht festhalten"));
 			if (MenuApi::Button(T("Log shadow cascades (300 frames)##cc","Schattenkaskaden protokollieren (300 Frames)##cc"))) {
 				ShadowCulling::RequestCascadeDump(300);
 			}

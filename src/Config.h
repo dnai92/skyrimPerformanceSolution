@@ -76,6 +76,9 @@ namespace Config
 		float extentFactor = 1.05f;   // Ausschnitt = (Engine-Ausschnitt + margin) * Faktor
 		float margin = 256.0f;        // Spielraum um den Engine-Ausschnitt, bevor neu ausgerichtet wird
 		float depthStep = 1024.0f;    // Tiefenbereich in diesen Schritten
+		// Diagnose (Menue): 0 normal | 1 nur rechnen, nichts setzen | 2 Engine-Werte ueber unseren Weg setzen (Update) |
+		// 3 normal ohne Kamera-Update | 4 normal mit Engine-Tiefenbereich | 5 ohne Festhalten von Drehung/Position
+		float debugMode = 0.0f;
 	};
 	inline StableCascade stableCascade;  // [ShadowStableCascade]
 

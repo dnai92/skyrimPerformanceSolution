@@ -840,10 +840,19 @@ namespace ShadowCulling
 			const float         ehx = 0.5f * (fr.fRight - fr.fLeft), ehy = 0.5f * (fr.fTop - fr.fBottom);
 			const RE::NiPoint3  centerW = posE + rightE * exc + upE * eyc;
 
+			const int mode = static_cast<int>(std::lround(cfg.debugMode));
+			if (mode == 2) {
+				// Diagnose: Engine-Werte unveraendert ueber unseren Weg (local setzen + Update) - prueft den Mechanismus
+				cam->local.rotate = rotE;
+				cam->local.translate = posE;
+				RE::NiUpdateData ud2{};
+				cam->Update(ud2);
+				return;
+			}
 			auto& s = g_stable;
 			++g_stableFrames;
 			bool changed = false;
-			bool reanchor = !s.valid;
+			bool reanchor = !s.valid || mode == 5;
 			if (s.valid) {
 				reanchor = Dot3(dirE, Col(s.rot, 0)) < std::cos(cfg.maxAngleDeg * 0.017453292f);
 			}
@@ -880,7 +889,10 @@ namespace ShadowCulling
 				changed = true;
 			}
 			// Tiefe: Engine-Bereich muss hineinpassen, nicht unnoetig gross
-			if (changed || en < s.n || ef > s.f || (s.f - s.n) > (ef - en) * 1.2f + 2.0f * cfg.depthStep) {
+			if (mode == 4) {
+				s.n = en;
+				s.f = ef;
+			} else if (changed || en < s.n || ef > s.f || (s.f - s.n) > (ef - en) * 1.2f + 2.0f * cfg.depthStep) {
 				s.n = std::max(1.0f, QuantDown(en - 0.25f * cfg.depthStep, cfg.depthStep));
 				s.f = QuantUp(ef + 0.25f * cfg.depthStep, cfg.depthStep);
 				changed = true;
@@ -889,6 +901,9 @@ namespace ShadowCulling
 				++g_stableChanged;
 			}
 
+			if (mode == 1) {
+				return;  // Diagnose: nur rechnen
+			}
 			// Anwenden: Lage + Frustum setzen, Kamera neu berechnen lassen (worldToCam) - wie die Engine selbst
 			cam->local.rotate = s.rot;
 			cam->local.translate = s.pos;
@@ -900,8 +915,10 @@ namespace ShadowCulling
 			fr.fBottom = s.cy - s.hy;
 			fr.fNear = s.n;
 			fr.fFar = s.f;
-			RE::NiUpdateData ud{};
-			cam->Update(ud);
+			if (mode != 3) {
+				RE::NiUpdateData ud{};
+				cam->Update(ud);
+			}
 			// Mit Kaskaden-Cache: Schattenwerfer fuer den GANZEN gehaltenen Ausschnitt sammeln. Die Engine cullt sonst mit
 			// einer engen Huelle um den aktuellen Sichtbereich (customCullPlanes) - beim Drehen fehlten im wiederverwendeten
 			// Frame Schatten am Rand. Ohne die Huelle gelten die Ebenen der Kamera, also unser Ausschnitt.
