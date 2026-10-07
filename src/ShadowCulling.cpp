@@ -515,7 +515,9 @@ namespace ShadowCulling
 					g_decalNames[name == "Decal" ? 0 : name == "DecalDirt" ? 1 : name.empty() ? 3 : 2].fetch_add(1, std::memory_order_relaxed);
 					RecordDecalTexture(a_geom, DistanceToCamera(a_geom.worldBound));
 				}
-				if (dec.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && a_geom.worldBound.radius < dec.maxRadius && DistanceToCamera(a_geom.worldBound) > dec.maxDistance) {
+				// Figuren ausnehmen: Haaransaetze (Hairline) sind als Decal markiert und geskinnt - Fussabdruecke nie
+				if (dec.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && a_geom.worldBound.radius < dec.maxRadius &&
+					!const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData().skinInstance && DistanceToCamera(a_geom.worldBound) > dec.maxDistance) {
 					Stats::Count(Stats::Counter::DecalCulled);
 					return true;
 				}
