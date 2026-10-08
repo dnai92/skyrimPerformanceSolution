@@ -22,7 +22,7 @@ so you can compare with and without the plugin at any time.
 | **Bodies, faces and hair** *(test)* | Also streams `textures\actors\character` of far characters. Textures that mods create or change at runtime (RaceMenu overlays, skin tint) are never touched. | OFF |
 | **RAM buffer** | Texture data that had to be reloaded more than once stays in RAM up to a set size (default 1 GB, slider in the menu). Textures that go back and forth then come from RAM instead of disk — mostly useful with 8K texture packs. Least recently used is dropped first. 0 = off. | 1024 MB |
 | **Load at remembered size** | The size a texture needed last time (also in earlier sessions) is passed to the game's DDS loader, so the top mip levels are never read or uploaded. Also applied during loading screens when VRAM was tight shortly before, so the VRAM no longer peaks at ~97 % after a door. | ON |
-| **Sun shadow culling** | Small, far objects do not cast sun shadows. Shadow length is taken into account (no culling below 25° sun elevation). | ON |
+| **Sun shadow culling** | Small, far objects do not cast sun shadows. Shadow length is taken into account (no culling below 10° sun elevation). | ON |
 | **Torch / point light shadow culling** | Small, far objects do not cast shadows from torches and fires. Objects close to the light always keep their shadow; not applied in interiors by default (switch in the menu). | ON (exteriors) |
 | **Character shadow culling** | Characters and creatures far away (default 50 m, min. 30 m) do not cast shadows. | ON |
 | **Skylighting culling** | Small objects are left out of the Community Shaders skylighting / precipitation occlusion map. | ON |

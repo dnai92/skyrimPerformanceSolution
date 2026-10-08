@@ -21,7 +21,7 @@ namespace Config
 	};
 
 	inline CullRule shadowCulling;                                               // Sonne [ShadowCulling]
-	inline std::atomic<float> sunMinElevation{ 25.0f };  // Sonne tiefer (Grad) -> kein Sonnen-Culling (lange Schatten) [ShadowCulling] fMinSunElevation
+	inline std::atomic<float> sunMinElevation{ 10.0f };  // Sonne tiefer (Grad) -> kein Sonnen-Culling (lange Schatten) [ShadowCulling] fMinSunElevation
 	inline CullRule pointLightCulling{ true, 0, 1000.0f, 150.0f, 0.035f, true };  // Punktlichter [PointLightShadowCulling]
 	// Innenraeume werden fast nur von Punktlichtern beleuchtet -> fehlende Schatten fallen dort auf (Drachenfeste)
 	inline std::atomic<bool> pointLightInteriors{ false };  // [PointLightShadowCulling] bInteriors
