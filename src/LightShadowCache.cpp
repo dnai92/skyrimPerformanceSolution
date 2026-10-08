@@ -45,6 +45,8 @@ namespace LightShadowCache
 			bool                                  drawn = false;        // in diesem Frame gezeichnet
 			bool                                  unsupported = false;  // Karten in verschiedenen Ebenen
 			REX::W32::ID3D11Texture2D*            tex = nullptr;        // eigene Kopie der Ebene
+			REX::W32::ID3D11Texture2D*            boundTex = nullptr;   // Ebene der 1. Karte in diesem Frame (Vergleich)
+			std::uint32_t                         boundSub = 0;
 			std::uint32_t                         texW = 0, texH = 0, texFormat = 0;
 			// Culling-Jobs (unter lock)
 			struct Entry
@@ -282,6 +284,48 @@ namespace LightShadowCache
 		}
 
 		// ID 107604 (+0x167) ruft hier das Zeichnen einer Schattenkarte auf (Kamera, Shader-Akkumulator, Flags)
+		// Gebundener Tiefenpuffer: Textur (nicht besessen, lebt in der Engine) und Unterressource der gebundenen Ebene
+		REX::W32::ID3D11Texture2D* BoundDepth(std::uint32_t& a_sub) noexcept
+		{
+			const auto                        context = RE::BSGraphics::Renderer::GetSingleton()->GetRuntimeData().context;
+			REX::W32::ID3D11RenderTargetView* rtvs[1]{};
+			REX::W32::ID3D11DepthStencilView* dsv = nullptr;
+			context->OMGetRenderTargets(1, rtvs, &dsv);
+			if (rtvs[0]) {
+				rtvs[0]->Release();
+			}
+			if (!dsv) {
+				return nullptr;
+			}
+			REX::W32::D3D11_DEPTH_STENCIL_VIEW_DESC d{};
+			dsv->GetDesc(&d);
+			REX::W32::ID3D11Resource* res = nullptr;
+			dsv->GetResource(&res);
+			dsv->Release();
+			if (!res) {
+				return nullptr;
+			}
+			const auto tex = static_cast<REX::W32::ID3D11Texture2D*>(res);  // DSV einer 2D-Textur(-Sammlung)
+			res->Release();  // die Engine haelt die Textur
+			REX::W32::D3D11_TEXTURE2D_DESC td{};
+			tex->GetDesc(&td);
+			const auto dim = static_cast<int>(d.viewDimension);
+			if (td.sampleDesc.count != 1) {
+				return nullptr;
+			}
+			if (dim == 4) {  // TEXTURE2DARRAY
+				if (d.texture2DArray.arraySize != 1 || d.texture2DArray.firstArraySlice >= td.arraySize) {
+					return nullptr;
+				}
+				a_sub = d.texture2DArray.firstArraySlice * td.mipLevels + d.texture2DArray.mipSlice;
+			} else if (dim == 3) {  // TEXTURE2D
+				a_sub = d.texture2D.mipSlice;
+			} else {
+				return nullptr;
+			}
+			return tex;
+		}
+
 		// Diagnose (Analyse-Protokoll): wohin zeichnet jede Schattenkarte wirklich? Ebene/Ausschnitt laut Deskriptor
 		// gegen den tatsaechlich gebundenen Tiefenpuffer und Viewport (vor und nach dem Zeichnen)
 		std::uint32_t g_targetDiagLeft = 0;
@@ -369,14 +413,16 @@ namespace LightShadowCache
 					++g_win.buildFailed;
 					return;
 				}
-				const auto&   descs = light->GetRuntimeData().shadowmapDescriptors;
-				const auto&   d = descs[idx];
-				const auto&   d0 = descs[0];
+				const auto& descs = light->GetRuntimeData().shadowmapDescriptors;
+				// Ziel = der gerade gebundene Tiefenpuffer (nicht der Deskriptor: bei Fackeln steht in der 2. Halbkugel eine
+				// veraltete Ebene, gezeichnet wird in die untere Haelfte der Ebene der 1. Halbkugel - Messung 1.0.26)
 				std::uint32_t sub = 0;
-				const auto    target = TargetTexture(d, sub);
-				// alle Karten eines Lichts muessen in derselben Ebene liegen (Fackel: 2 Halbkugeln, eine Ebene)
-				if (d.renderTarget != d0.renderTarget || d.shadowmapIndex != d0.shadowmapIndex) {
-					l->unsupported = true;
+				const auto    target = BoundDepth(sub);
+				if (idx == 0) {
+					l->boundTex = target;
+					l->boundSub = sub;
+				} else if (target != l->boundTex || sub != l->boundSub) {
+					l->unsupported = true;  // Karten eines Lichts in verschiedenen Ebenen
 				}
 				if (!target || l->unsupported || !EnsureCacheTexture(*l, target)) {
 					func(a_camera, a_accumulator, a_flags);
@@ -387,7 +433,7 @@ namespace LightShadowCache
 				l->drawn = true;
 				if (mode == Mode::kCached) {
 					if (idx == 0) {
-						CopyUnbound(target, sub, l->tex, 0);  // unbewegliche Schatten aller Karten zurueck
+						CopyUnbound(target, sub, l->tex, 0);  // unbewegliche Schatten aller Karten zurueck (nach dem Leeren)
 					}
 					func(a_camera, a_accumulator, a_flags);  // nur Bewegliche
 				} else {
@@ -625,7 +671,7 @@ namespace LightShadowCache
 		// Ziel-Diagnose: alle ~5 s zwei Frames lang jede Schattenkarte protokollieren
 		if (g_targetDiagLeft > 0) {
 			--g_targetDiagLeft;
-		} else if (Config::analysis.load(std::memory_order_relaxed) && ++g_targetDiagFrame % 300 == 0) {
+		} else if (Config::analysis.load(std::memory_order_relaxed) && !enabled && ++g_targetDiagFrame % 300 == 0) {  // nur ohne Cache (umgeht ihn)
 			g_targetDiagLeft = 2;
 		}
 	}
