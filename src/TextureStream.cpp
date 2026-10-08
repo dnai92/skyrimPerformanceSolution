@@ -962,7 +962,10 @@ namespace TextureStream
 			}
 			try {
 				const auto path = NormalizePath(src->name.c_str());
-				if (!Config::textureStream.streamCharacters && IsCharacterPath(path)) {
+				// Figuren-Texturen nie schon beim Laden verkleinern (auch nicht mit bStreamCharacters): RaceMenu legt beim
+				// Zellenladen im Hintergrund Overlays auf die Koerper und stuerzte dabei zweimal ab (skee64+D9830, Drachenfeste,
+				// 08.10., nur mit eingeschaltetem Schalter). Verkleinert wird hoechstens spaeter im laufenden Spiel.
+				if (IsCharacterPath(path)) {
 					return 0;
 				}
 				std::scoped_lock lock(g_sizeLock);
