@@ -272,6 +272,7 @@ namespace Config
 			ts.enabled ? "ON" : "OFF", ts.analysis, ts.safetyFactor, ts.minEdge, ts.budgetMs, ts.streamClothing, ts.streamCharacters, ts.exclude);
 
 		lightShadowCache.enabled = ini.GetBoolValue("LightShadowCache", "bEnabled", lightShadowCache.enabled);
+		lightShadowCache.debugMode = static_cast<float>(ini.GetDoubleValue("LightShadowCache", "iDebugMode", lightShadowCache.debugMode));
 		logger::info("LightShadowCache (test): {}", lightShadowCache.enabled ? "ON" : "OFF");
 
 		auto& sky = skylightingCulling;

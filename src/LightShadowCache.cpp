@@ -183,6 +183,11 @@ namespace LightShadowCache
 			return nullptr;
 		}
 
+		int DebugMode() noexcept
+		{
+			return static_cast<int>(Config::lightShadowCache.debugMode + 0.5f);
+		}
+
 		bool PoseChanged(const RE::NiTransform& a_a, const RE::NiTransform& a_b) noexcept
 		{
 			const float dx = a_a.translate.x - a_b.translate.x, dy = a_a.translate.y - a_b.translate.y, dz = a_a.translate.z - a_b.translate.z;
@@ -499,7 +504,9 @@ namespace LightShadowCache
 					func(a_camera, a_accumulator, a_flags);  // nur Unbewegliche
 					if (idx + 1 == descs.size()) {
 						CopyUnbound(l->tex, 0, target, sub);      // nach der letzten Karte: nur Unbewegliche sichern
-						CopyUnbound(target, sub, l->prevTex, 0);  // sichtbar bleibt die vollstaendige Karte des Vorframes
+						if (DebugMode() != 2) {
+							CopyUnbound(target, sub, l->prevTex, 0);  // sichtbar bleibt die vollstaendige Karte des Vorframes
+						}
 						l->built = true;
 					}
 				}
@@ -557,6 +564,9 @@ namespace LightShadowCache
 				return false;
 			}
 			// Cache-Frame
+			if (DebugMode() == 3) {
+				return false;  // Pruef-Modus: zurueckkopieren, aber alles zeichnen
+			}
 			if (dynamic) {
 				g_drawnDynamic.fetch_add(1, std::memory_order_relaxed);
 				return false;
@@ -609,7 +619,7 @@ namespace LightShadowCache
 				if (mode == Mode::kBuild) {
 					l.valid = l.built && !l.statics.empty() && !l.unsupported;
 					++g_win.builds;
-				} else {
+				} else if (DebugMode() != 1 && DebugMode() != 3) {  // Pruef-Modi 1/3: nie neu aufbauen
 					if (l.broken) {
 						++g_win.promoted;
 						l.valid = false;
@@ -753,9 +763,9 @@ namespace LightShadowCache
 		}
 		auto&        w = g_win;
 		const double f = static_cast<double>(w.frames);
-		logger::info("[LightCache] {} | maps/frame from cache {:.1f}, drawn normally {:.1f} | builds/frame {:.3f} | meshes/frame saved {:.0f}, still drawn: moving {:.0f}, added {:.0f} | "
+		logger::info("[LightCache] {} (test mode {}) | maps/frame from cache {:.1f}, drawn normally {:.1f} | builds/frame {:.3f} | meshes/frame saved {:.0f}, still drawn: moving {:.0f}, added {:.0f} | "
 					 "rebuilds: light moved {}, mesh removed {}, mesh started moving {}, too many added {} | failed {}, lights not supported {:.1f}",
-			Config::lightShadowCache.enabled ? "ON" : "OFF", w.cachedMaps / f, w.normalMaps / f, w.builds / f, g_saved.exchange(0) / f, g_drawnDynamic.exchange(0) / f,
+			Config::lightShadowCache.enabled ? "ON" : "OFF", DebugMode(), w.cachedMaps / f, w.normalMaps / f, w.builds / f, g_saved.exchange(0) / f, g_drawnDynamic.exchange(0) / f,
 			g_drawnExtra.exchange(0) / f, w.lightMoved, w.removed, w.promoted, w.extraFull, w.buildFailed, w.unsupported / f);
 		std::scoped_lock lock(g_moverLock);
 		for (const auto& [name, count] : g_movers) {

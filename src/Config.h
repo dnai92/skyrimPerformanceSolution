@@ -158,7 +158,8 @@ namespace Config
 	// Schatten-Cache fester Lichter (siehe LightShadowCache.h)
 	struct LightShadowCache
 	{
-		bool enabled = false;  // Test
+		bool  enabled = false;  // Test
+		float debugMode = 0;    // Pruef-Modus: 1 nie neu aufbauen, 2 Aufbau ohne Vorframe-Karte, 3 zurueckkopieren + alles zeichnen
 	};
 	inline LightShadowCache lightShadowCache;  // [LightShadowCache]
 
