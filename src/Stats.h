@@ -18,6 +18,7 @@ namespace Stats
 		LightGather,          // Licht-Geometrie-Zuordnung dynamischer Punktlichter (tatsaechlich ausgefuehrt)
 		PrecipMask,           // Precipitation::SetupMask (Szenen-Durchlauf Regen-/Skylighting-Karte)
 		MainCull,             // Szenen-Durchlauf der Hauptkamera (ID 32174)
+		PresentWait,          // IDXGISwapChain::Present (CPU wartet auf GPU, FPS-Limit oder VSync)
 
 		kTotal
 	};
@@ -35,6 +36,7 @@ namespace Stats
 		"Light assignment",
 		"Rain/sky map",
 		"Main camera culling",
+		"Present wait",
 	};
 
 	// Zaehler pro Frame (Meshes, die in Culling-Listen aufgenommen bzw. verworfen werden)

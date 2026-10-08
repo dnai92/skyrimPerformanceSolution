@@ -113,6 +113,10 @@ namespace GpuTimer
 					continue;
 				}
 				const double frame = static_cast<double>(t1 - t0) * toMs;
+				if (frame >= 1000.0) {  // Ladebildschirm/Pause (keine Frame-Grenze) - wie die CPU-Statistik verwerfen
+					++g_sum.skipped;
+					continue;
+				}
 				++g_sum.frames;
 				g_frameSum += frame;
 				g_sum.frameMax = std::max(g_sum.frameMax, frame);

@@ -131,6 +131,18 @@ namespace Hooks
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		// IDXGISwapChain::Present (vfunc 8): wie lange die CPU bei der Bildausgabe wartet. Lang = GPU-begrenzt
+		// (oder FPS-Limit/VSync), kurz = CPU-begrenzt. Nur Zeitmessung.
+		struct Present
+		{
+			static long thunk(void* a_swapChain, std::uint32_t a_syncInterval, std::uint32_t a_flags)
+			{
+				Stats::ScopedTimer timer{ Stats::Zone::PresentWait };
+				return func(a_swapChain, a_syncInterval, a_flags);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		class EventSink :
 			public RE::BSTEventSink<RE::TESCellFullyLoadedEvent>,
 			public RE::BSTEventSink<RE::MenuOpenCloseEvent>
@@ -194,5 +206,14 @@ namespace Hooks
 			ui->AddEventSink<RE::MenuOpenCloseEvent>(EventSink::GetSingleton());
 		}
 		logger::info("Event sinks registered");
+#ifndef SPS_VR
+		if (const auto renderer = RE::BSGraphics::Renderer::GetSingleton()) {
+			if (const auto swapChain = renderer->GetRuntimeData().renderWindows[0].swapChain) {
+				REL::Relocation<std::uintptr_t> vtbl{ *reinterpret_cast<std::uintptr_t*>(swapChain) };
+				Present::func = vtbl.write_vfunc(8, Present::thunk);
+				logger::info("Hook installed: IDXGISwapChain::Present (vfunc 8) - wait time");
+			}
+		}
+#endif
 	}
 }
