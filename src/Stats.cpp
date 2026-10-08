@@ -1,6 +1,7 @@
 #include "Stats.h"
 
 #include "Config.h"
+#include "TextureStream.h"
 
 namespace Stats
 {
@@ -10,6 +11,10 @@ namespace Stats
 
 		constexpr auto        kReportInterval = 10s;
 		constexpr double      kMaxFrameMs = 1000.0;  // laengere Luecken = Ladebildschirm/Pause -> verwerfen
+		// Ruckler-Protokoll (immer an, auch ohne Analyse): jeder Frame ab kHitchMs mit dem, was SPS in diesem und im
+		// vorigen Frame getan hat - GPU-Arbeit (Kopien, Freigaben) kann erst im naechsten Frame warten lassen
+		constexpr double      kHitchMs = 100.0;
+		constexpr std::uint32_t kHitchLinesPerWindow = 20;
 		constexpr std::size_t kZoneCount = static_cast<std::size_t>(Zone::kTotal);
 		constexpr std::size_t kCounterCount = static_cast<std::size_t>(Counter::kTotal);
 
@@ -19,6 +24,8 @@ namespace Stats
 		std::atomic<std::uint32_t>                        g_frameNpcCount{ 0 };
 		std::atomic<std::uint32_t>                        g_overstressed{ 0 };
 		std::atomic<std::uint32_t>                        g_cellLoads{ 0 };
+		std::atomic<bool>                                 g_cellLoadedInFrame{ false };
+		std::atomic<bool>                                 g_menuInFrame{ false };
 
 		// Nur vom Main-Thread (OnFrame) angefasst
 		clock::time_point                        g_lastFrame{};
@@ -27,6 +34,35 @@ namespace Stats
 		std::array<std::vector<double>, kZoneCount> g_zoneMs;
 		std::array<std::vector<double>, kCounterCount> g_counterValues;
 		std::uint64_t                            g_npcUpdatesInWindow{ 0 };
+		std::uint32_t                            g_hitches{ 0 };
+		std::uint32_t                            g_hitchLines{ 0 };
+		TextureStream::FrameActivity             g_prevAct;
+
+		std::string Describe(const TextureStream::FrameActivity& a_act)
+		{
+			if (a_act.downs == 0 && a_act.reloads == 0 && a_act.released == 0) {
+				return std::format("nothing ({:.1f} ms{})", a_act.ms, a_act.passEnd ? ", pass evaluated" : "");
+			}
+			return std::format("downscaled {} ({:.0f} MB), reloaded {} ({:.0f} MB), released {} ({:.0f} MB), {:.1f} ms{}", a_act.downs, a_act.downMB, a_act.reloads,
+				a_act.reloadMB, a_act.released, a_act.releasedMB, a_act.ms, a_act.passEnd ? ", pass evaluated" : "");
+		}
+
+		void CheckHitch(double a_frameMs)
+		{
+			// Seit dem letzten Frame-Wechsel = innerhalb dieses Frames (TextureStream::OnFrame laeuft direkt nach Stats::OnFrame)
+			const auto act = TextureStream::TakeFrameActivity();
+			const bool cell = g_cellLoadedInFrame.exchange(false, std::memory_order_relaxed);
+			const bool menu = g_menuInFrame.exchange(false, std::memory_order_relaxed);
+			if (a_frameMs >= kHitchMs && a_frameMs < kMaxFrameMs) {
+				++g_hitches;
+				if (g_hitchLines < kHitchLinesPerWindow) {
+					++g_hitchLines;
+					logger::info("[Hitch] {:.0f} ms | SPS this frame: {} | frame before: {} | VRAM {:.0f} %, paged out {:.0f} MB{}{}", a_frameMs, Describe(act), Describe(g_prevAct),
+						std::max(0.0f, act.vramPct), act.pagedMB, cell ? " | cell loaded" : "", menu ? " | menu opened/closed" : "");
+				}
+			}
+			g_prevAct = act;
+		}
 		std::filesystem::path                    g_csvPath;
 
 		struct Summary
@@ -78,8 +114,10 @@ namespace Stats
 			const auto cellLoads = g_cellLoads.exchange(0);
 			const auto npcPerFrame = static_cast<double>(g_npcUpdatesInWindow) / static_cast<double>(frames);
 
-			logger::info("---- {} Frames | {:.1f} FPS | Frame avg {:.2f} ms, p99 {:.2f} ms, max {:.2f} ms | NPC updates/frame {:.1f} | VM overstressed {} | cell loads {}",
-				frames, fps, frame.avg, frame.p99, frame.max, npcPerFrame, overstressed, cellLoads);
+			logger::info("---- {} Frames | {:.1f} FPS | Frame avg {:.2f} ms, p99 {:.2f} ms, max {:.2f} ms | NPC updates/frame {:.1f} | VM overstressed {} | cell loads {} | hitches >= {:.0f} ms: {}",
+				frames, fps, frame.avg, frame.p99, frame.max, npcPerFrame, overstressed, cellLoads, kHitchMs, g_hitches);
+			g_hitches = 0;
+			g_hitchLines = 0;
 
 			// Ohne Analyse-Protokoll nur diese eine Zeile (pro Minute) - Zonen, Zaehler und CSV nur zur Fehlersuche
 			if (!Config::analysis.load(std::memory_order_relaxed)) {
@@ -165,7 +203,12 @@ namespace Stats
 
 	void CountNpcUpdate() noexcept { g_frameNpcCount.fetch_add(1, std::memory_order_relaxed); }
 	void OnOverstressed() noexcept { g_overstressed.fetch_add(1, std::memory_order_relaxed); }
-	void OnCellLoaded() noexcept { g_cellLoads.fetch_add(1, std::memory_order_relaxed); }
+	void OnCellLoaded() noexcept
+	{
+		g_cellLoads.fetch_add(1, std::memory_order_relaxed);
+		g_cellLoadedInFrame.store(true, std::memory_order_relaxed);
+	}
+	void OnMenuEvent() noexcept { g_menuInFrame.store(true, std::memory_order_relaxed); }
 
 	void OnFrame() noexcept
 	{
@@ -179,6 +222,10 @@ namespace Stats
 
 		const auto frameMs = std::chrono::duration<double, std::milli>(now - g_lastFrame).count();
 		g_lastFrame = now;
+		try {
+			CheckHitch(frameMs);
+		} catch (...) {
+		}
 
 		if (frameMs < kMaxFrameMs) {
 			try {

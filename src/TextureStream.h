@@ -41,4 +41,16 @@ namespace TextureStream
 
 	// VRAM-Belegung des Spiels und Budget laut Windows (Bytes; 0 = unbekannt)
 	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget);
+
+	// Ruckler-Protokoll: was das Streaming seit dem letzten Abruf getan hat (Main-Thread, einmal pro Frame)
+	struct FrameActivity
+	{
+		std::uint32_t downs = 0, reloads = 0, released = 0;
+		double        downMB = 0, reloadMB = 0, releasedMB = 0;  // frei geworden / neu angelegt / freigegeben
+		double        ms = 0;                                     // eigene Zeit in OnFrame
+		bool          passEnd = false;                            // Szenen-Durchlauf abgeschlossen (Auswertung)
+		float         vramPct = -1.0f;
+		double        pagedMB = 0;
+	};
+	FrameActivity TakeFrameActivity();
 }

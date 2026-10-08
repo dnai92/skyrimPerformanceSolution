@@ -120,6 +120,7 @@ namespace Stats
 	void CountNpcUpdate() noexcept;
 	void OnOverstressed() noexcept;
 	void OnCellLoaded() noexcept;
+	void OnMenuEvent() noexcept;  // Menue geoeffnet/geschlossen (Ruckler-Protokoll: Pause statt Ruckler)
 
 	// Frame-Grenze: wird zu Beginn von PlayerCharacter::Update aufgerufen (1x pro Spiel-Frame)
 	void OnFrame() noexcept;

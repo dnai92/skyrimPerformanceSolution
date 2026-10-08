@@ -150,6 +150,7 @@ namespace Hooks
 
 			RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
 			{
+				Stats::OnMenuEvent();
 				// Vor dem Abbau der Welt/Zellen alle eigenen Verweise freigeben (Ladebildschirm oeffnet vor dem Entladen)
 				if (a_event && a_event->opening && (a_event->menuName == RE::MainMenu::MENU_NAME || a_event->menuName == RE::LoadingMenu::MENU_NAME)) {
 					TextureStream::Reset(a_event->menuName == RE::MainMenu::MENU_NAME ? "main menu" : "loading screen");

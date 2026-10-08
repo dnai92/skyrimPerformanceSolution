@@ -198,6 +198,7 @@ namespace TextureStream
 			bool                               eligible = false;
 			bool                               busy = false;  // Auftrag laeuft
 			std::uint32_t                      passId = 0;    // zuletzt gesehen in Durchlauf
+			std::uint32_t                      skinPass = 0;  // zuletzt an einer Figur (geskinnt) gesehen - bleibt immer voll
 			float                              passNeed = 0;  // max. Bildschirmgroesse (px) im Durchlauf
 			std::uint32_t                      lowPasses = 0;
 			std::uint32_t                      lowTarget = 0;
@@ -364,6 +365,9 @@ namespace TextureStream
 		std::deque<Deferred>    g_deferred;
 		constexpr std::uint64_t kReleaseBytesPerCall = 64ull << 20;
 
+		// Ruckler-Protokoll (unter g_stateLock)
+		FrameActivity g_act;
+
 		void DeferRelease(W::IUnknown* a_obj, std::uint64_t a_bytes = 0)
 		{
 			if (a_obj) {
@@ -381,6 +385,10 @@ namespace TextureStream
 					break;
 				}
 				released += e.bytes;
+				if (e.bytes) {
+					++g_act.released;
+					g_act.releasedMB += e.bytes / 1048576.0;
+				}
 				e.obj->Release();
 				g_deferred.pop_front();
 			}
@@ -1086,7 +1094,7 @@ namespace TextureStream
 		std::uint32_t g_passId = 1;
 
 		// Textur wurde an einem Objekt gefunden, das a_needPx Pixel gross erscheint
-		void OnSeen(RE::NiSourceTexture* a_src, float a_needPx)
+		void OnSeen(RE::NiSourceTexture* a_src, float a_needPx, bool a_skinned)
 		{
 			const auto r = a_src->rendererTexture;
 			if (!r || !r->texture) {
@@ -1121,6 +1129,9 @@ namespace TextureStream
 				}
 			}
 			st.lastSeen = Clock::now();
+			if (a_skinned) {
+				st.skinPass = g_passId;
+			}
 			if (st.passId != g_passId) {
 				st.passId = g_passId;
 				st.passNeed = 0;
@@ -1219,6 +1230,8 @@ namespace TextureStream
 				++g_stats.pingPong;
 			}
 			++g_stats.downs;
+			++g_act.downs;
+			g_act.downMB += a_freed / 1048576.0;
 		}
 
 		// ---------------- Ergebnisse des Hintergrund-Threads uebernehmen (Main-Thread) ----------------
@@ -1304,6 +1317,8 @@ namespace TextureStream
 				st.curH = std::max(1u, job.fullH >> job.skip);
 				st.curMips = job.fullMips - job.skip;
 				st.lastReload = Clock::now();
+				++g_act.reloads;
+				g_act.reloadMB += ChainBytes(st.fi, st.curW, st.curH, st.curMips) / 1048576.0;
 				++g_stats.ups;
 				g_stats.upMs += res.ms;
 				g_stats.upMB += res.mb;
@@ -1342,11 +1357,12 @@ namespace TextureStream
 			if (!material) {
 				return;
 			}
-			float need = a_forceNeed;
+			float      need = a_forceNeed;
+			const bool skinned = a_geom->GetGeometryRuntimeData().skinInstance != nullptr;
 			// Figuren (geskinnt: Koerper, Haare, Kleidung) nie verkleinern: ihre Huelle ist oft veraltet (Animation bewegt
 			// die Figur, die Huelle bleibt am Ausgangspunkt - besonders bei sitzenden NPCs). Snilf in Rifton: Haare galten
 			// als 9 px gross und wurden verkleinert -> flaechig blaue Haare (1.0.4). Volle Groesse auch fuer Stufe 3 merken.
-			if (need <= 0 && a_geom->GetGeometryRuntimeData().skinInstance) {
+			if (need <= 0 && skinned) {
 				need = 1.0e6f;
 			}
 			if (need <= 0) {
@@ -1359,7 +1375,7 @@ namespace TextureStream
 			const int            n = SafeGather(material, textures);
 			for (int i = 0; i < n; ++i) {
 				if (textures[i]) {
-					OnSeen(textures[i], need);
+					OnSeen(textures[i], need, skinned);
 				}
 			}
 		}
@@ -1791,6 +1807,31 @@ namespace TextureStream
 			const auto& s = g_stats;
 			logger::info("[TextureStream] {} | textures {} (downscalable {}, file mismatch {}) | downscaled {} -> {:.0f} MB instead of {:.0f} MB = {:.0f} MB saved",
 				Active() ? "ON" : "OFF", managed, eligible, probeBad, reduced, curMB, fullMB, fullMB - curMB);
+			// Figuren (geskinnt) werden nie verkleinert - wie viel VRAM steckt darin? (aktueller und letzter Durchlauf)
+			{
+				std::uint32_t nChar = 0, nOther = 0, nBig = 0;
+				double        mbChar = 0, mbOther = 0, mbBig = 0, mbAll = 0;
+				for (const auto& [r, st] : g_tex) {
+					const double mb = ChainBytes(st.fi, st.curW, st.curH, st.curMips) / 1048576.0;
+					mbAll += mb;
+					if (st.skinPass == 0 || st.skinPass + 1 < g_passId) {
+						continue;
+					}
+					if (st.path.starts_with("textures\\actors\\character\\")) {
+						++nChar;
+						mbChar += mb;
+					} else {
+						++nOther;
+						mbOther += mb;
+					}
+					if (st.CurEdge() >= 4096) {
+						++nBig;
+						mbBig += mb;
+					}
+				}
+				logger::info("[TextureStream]   figures (skinned, always full size): {} textures, {:.0f} MB of {:.0f} MB seen | body/face/hair {} ({:.0f} MB), armor/clothing/other {} ({:.0f} MB) | 4K+ {} ({:.0f} MB)",
+					nChar + nOther, mbChar + mbOther, mbAll, nChar, mbChar, nOther, mbOther, nBig, mbBig);
+			}
 			logger::info("[TextureStream]   10 s: downscaled {} | reloaded {} ({:.0f} MB, avg {:.0f} ms) | load errors {} | ping-pong {} | refilled {} | queue {} | passes {} (avg {:.0f} frames, {:.0f} nodes, {:.2f} ms total)",
 				s.downs, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, s.pingPong, s.refills, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
 				s.passes ? double(s.passNodes) / s.passes : 0.0, s.passes ? s.passMs / s.passes : 0.0);
@@ -1913,9 +1954,24 @@ namespace TextureStream
 		logger::info("Hook installed: DDS loader (Detour) - load reduced; only textures straight from DDS files are streamed");
 	}
 
+	FrameActivity TakeFrameActivity()
+	{
+		std::scoped_lock state(g_stateLock);
+		auto a = g_act;
+		g_act = {};
+		a.vramPct = g_vramPct.load(std::memory_order_relaxed);
+		a.pagedMB = g_procShared.load(std::memory_order_relaxed) / 1048576.0;
+		return a;
+	}
+
 	void OnFrame()
 	{
 		std::scoped_lock state(g_stateLock);
+		struct OwnTime
+		{
+			Clock::time_point t0 = Clock::now();
+			~OwnTime() { g_act.ms += std::chrono::duration<double, std::milli>(Clock::now() - t0).count(); }
+		} ownTime;
 		static Clock::time_point lastSave = Clock::now();
 		if (Clock::now() - lastSave >= 300s) {
 			lastSave = Clock::now();
@@ -2038,6 +2094,7 @@ namespace TextureStream
 			g_stats.passFrames += g_passFrames;
 			g_stats.passNodes += g_passNodes;
 			g_stats.passMs += g_passMs;
+			g_act.passEnd = true;
 			PassEnd();
 		}
 	}
