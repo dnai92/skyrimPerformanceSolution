@@ -5,6 +5,7 @@
 #include "DetourHelper.h"
 #include "GpuTimer.h"
 #include "InstancedDraw.h"
+#include "LightShadowCache.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
 
@@ -577,6 +578,9 @@ namespace InstancingAnalysis
 				if (a_pass && ShadowCulling::ShouldSkipDepthPrepassDraw(*a_pass)) {
 					return;  // Tiefenvorpass: kleines, fernes Objekt -> Draw ueberspringen
 				}
+				if (a_pass && LightShadowCache::SkipDraw(*a_pass)) {
+					return;  // Schatten steckt in der zwischengespeicherten Karte
+				}
 				bool first = false;
 				if (Site == 1 && g_instBatchActive && a_pass && Qualifies(*a_pass, a_alphaTest)) {
 					if (CollectInstance(*a_pass)) {
@@ -638,6 +642,7 @@ namespace InstancingAnalysis
 			static void thunk(RE::BSShader* a_this, RE::BSRenderPass* a_pass, std::uint32_t a_flags)
 			{
 				Stats::Count(Stats::Counter::UtilityDraws);
+				LightShadowCache::OnUtilityDraw();
 				if (ShadowCulling::InDepthPrepass()) {
 					Stats::Count(Stats::Counter::DepthDrawsAll);
 				}
@@ -760,6 +765,7 @@ namespace InstancingAnalysis
 		if (ok) {
 			RenderPassImmediately<1>::func = trampoline.write_call<5>(site1.address(), RenderPassImmediately<1>::thunk);
 			RenderPassImmediately<2>::func = trampoline.write_call<5>(site2.address(), RenderPassImmediately<2>::thunk);
+			LightShadowCache::SetDrawFilterInstalled();
 			logger::info("Hooks installed: RenderPassImmediately call sites 1 and 2");
 		}
 		Features::Report("Diagnostics: draw call assignment", "Diagnose: Draw-Zuordnung", ok, ok ? "" : "call sites differ");

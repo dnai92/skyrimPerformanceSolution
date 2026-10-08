@@ -49,8 +49,6 @@ namespace Stats
 		OtherCullers,     // AppendVirtual anderer Culler (Hauptszene, Punktlichter, ...)
 		PointKept,        // Meshes in Punktlicht-Schattenkarten
 		PointCulled,      // davon verworfen
-		PointLitOnly,     // nur Beleuchtung eingetragen, Schatten weggelassen (Culling / Schatten-Cache)
-		PointLitOnlyGrouped,  // dabei in Alpha-Gruppe -> unveraendert gelassen
 		SkylightKept,     // Objekte in der Skylighting-/Niederschlags-Verdeckungskarte
 		SkylightCulled,   // davon verworfen
 		DepthKept,        // Draws im Tiefenvorpass (ueber gehookte Aufrufstelle)
@@ -92,8 +90,6 @@ namespace Stats
 		"Other cullers",
 		"Point light kept",
 		"Point light culled",
-		"Point light lit only",
-		"Point light lit only (grouped, kept)",
 		"Skylight kept",
 		"Skylight culled",
 		"Depth pre-pass kept",

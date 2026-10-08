@@ -5,7 +5,8 @@
 // ruhenden Licht fast nichts aendert (Drachenfeste: ~3.400 Meshes je Karte, ~4 ms GPU fuer alle Fackelschatten).
 // Pro Karte wird eine Kopie mit nur den unbeweglichen Meshes gehalten. In jedem Frame wird sie in den gerade
 // zugeteilten Platz der Schattenkarten-Sammlung kopiert, gezeichnet werden nur noch Figuren, an Figuren haengende
-// Meshes, Effekte und gelernte Bewegliche. Flackernde (sich bewegende) Lichter werden nie zwischengespeichert.
+// Meshes, Effekte und gelernte Bewegliche. Eingesammelt wird alles wie ohne Cache, weggelassen wird erst beim
+// einzelnen Draw: das Einsammeln hat Nebenwirkungen (bis 1.0.33 ging dadurch das Licht aus). Flackernde (sich bewegende) Lichter werden nie zwischengespeichert.
 // Neu aufgebaut wird, wenn sich ein unbewegliches Mesh bewegt (es gilt ab dann als beweglich), hinzukommt oder
 // wegfaellt. Ablauf in der Engine (ID 107604, je Schattenkarte): Platz zuteilen, leeren, zeichnen (ID 106436),
 // Matrix berechnen - der Cache haengt sich an den Zeichen-Aufruf.
@@ -17,13 +18,15 @@ namespace LightShadowCache
 	// Frame-Beginn (Main-Thread): letzten Frame auswerten, Modus je Schattenkarte fuer diesen Frame festlegen
 	void OnFrame();
 
-	// Culling-Jobs: Mesh kommt in die Schattenkarte dieser Kamera. true = keinen Schatten zeichnen (steckt im Cache);
-	// die Beleuchtung durch das Licht muss der Aufrufer trotzdem eintragen (s. ShadowCulling, AppendVirtualParabolic)
-	bool FilterAppend(const RE::NiCamera* a_camera, RE::BSGeometry& a_geom) noexcept;
+	// Einzelner Draw (RenderPassImmediately, Render-Thread) waehrend eine Schattenkarte gezeichnet wird.
+	// true = nicht zeichnen (steckt im Cache bzw. Figur im Aufbau-Frame)
+	bool SkipDraw(const RE::BSRenderPass& a_pass) noexcept;
 
-	// Culling-Jobs: Mesh einer Lichtkamera ueber einen Culler, bei dem sich Schatten und Beleuchtung nicht trennen
-	// lassen -> dieses Licht nicht zwischenspeichern
-	void NotCacheable(const RE::NiCamera* a_camera) noexcept;
+	// BSUtilityShader::SetupGeometry: jeder Utility-Draw (Abdeckungs-Kontrolle des Draw-Filters)
+	void OnUtilityDraw() noexcept;
+
+	// Draw-Filter (RenderPassImmediately-Aufrufstellen) installiert - ohne ihn bleibt der Cache aus
+	void SetDrawFilterInstalled() noexcept;
 
 	// Bildausgabe (IDXGISwapChain::Present, jedes gezeichnete Bild - auch in Pause/Menues)
 	void OnPresent() noexcept;

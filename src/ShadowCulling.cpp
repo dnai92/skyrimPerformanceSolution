@@ -912,7 +912,6 @@ namespace ShadowCulling
 					}
 					Stats::Count(Stats::Counter::PointKept);
 					RecordPointMesh(a_this->camera, a_visible);
-					LightShadowCache::NotCacheable(a_this->camera);  // dieser Culler trennt Schatten und Beleuchtung nicht
 					break;
 				default:
 					Stats::Count(Stats::Counter::OtherCullers);
@@ -943,43 +942,15 @@ namespace ShadowCulling
 		// Basis-Implementierung und laeuft daher NICHT ueber den Hook auf BSCullingProcess. Alles hier ist Punktlicht.
 		struct AppendVirtualParabolic
 		{
-			// Dieser Culler sammelt in einem Durchlauf zweierlei, gesteuert ueber den Modus an +0x301F4 (in CommonLib
-			// "alphaGroupStopIndex"; AppendNonAccum ID 108604): Bit 0 = das Licht beleuchtet das Mesh (Licht-Zuordnung),
-			// Bit 1 = das Mesh wirft Schatten. Weglassen darf nur den Schatten treffen - sonst fehlt das Licht auf dem Mesh.
-			// Bis 1.0.32 fiel beides weg: im Schatten-Cache ging das Licht auf Waenden und Boden aus (Community Shaders
-			// wie Vanilla), beim Aufbau kurz auf Figuren. Nur AE geprueft; SE/VR wie bisher alles weglassen.
-			static void SkipShadow(RE::BSCullingProcess* a_this, RE::BSGeometry& a_visible, std::int32_t a_alphaGroupIndex)
-			{
-				if (!REL::Module::IsAE()) {
-					return;
-				}
-				const auto mode = static_cast<std::int32_t>(a_this->alphaGroupStopIndex);
-				if ((mode & 1) == 0) {
-					return;  // reiner Schatten-Durchlauf
-				}
-				if (a_alphaGroupIndex != -1 || a_this->isGroupingAlphas) {
-					Stats::Count(Stats::Counter::PointLitOnlyGrouped);
-					func(a_this, a_visible, a_alphaGroupIndex);  // Alpha-Gruppen (selten): unveraendert, Schatten bleibt
-					return;
-				}
-				Stats::Count(Stats::Counter::PointLitOnly);
-				a_this->AppendNonAccum(a_visible, mode & ~2);  // nur Beleuchtung eintragen
-			}
-
 			static void thunk(RE::BSCullingProcess* a_this, RE::BSGeometry& a_visible, std::int32_t a_alphaGroupIndex)
 			{
 				DiagRecord(a_this->camera);
 				if (g_pointCullAllowed.load(std::memory_order_relaxed) && !NearPointLight(a_this->camera, a_visible) && ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX)) {
 					Stats::Count(Stats::Counter::PointCulled);
-					SkipShadow(a_this, a_visible, a_alphaGroupIndex);
 					return;
 				}
 				Stats::Count(Stats::Counter::PointKept);
 				RecordPointMesh(a_this->camera, a_visible);
-				if (LightShadowCache::FilterAppend(a_this->camera, a_visible)) {
-					SkipShadow(a_this, a_visible, a_alphaGroupIndex);  // Schatten steckt in der zwischengespeicherten Karte
-					return;
-				}
 				func(a_this, a_visible, a_alphaGroupIndex);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;

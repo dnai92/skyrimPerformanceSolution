@@ -41,8 +41,8 @@ namespace LightShadowCache
 			bool                                  valid = false;        // Cache-Inhalt passt
 			bool                                  built = false;        // Aufbau-Frame: Kopie gesichert
 			bool                                  drawn = false;        // in diesem Frame gezeichnet
-			bool                                  unsupported = false;  // Karten in verschiedenen Ebenen / Culler ohne Trennung
-			std::atomic<bool>                     notCacheable{ false };  // Culling-Jobs: s. NotCacheable
+			bool                                  unsupported = false;  // Karten in verschiedenen Ebenen
+			bool                                  uncovered = false;    // Aufbau: Draws ausserhalb des Filters (Figur koennte im Cache stecken)
 			REX::W32::ID3D11Texture2D*            tex = nullptr;        // eigene Kopie der Ebene
 			REX::W32::ID3D11Texture2D*            prevTex = nullptr;    // vollstaendige Karte des Vorframes (Aufbau ohne Blinken)
 			std::uint32_t                         prevW = 0, prevH = 0, prevFormat = 0;
@@ -62,7 +62,6 @@ namespace LightShadowCache
 			std::unordered_set<const RE::BSGeometry*>        promoted;  // gelernte Bewegliche
 			std::uint32_t                                    matched = 0;
 			bool                                             broken = false;   // bewegt/weggefallen -> neu aufbauen
-			std::uint32_t                                    keptFrame = 0;    // Frame, in dem schon ein Unbewegliches gezeichnet wurde
 		};
 		std::array<LightState, kMaxLights> g_lights;
 		std::atomic<std::uint32_t>         g_frame{ 0 };
@@ -72,11 +71,16 @@ namespace LightShadowCache
 		std::atomic<bool> g_onFrameSeen{ false };
 		std::atomic<bool> g_stalled{ false };
 		bool                               g_installed = false;
+		bool                               g_drawFilter = false;
+		// Gerade gezeichnete Schattenkarte (Render-Thread, nur waehrend des Zeichen-Aufrufs gesetzt)
+		LightState*   g_curLight = nullptr;
+		Mode          g_curMode = Mode::kNormal;
+		std::uint32_t g_curSetups = 0, g_curPasses = 0;  // Utility-Draws / davon durch den Filter gelaufen
 
 		struct Window
 		{
 			std::uint64_t frames = 0, cachedMaps = 0, builds = 0, normalMaps = 0;
-			std::uint64_t lightMoved = 0, removed = 0, promoted = 0, extraFull = 0, buildFailed = 0, unsupported = 0;
+			std::uint64_t lightMoved = 0, removed = 0, promoted = 0, extraFull = 0, buildFailed = 0, unsupported = 0, uncoveredDraws = 0;
 		} g_win;
 		std::atomic<std::uint64_t> g_saved{ 0 }, g_drawnDynamic{ 0 }, g_drawnExtra{ 0 };
 
@@ -231,8 +235,7 @@ namespace LightShadowCache
 				std::scoped_lock lock(a_l.lock);
 				a_l.promoted.clear();
 			}
-			a_l.valid = a_l.built = a_l.drawn = a_l.unsupported = false;
-			a_l.notCacheable.store(false, std::memory_order_relaxed);
+			a_l.valid = a_l.built = a_l.drawn = a_l.unsupported = a_l.uncovered = false;
 			a_l.stableFrames = a_l.camCount = 0;
 			a_l.mode.store(static_cast<int>(Mode::kNormal), std::memory_order_relaxed);
 			for (auto& c : a_l.cams) {
@@ -498,13 +501,21 @@ namespace LightShadowCache
 					return;
 				}
 				l->drawn = true;
-				if (mode == Mode::kCached) {
-					if (idx == 0) {
-						CopyUnbound(target, sub, l->tex, 0);  // unbewegliche Schatten aller Karten zurueck (nach dem Leeren)
+				if (mode == Mode::kCached && idx == 0) {
+					CopyUnbound(target, sub, l->tex, 0);  // unbewegliche Schatten aller Karten zurueck (nach dem Leeren)
+				}
+				g_curLight = l;
+				g_curMode = mode;
+				g_curSetups = g_curPasses = 0;
+				func(a_camera, a_accumulator, a_flags);  // Cache-Frame: nur Bewegliche, Aufbau: nur Unbewegliche (SkipDraw)
+				g_curLight = nullptr;
+				if (g_curSetups > g_curPasses) {
+					g_win.uncoveredDraws += g_curSetups - g_curPasses;
+					if (mode == Mode::kBuild) {
+						l->uncovered = true;  // eine Figur koennte im Cache gelandet sein
 					}
-					func(a_camera, a_accumulator, a_flags);  // nur Bewegliche
-				} else {
-					func(a_camera, a_accumulator, a_flags);  // nur Unbewegliche
+				}
+				if (mode == Mode::kBuild) {
 					if (idx + 1 == descs.size()) {
 						CopyUnbound(l->tex, 0, target, sub);      // nach der letzten Karte: nur Unbewegliche sichern
 						if (DebugMode() != 2) {
@@ -536,34 +547,50 @@ namespace LightShadowCache
 		logger::info("Hook installed: shadow map draw (ID 107604+0x167) - shadow cache for static lights");
 	}
 
-	bool FilterAppend(const RE::NiCamera* a_camera, RE::BSGeometry& a_geom) noexcept
+	void SetDrawFilterInstalled() noexcept
 	{
-		if (!g_installed) {
-			return false;
+		g_drawFilter = true;
+	}
+
+	void OnUtilityDraw() noexcept
+	{
+		if (g_curLight) {
+			++g_curSetups;
 		}
-		if (g_stalled.load(std::memory_order_relaxed)) {
-			return false;
-		}
-		LightState* l = FindByCamera(a_camera);
+	}
+
+	namespace
+	{
+		bool Filter(LightState* l, RE::BSGeometry& geom) noexcept;
+	}
+
+	bool SkipDraw(const RE::BSRenderPass& a_pass) noexcept
+	{
+		LightState* const l = g_curLight;
 		if (!l) {
 			return false;
 		}
-		const auto mode = static_cast<Mode>(l->mode.load(std::memory_order_relaxed));
-		if (mode == Mode::kNormal) {
-			return false;
+		const bool skip = a_pass.geometry && Filter(l, *a_pass.geometry);
+		if (!skip) {
+			++g_curPasses;  // wird gezeichnet -> SetupGeometry folgt
 		}
-		bool dynamic = IsDynamic(a_geom);
+		return skip;
+	}
+
+	namespace
+	{
+	bool Filter(LightState* l, RE::BSGeometry& geom) noexcept
+	{
+		const auto mode = g_curMode;
+		bool       dynamic = IsDynamic(geom);
 		try {
 			std::scoped_lock lock(l->lock);
-			dynamic = dynamic || l->promoted.contains(&a_geom);
-			if (mode == Mode::kWait) {
-				return false;
-			}
+			dynamic = dynamic || l->promoted.contains(&geom);
 			if (mode == Mode::kBuild) {
 				if (dynamic) {
 					return true;  // Aufbau-Frame: nur Unbewegliche in die Karte
 				}
-				l->statics[&a_geom] = { a_geom.world, 0 };
+				l->statics.try_emplace(&geom, LightState::Entry{ geom.world, 0 });
 				return false;
 			}
 			// Cache-Frame
@@ -574,10 +601,10 @@ namespace LightShadowCache
 				g_drawnDynamic.fetch_add(1, std::memory_order_relaxed);
 				return false;
 			}
-			const auto it = l->statics.find(&a_geom);
+			const auto it = l->statics.find(&geom);
 			if (it == l->statics.end()) {
 				// neu im Lichtradius: zusaetzlich zeichnen, der Cache bleibt gueltig (zu viele -> neu aufbauen)
-				l->extras.insert(&a_geom);
+				l->extras.insert(&geom);
 				g_drawnExtra.fetch_add(1, std::memory_order_relaxed);
 				return false;
 			}
@@ -586,16 +613,10 @@ namespace LightShadowCache
 				it->second.seen = frame;
 				++l->matched;
 			}
-			if (MeshMoved(it->second.pose, a_geom.world)) {
-				l->promoted.insert(&a_geom);  // bewegt sich -> ab jetzt immer neu zeichnen; alter Schatten steckt im Cache
-				RecordMover(a_geom);
+			if (MeshMoved(it->second.pose, geom.world)) {
+				l->promoted.insert(&geom);  // bewegt sich -> ab jetzt immer neu zeichnen; alter Schatten steckt im Cache
+				RecordMover(geom);
 				l->broken = true;
-				return false;
-			}
-			// Vorsicht aus 1.0.32: je Licht und Frame ein Unbewegliches zusaetzlich zeichnen, damit die Liste nie leer ist
-			// (steckt auch im Cache, optisch gleich). Das "Licht geht aus" hatte aber eine andere Ursache, s. ShadowCulling.
-			if (l->keptFrame != frame) {
-				l->keptFrame = frame;
 				return false;
 			}
 		} catch (...) {
@@ -604,15 +625,6 @@ namespace LightShadowCache
 		g_saved.fetch_add(1, std::memory_order_relaxed);
 		return true;
 	}
-
-	void NotCacheable(const RE::NiCamera* a_camera) noexcept
-	{
-		if (!g_installed) {
-			return;
-		}
-		if (LightState* l = FindByCamera(a_camera)) {
-			l->notCacheable.store(true, std::memory_order_relaxed);
-		}
 	}
 
 	void OnFrame()
@@ -622,7 +634,7 @@ namespace LightShadowCache
 		}
 		const auto frame = g_frame.fetch_add(1, std::memory_order_relaxed) + 1;
 		g_onFrameSeen.store(true, std::memory_order_relaxed);
-		const bool enabled = Config::lightShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed);
+		const bool enabled = g_drawFilter && Config::lightShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed);
 
 		// 1. letzten Frame auswerten
 		for (auto& l : g_lights) {
@@ -630,17 +642,16 @@ namespace LightShadowCache
 				continue;
 			}
 			const auto mode = static_cast<Mode>(l.mode.load(std::memory_order_relaxed));
-			if (l.notCacheable.exchange(false, std::memory_order_relaxed)) {
-				l.unsupported = true;
-				l.valid = false;
-			}
 			if (l.unsupported) {
 				++g_win.unsupported;
 			}
 			if ((mode == Mode::kBuild || mode == Mode::kCached) && l.drawn) {
 				std::scoped_lock lock(l.lock);
 				if (mode == Mode::kBuild) {
-					l.valid = l.built && !l.statics.empty() && !l.unsupported;
+					l.valid = l.built && !l.statics.empty() && !l.unsupported && !l.uncovered;
+					if (l.uncovered) {
+						++g_win.buildFailed;
+					}
 					++g_win.builds;
 				} else if (DebugMode() != 1 && DebugMode() != 3) {  // Pruef-Modi 1/3: nie neu aufbauen
 					if (l.broken) {
@@ -659,6 +670,7 @@ namespace LightShadowCache
 			}
 			l.drawn = false;
 			l.built = false;
+			l.uncovered = false;
 		}
 
 		// 2. Modus je Licht fuer diesen Frame
@@ -787,9 +799,9 @@ namespace LightShadowCache
 		auto&        w = g_win;
 		const double f = static_cast<double>(w.frames);
 		logger::info("[LightCache] {} (test mode {}) | maps/frame from cache {:.1f}, drawn normally {:.1f} | builds/frame {:.3f} | meshes/frame saved {:.0f}, still drawn: moving {:.0f}, added {:.0f} | "
-					 "rebuilds: light moved {}, mesh removed {}, mesh started moving {}, too many added {} | failed {}, lights not supported {:.1f}",
+					 "rebuilds: light moved {}, mesh removed {}, mesh started moving {}, too many added {} | failed {}, lights not supported {:.1f} | draws outside filter {}",
 			Config::lightShadowCache.enabled ? "ON" : "OFF", DebugMode(), w.cachedMaps / f, w.normalMaps / f, w.builds / f, g_saved.exchange(0) / f, g_drawnDynamic.exchange(0) / f,
-			g_drawnExtra.exchange(0) / f, w.lightMoved, w.removed, w.promoted, w.extraFull, w.buildFailed, w.unsupported / f);
+			g_drawnExtra.exchange(0) / f, w.lightMoved, w.removed, w.promoted, w.extraFull, w.buildFailed, w.unsupported / f, w.uncoveredDraws);
 		std::scoped_lock lock(g_moverLock);
 		for (const auto& [name, count] : g_movers) {
 			logger::info("[LightCache]   started moving: {}x {}", count, name);
