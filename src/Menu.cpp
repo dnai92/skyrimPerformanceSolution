@@ -306,6 +306,9 @@ namespace Menu
 			MenuApi::SeparatorText(T("Torch / point light shadow culling", "Fackelschatten kleiner Objekte weglassen"));
 			Toggle(T("Enabled##point", "Aktiv##point"), Config::pointLightCulling.enabled,
 				T("Small, far objects do not cast shadows from torches and fires.", "Kleine, ferne Objekte werfen keinen Schatten von Fackeln und Feuern."));
+			Toggle(T("Cache shadows of static lights (test)##point", "Schatten fester Lichter zwischenspeichern (Test)##point"), Config::lightShadowCache.enabled,
+				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters and moving objects are drawn again each frame. Flickering lights are always redrawn. Mainly for interiors with many lights.",
+					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren und Bewegliches neu gezeichnet. Flackernde Lichter werden immer neu gezeichnet. Vor allem für Innenräume mit vielen Lichtern."));
 			AtomicToggle(T("Also in interiors##point", "Auch in Innenräumen##point"), Config::pointLightInteriors,
 				T("Interiors are lit almost only by torches and fires, missing shadows are noticeable there. Off = full torch shadows indoors.",
 					"Innenräume werden fast nur von Fackeln und Feuern beleuchtet, fehlende Schatten fallen dort auf. Aus = in Innenräumen volle Fackelschatten."));

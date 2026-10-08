@@ -5,6 +5,7 @@
 #include "TextureStream.h"
 #include "DetourHelper.h"
 #include "GpuTimer.h"
+#include "LightShadowCache.h"
 #include "Stats.h"
 
 #include <mutex>
@@ -911,6 +912,9 @@ namespace ShadowCulling
 					}
 					Stats::Count(Stats::Counter::PointKept);
 					RecordPointMesh(a_this->camera, a_visible);
+					if (LightShadowCache::FilterAppend(a_this->camera, a_visible)) {
+						return;  // steckt in der zwischengespeicherten Schattenkarte
+					}
 					break;
 				default:
 					Stats::Count(Stats::Counter::OtherCullers);
@@ -950,6 +954,9 @@ namespace ShadowCulling
 				}
 				Stats::Count(Stats::Counter::PointKept);
 				RecordPointMesh(a_this->camera, a_visible);
+				if (LightShadowCache::FilterAppend(a_this->camera, a_visible)) {
+					return;  // steckt in der zwischengespeicherten Schattenkarte
+				}
 				func(a_this, a_visible, a_alphaGroupIndex);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -1627,6 +1634,7 @@ namespace ShadowCulling
 		g_viewValid.store(false, std::memory_order_relaxed);  // neu erst beim naechsten Sonnen-Accumulate (Innenraeume: nie)
 #ifndef SPS_VR
 		FinishLightCacheDiag();  // vor dem Neuaufbau der Kameraliste: Zaehler gehoeren zur Liste des letzten Frames
+		LightShadowCache::OnFrame();
 #endif
 
 		if (const auto camera = RE::PlayerCamera::GetSingleton(); camera && camera->cameraRoot) {
@@ -1740,6 +1748,7 @@ namespace ShadowCulling
 			}
 			ReportCulled();
 			ReportLightCacheDiag();
+			LightShadowCache::Report();
 			if (Config::analysis.load(std::memory_order_relaxed)) {
 				ReportDecalTextures();
 			}

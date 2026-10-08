@@ -85,6 +85,7 @@ namespace Config
 			f("TextureStream", "fSafetyFactor", textureStream.safetyFactor);
 			f("TextureStream", "fMinEdge", textureStream.minEdge);
 			b("TextureStream", "bStreamClothing", textureStream.streamClothing);
+			b("LightShadowCache", "bEnabled", lightShadowCache.enabled);
 			b("TextureStream", "bStreamCharacters", textureStream.streamCharacters);
 			b("SubtreePruning", "bSun", subtreePruning.sun);
 			b("SubtreePruning", "bPrecipitation", subtreePruning.precip);
@@ -269,6 +270,9 @@ namespace Config
 		ts.streamCharacters = ini.GetBoolValue("TextureStream", "bStreamCharacters", ts.streamCharacters);
 		logger::info("TextureStream: {} | report {} | safety factor {:.1f} | min. {:.0f} px | budget {:.2f} ms | clothing/armor {} | bodies/faces/hair {} | excluded: {}",
 			ts.enabled ? "ON" : "OFF", ts.analysis, ts.safetyFactor, ts.minEdge, ts.budgetMs, ts.streamClothing, ts.streamCharacters, ts.exclude);
+
+		lightShadowCache.enabled = ini.GetBoolValue("LightShadowCache", "bEnabled", lightShadowCache.enabled);
+		logger::info("LightShadowCache (test): {}", lightShadowCache.enabled ? "ON" : "OFF");
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);

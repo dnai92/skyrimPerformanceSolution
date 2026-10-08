@@ -4,6 +4,7 @@
 #include "GpuTimer.h"
 
 #include "InstancingAnalysis.h"
+#include "LightShadowCache.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
 #include "TextureStream.h"
@@ -170,6 +171,7 @@ namespace Hooks
 				// Vor dem Abbau der Welt/Zellen alle eigenen Verweise freigeben (Ladebildschirm oeffnet vor dem Entladen)
 				if (a_event && a_event->opening && (a_event->menuName == RE::MainMenu::MENU_NAME || a_event->menuName == RE::LoadingMenu::MENU_NAME)) {
 					TextureStream::Reset(a_event->menuName == RE::MainMenu::MENU_NAME ? "main menu" : "loading screen");
+					LightShadowCache::Reset();
 				}
 				if (TracyIsConnected && a_event) {
 					const auto msg = std::format("Menue {}: {}", a_event->opening ? "auf" : "zu", a_event->menuName.c_str());

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SPS
-	VERSION 1.0.20
+	VERSION 1.0.21
 	LANGUAGES CXX
 )
 
@@ -39,6 +39,7 @@ add_commonlibsse_plugin(
 		src/Hotkey.cpp
 		src/InstancingAnalysis.cpp
 		src/LightGather.cpp
+		src/LightShadowCache.cpp
 		src/EngineTimers.cpp
 		src/TextureStream.cpp
 		src/Menu.cpp

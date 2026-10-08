@@ -3,6 +3,7 @@
 #include "InstancingAnalysis.h"
 #include "EngineTimers.h"
 #include "LightGather.h"
+#include "LightShadowCache.h"
 #include "Menu.h"
 #include "Config.h"
 #include "Features.h"
@@ -123,6 +124,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 #ifndef SPS_VR
 	InstancingAnalysis::Install();
 	LightGather::Install();
+	LightShadowCache::Install();
 #endif
 	TextureStream::Install();
 

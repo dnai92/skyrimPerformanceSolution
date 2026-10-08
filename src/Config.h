@@ -155,6 +155,13 @@ namespace Config
 	};
 	inline TextureStream textureStream;  // [TextureStream]
 
+	// Schatten-Cache fester Lichter (siehe LightShadowCache.h)
+	struct LightShadowCache
+	{
+		bool enabled = false;  // Test
+	};
+	inline LightShadowCache lightShadowCache;  // [LightShadowCache]
+
 	// Laedt SPS.ini (Vorgaben aus dem Mod-Paket) und darueber SPS_User.ini (Werte aus dem Menue im Spiel)
 	void Load();
 
