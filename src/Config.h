@@ -145,7 +145,7 @@ namespace Config
 		float       safetyFactor = 2.0f;  // benoetigte Aufloesung = Bildschirmgroesse x Faktor
 		float       minEdge = 1024.0f;    // nie unter diese Kantenlaenge verkleinern (Zweierpotenz)
 		float       budgetMs = 0.4f;      // Zeit pro Frame fuer den Szenen-Durchlauf
-		bool        streamClothing = false;    // Kleidung/Ruestung an Figuren verkleinern (Abstand ueber die Figur, nicht ihre Huelle)
+		bool        streamClothing = true;     // Kleidung/Ruestung an Figuren verkleinern (Abstand ueber die Figur, nicht ihre Huelle)
 		bool        streamCharacters = false;  // Koerper, Gesichter, Haare (textures/actors/character/) verkleinern
 		std::string exclude = "interface\\,\\maps\\,mapmarker,\\lod\\,terrain\\,fonts\\,book,\\sky\\,effects\\,cubemaps\\";  // Pfadteile (kleingeschrieben), nie verkleinern
 	};

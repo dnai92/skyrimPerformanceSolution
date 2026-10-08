@@ -18,6 +18,8 @@ so you can compare with and without the plugin at any time.
 | **Texture streaming** | Textures of far objects (also behind the camera) are shrunk in VRAM by dropping their top mip levels on the GPU, and reloaded at full size from disk/BSA in the background when you come closer. Files on disk are never changed. UI, maps, LOD, fonts and books are excluded; items in inventory/barter/crafting previews are always shown at full size. | ON, min. 512–1024 px |
 | **VRAM budget mode** | Streaming only kicks in when the game uses more than 85 % of the video memory Windows grants it, largest savings first. With enough VRAM (or no high-res texture packs) it does nothing and costs nothing. | ON |
 | **VRAM refill** | When usage drops clearly below the threshold (default 10 points), downscaled textures are reloaded at full size again, most needed first, so the VRAM stays as full as useful. | ON |
+| **Clothing and armor of characters** | Clothing and armor worn by far NPCs are streamed as well. Distance is measured at the character itself, so sitting or animated NPCs are handled correctly (their bounding volume lags behind). At a busy market about 1 GB less VRAM. | ON |
+| **Bodies, faces and hair** *(test)* | Also streams `textures\actors\character` of far characters. Textures that mods create or change at runtime (RaceMenu overlays, skin tint) are never touched. | OFF |
 | **RAM buffer** | Texture data that had to be reloaded more than once stays in RAM up to a set size (default 1 GB, slider in the menu). Textures that go back and forth then come from RAM instead of disk — mostly useful with 8K texture packs. Least recently used is dropped first. 0 = off. | 1024 MB |
 | **Load at remembered size** | The size a texture needed last time (also in earlier sessions) is passed to the game's DDS loader, so the top mip levels are never read or uploaded. Also applied during loading screens when VRAM was tight shortly before, so the VRAM no longer peaks at ~97 % after a door. | ON |
 | **Sun shadow culling** | Small, far objects do not cast sun shadows. Shadow length is taken into account (no culling below 25° sun elevation). | ON |
@@ -30,7 +32,7 @@ so you can compare with and without the plugin at any time.
 | **Subtree pruning** | Whole scene-graph branches are skipped in the sun shadow and skylighting passes when the branch as a whole already meets the culling rule. Same result, less traversal. | ON |
 | **In-game menu** | All switches and sliders via SKSE Menu Framework, English and German, saved automatically. | — |
 | **Hotkey** | One key toggles every optimization (default *Page Up*, freely assignable in the menu). | — |
-| **Logging & diagnostics** | One summary line per minute in `SPS.log`. The *Analysis logging* switch adds a detailed 10-second report (counters per optimization, VRAM, streaming), and *Log textures under crosshair* writes path and current size of every texture you look at — handy for bug reports. Optional Tracy timeline. | analysis off |
+| **Logging & diagnostics** | One summary line per minute in `SPS.log`; every frame over 100 ms is logged with what SPS did in it (`[Hitch]`). The *Analysis logging* switch adds a detailed 10-second report (counters per optimization, VRAM, streaming), and *Log textures under crosshair* writes path and current size of every texture you look at — handy for bug reports. Optional Tracy timeline. | analysis off |
 
 Experimental and **off** by default (known side effects): depth pre-pass culling, main view micro culling, far shadow
 cascade cache.

@@ -387,7 +387,7 @@ namespace Menu
 				}
 				Config::textureStream.minEdge = p;
 			}
-			Toggle(T("Also clothing and armor of characters (test)##ts", "Auch Kleidung und Rüstung von Figuren (Test)##ts"), Config::textureStream.streamClothing,
+			Toggle(T("Also clothing and armor of characters##ts", "Auch Kleidung und Rüstung von Figuren##ts"), Config::textureStream.streamClothing,
 				T("Clothing and armor worn by NPCs far away are shrunk as well. Distance is taken from the character itself, so sitting or animated NPCs are measured correctly.",
 					"Kleidung und Rüstung weit entfernter NPCs werden ebenfalls verkleinert. Der Abstand wird an der Figur selbst gemessen, damit auch sitzende oder animierte NPCs richtig erfasst werden."));
 			Toggle(T("Also bodies, faces and hair (test)##ts", "Auch Körper, Gesichter und Haare (Test)##ts"), Config::textureStream.streamCharacters,
