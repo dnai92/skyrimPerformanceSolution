@@ -84,6 +84,7 @@ namespace LightShadowCache
 			std::uint64_t lightMoved = 0, removed = 0, promoted = 0, extraFull = 0, buildFailed = 0, unsupported = 0, uncoveredDraws = 0;
 		} g_win;
 		std::atomic<std::uint64_t> g_saved{ 0 }, g_drawnDynamic{ 0 }, g_drawnExtra{ 0 };
+		std::uint32_t              g_frameBuilds = 0;  // Main-Thread
 
 		std::uint64_t Mix64(std::uint64_t a_x) noexcept
 		{
@@ -650,6 +651,7 @@ namespace LightShadowCache
 				std::scoped_lock lock(l.lock);
 				if (mode == Mode::kBuild) {
 					l.valid = l.built && !l.statics.empty() && !l.unsupported && !l.uncovered;
+					++g_frameBuilds;
 					if (l.uncovered) {
 						++g_win.buildFailed;
 					}
@@ -781,6 +783,11 @@ namespace LightShadowCache
 	void OnPresent() noexcept
 	{
 		g_stalled.store(!g_onFrameSeen.exchange(false, std::memory_order_relaxed), std::memory_order_relaxed);
+	}
+
+	std::uint32_t TakeFrameBuilds() noexcept
+	{
+		return std::exchange(g_frameBuilds, 0u);
 	}
 
 	void Reset()

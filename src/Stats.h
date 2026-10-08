@@ -19,6 +19,7 @@ namespace Stats
 		PrecipMask,           // Precipitation::SetupMask (Szenen-Durchlauf Regen-/Skylighting-Karte)
 		MainCull,             // Szenen-Durchlauf der Hauptkamera (ID 32174)
 		PresentWait,          // IDXGISwapChain::Present (CPU wartet auf GPU, FPS-Limit oder VSync)
+		LightShadowRender,    // Render der Fackel-/Punktlicht-Schattenkarten (inkl. Schatten-Cache)
 
 		kTotal
 	};
@@ -37,6 +38,7 @@ namespace Stats
 		"Rain/sky map",
 		"Main camera culling",
 		"Present wait",
+		"Torch shadows render",
 	};
 
 	// Zaehler pro Frame (Meshes, die in Culling-Listen aufgenommen bzw. verworfen werden)

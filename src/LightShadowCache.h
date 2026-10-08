@@ -36,6 +36,9 @@ namespace LightShadowCache
 	// Ladebildschirm / Hauptmenue: alles verwerfen
 	void Reset();
 
+	// Neuaufbauten seit dem letzten Aufruf (Ruckler-Zeile)
+	std::uint32_t TakeFrameBuilds() noexcept;
+
 	// Analyse-Bericht
 	void Report();
 }

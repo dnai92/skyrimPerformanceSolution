@@ -537,6 +537,7 @@ namespace InstancingAnalysis
 		{
 			static void thunk(RE::BSShadowLight* a_this, std::uint32_t& a_index)
 			{
+				Stats::ScopedTimer timer{ Stats::Zone::LightShadowRender };
 				GpuTimer::Begin(GpuTimer::kLightShadows);
 				func(a_this, a_index);
 				GpuTimer::End(GpuTimer::kLightShadows);

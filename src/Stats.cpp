@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include "GpuTimer.h"
+#include "LightShadowCache.h"
 #include "TextureStream.h"
 
 namespace Stats
@@ -52,14 +53,22 @@ namespace Stats
 		{
 			// Seit dem letzten Frame-Wechsel = innerhalb dieses Frames (TextureStream::OnFrame laeuft direkt nach Stats::OnFrame)
 			const auto act = TextureStream::TakeFrameActivity();
+			const auto builds = LightShadowCache::TakeFrameBuilds();
 			const bool cell = g_cellLoadedInFrame.exchange(false, std::memory_order_relaxed);
 			const bool menu = g_menuInFrame.exchange(false, std::memory_order_relaxed);
 			if (a_frameMs >= kHitchMs && a_frameMs < kMaxFrameMs) {
 				++g_hitches;
 				if (g_hitchLines < kHitchLinesPerWindow) {
 					++g_hitchLines;
-					logger::info("[Hitch] {:.0f} ms | SPS this frame: {} | frame before: {} | VRAM {:.0f} %, paged out {:.0f} MB{}{}", a_frameMs, Describe(act), Describe(g_prevAct),
-						std::max(0.0f, act.vramPct), act.pagedMB, cell ? " | cell loaded" : "", menu ? " | menu opened/closed" : "");
+					// Zeiten der gemessenen Bereiche in diesem Frame (enthalten auch die SPS-Arbeit darin: Culling in den
+					// Sonnenschatten, Schatten-Cache in den Fackelschatten, Drosselung in der Licht-Zuordnung)
+					const auto z = [](Zone a_z) { return static_cast<double>(g_frameNs[static_cast<std::size_t>(a_z)].load(std::memory_order_relaxed)) / 1e6; };
+					const double sun = z(Zone::SunShadowAccumulate) + z(Zone::SunShadowRender), torch = z(Zone::LightShadowRender), lights = z(Zone::LightGather),
+								 papyrus = z(Zone::PapyrusUpdate) + z(Zone::PapyrusTasklets), npc = z(Zone::NpcUpdate) + z(Zone::PlayerUpdate), present = z(Zone::PresentWait);
+					logger::info("[Hitch] {:.0f} ms | SPS this frame: {} | frame before: {} | VRAM {:.0f} %, paged out {:.0f} MB{}{} | measured: sun shadows {:.1f}, torch shadows {:.1f} (cache rebuilds {}), "
+								 "light assignment {:.1f}, papyrus {:.1f}, actors {:.1f}, present wait {:.1f}, not measured {:.1f} ms",
+						a_frameMs, Describe(act), Describe(g_prevAct), std::max(0.0f, act.vramPct), act.pagedMB, cell ? " | cell loaded" : "", menu ? " | menu opened/closed" : "",
+						sun, torch, builds, lights, papyrus, npc, present, std::max(0.0, a_frameMs - sun - torch - lights - papyrus - npc - present));
 				}
 			}
 			g_prevAct = act;
