@@ -245,6 +245,9 @@ namespace Menu
 				T("Small, far objects do not cast sun shadows.", "Kleine, ferne Objekte werfen keinen Sonnenschatten."));
 			Toggle(T("Torch / point light shadow culling", "Fackelschatten kleiner Objekte weglassen"), Config::pointLightCulling.enabled,
 				T("Small, far objects do not cast shadows from torches and fires.", "Kleine, ferne Objekte werfen keinen Schatten von Fackeln und Feuern."));
+			Toggle(T("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern"), Config::lightShadowCache.enabled,
+				T("Shadows of lights that do not move are kept, only characters and moving things are redrawn. Mainly for interiors.",
+					"Schatten von Lichtern, die sich nicht bewegen, werden aufbewahrt, nur Figuren und Bewegliches werden neu gezeichnet. Vor allem für Innenräume."));
 			Toggle(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"), Config::actorShadowCulling.enabled,
 				T("Characters far away do not cast shadows.", "Weit entfernte Figuren werfen keinen Schatten."));
 			Toggle(T("Skylighting culling (Community Shaders)", "Himmelslicht: kleine Objekte weglassen (Community Shaders)"), Config::skylightingCulling.enabled,
@@ -312,7 +315,7 @@ namespace Menu
 			RuleControls("point", Config::pointLightCulling, 5000.0f);
 
 			MenuApi::SeparatorText(T("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern"));
-			Toggle(T("Cache shadows of static lights (test)##point", "Schatten fester Lichter zwischenspeichern (Test)##point"), Config::lightShadowCache.enabled,
+			Toggle(T("Enabled##lcache", "Aktiv##lcache"), Config::lightShadowCache.enabled,
 				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters and moving objects are drawn again each frame. Flickering lights are always redrawn. Mainly for interiors with many lights.",
 					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren und Bewegliches neu gezeichnet. Flackernde Lichter werden immer neu gezeichnet. Vor allem für Innenräume mit vielen Lichtern."));
 
@@ -420,6 +423,56 @@ namespace Menu
 				T("Only decals smaller than this are affected. Footprints are about 22. From about 50 plaster and stone patches on walls disappear too (visible).",
 					"Nur kleinere Bodendetails sind betroffen. Fußabdrücke haben etwa 22. Ab etwa 50 verschwinden auch Putz- und Steinflecken an Mauern (sichtbar)."));
 		}
+		// Hilfe: Bildfehler -> welcher Schalter
+		void HelpEntry(const char* a_symptom, const char* a_switch)
+		{
+			MenuApi::BulletText("%s", a_symptom);
+			MenuApi::TextWrapped("      -> %s", a_switch);
+		}
+
+		void __stdcall RenderHelp()
+		{
+			MenuApi::TextWrapped("%s", T("Something looks wrong? First press the hotkey (Page Up by default) to switch all optimizations off. If the issue stays, it does not come from SPS. If it goes away, switch on again and turn off the switch listed below for your issue.",
+											"Sieht etwas falsch aus? Zuerst mit der Taste (Standard Bild auf) alle Optimierungen ausschalten. Bleibt der Fehler, kommt er nicht von SPS. Verschwindet er, wieder einschalten und den unten genannten Schalter für den Fehler ausschalten."));
+
+			MenuApi::SeparatorText(T("Shadows", "Schatten"));
+			HelpEntry(T("Small objects in the distance have no sun shadow", "Kleine Objekte in der Ferne haben keinen Sonnenschatten"),
+				T("Shadows > Sun shadow culling (or lower 'Min. apparent size')", "Schatten > Sonnenschatten kleiner Objekte weglassen (oder 'Min. scheinbare Größe' senken)"));
+			HelpEntry(T("Objects near torches or fires are missing their shadow", "Objekten an Fackeln oder Feuern fehlt der Schatten"),
+				T("Shadows > Torch / point light shadow culling (in interiors: 'Also in interiors')", "Schatten > Fackelschatten kleiner Objekte weglassen (in Innenräumen: 'Auch in Innenräumen')"));
+			HelpEntry(T("Characters far away have no shadow", "Figuren in der Ferne haben keinen Schatten"),
+				T("Shadows > Character shadow culling (or raise the distance)", "Schatten > Figurenschatten in der Ferne weglassen (oder Entfernung erhöhen)"));
+			HelpEntry(T("A torch light briefly goes dark, or a shadow stays where a door or object used to be", "Ein Fackellicht wird kurz dunkel, oder ein Schatten bleibt, wo eine Tür oder ein Objekt war"),
+				T("Shadows > Shadow cache for static lights", "Schatten > Schatten fester Lichter zwischenspeichern"));
+			HelpEntry(T("Sun shadows or objects flicker", "Sonnenschatten oder Objekte flackern"),
+				T("Shadows > Shadow instancing", "Schatten > Gleiche Schatten bündeln"));
+			HelpEntry(T("Far shadows follow the sun in small steps", "Ferne Schatten folgen der Sonne in kleinen Schritten"),
+				T("Overview > Calmer far shadows", "Übersicht > Ruhigere ferne Schatten"));
+
+			MenuApi::SeparatorText(T("Textures", "Texturen"));
+			HelpEntry(T("Textures are blurry up close or get sharp only after a moment", "Texturen sind aus der Nähe unscharf oder werden erst nach einem Moment scharf"),
+				T("Lights and scene > Texture streaming (or raise 'Safety factor' / 'Min. size')", "Licht und Szene > Textur-Streaming (oder 'Sicherheitsfaktor' / 'Min. Größe' erhöhen)"));
+			HelpEntry(T("Faces or hair look black, purple or blurry", "Gesichter oder Haare sehen schwarz, lila oder unscharf aus"),
+				T("Lights and scene > Also bodies, faces and hair", "Licht und Szene > Auch Körper, Gesichter und Haare"));
+			HelpEntry(T("Clothing or armor of NPCs looks blurry", "Kleidung oder Rüstung von NPCs ist unscharf"),
+				T("Lights and scene > Also clothing and armor of characters", "Licht und Szene > Auch Kleidung und Rüstung von Figuren"));
+			HelpEntry(T("Use 'Log textures under crosshair' to report a texture issue (writes path and size to SPS.log)", "Für Texturfehler 'Texturen unter dem Fadenkreuz protokollieren' nutzen (schreibt Pfad und Größe in SPS.log)"),
+				T("Lights and scene > Texture streaming", "Licht und Szene > Textur-Streaming"));
+
+			MenuApi::SeparatorText(T("Scene", "Szene"));
+			HelpEntry(T("Footprints, blood or leaves on the ground are missing in the distance", "Fußspuren, Blut oder Laub auf dem Boden fehlen in der Ferne"),
+				T("Lights and scene > Decal culling", "Licht und Szene > Ferne Bodendetails weglassen"));
+			HelpEntry(T("Rain or snow falls through small roofs, or small objects look wrong in skylighting (Community Shaders)", "Regen oder Schnee fällt durch kleine Dächer, oder kleine Objekte wirken im Himmelslicht falsch (Community Shaders)"),
+				T("Lights and scene > Skylighting culling", "Licht und Szene > Himmelslicht: kleine Objekte weglassen"));
+			HelpEntry(T("Characters walking past a torch are lit a moment late", "An einer Fackel vorbeilaufende Figuren werden einen Moment zu spät beleuchtet"),
+				T("Lights and scene > Light assignment throttle (or lower 'Max. age')", "Licht und Szene > Licht-Zuordnung drosseln (oder 'Max. Alter' senken)"));
+			HelpEntry(T("Whole objects disappear, or tiny objects pop in", "Ganze Objekte verschwinden, oder winzige Objekte ploppen auf"),
+				T("Overview > Experimental switches (both off by default)", "Übersicht > Experimentelle Schalter (beide standardmäßig aus)"));
+
+			MenuApi::SeparatorText(T("Reporting a bug", "Fehler melden"));
+			MenuApi::TextWrapped("%s", T("Please attach SPS.log (Documents\My Games\Skyrim Special Edition\SKSE) and say where it happened and which switch makes it go away.",
+											"Bitte SPS.log anhängen (Dokumente\My Games\Skyrim Special Edition\SKSE) und sagen, wo es passiert ist und welcher Schalter es behebt."));
+		}
 	}
 
 	bool IsGerman()
@@ -438,6 +491,7 @@ namespace Menu
 		MenuApi::AddSectionItem(kSection + T("Overview", "Übersicht"), RenderOverview);
 		MenuApi::AddSectionItem(kSection + T("Shadows", "Schatten"), RenderShadows);
 		MenuApi::AddSectionItem(kSection + T("Lights and scene", "Licht und Szene"), RenderScene);
+		MenuApi::AddSectionItem(kSection + T("Help with visual issues", "Hilfe bei Bildfehlern"), RenderHelp);
 		logger::info("Menu registered in SKSE Menu Framework (version {:.1f})", MenuApi::Version());
 	}
 }

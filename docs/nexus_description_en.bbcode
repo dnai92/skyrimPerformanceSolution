@@ -40,6 +40,7 @@ Nothing on disk is changed, nothing is stored in your save. Everything can be sw
 [list]
 [*][b]Sun shadow culling[/b] – Small, far objects do not cast sun shadows (depends on sun elevation).
 [*][b]Torch shadow culling[/b] – Small, far objects do not cast torch/fire shadows. Objects close to the light keep theirs; off in interiors by default.
+[*][b]Shadow cache for static lights[/b] – Shadows of lights that do not move (wall lamps, fireplaces) are kept; only characters and moving things are redrawn each frame. Flickering lights are always redrawn. Mainly for interiors with many lights. AE only.
 [*][b]Character shadow culling[/b] – Characters far away (default 50 m) do not cast shadows.
 [*][b]Skylighting culling[/b] – Small objects are left out of the Community Shaders skylighting map.
 [*][b]Decal culling[/b] – Footprint-sized decals farther than ~21 m are not drawn.
