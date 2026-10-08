@@ -21,7 +21,9 @@ namespace LightShadowCache
 		constexpr std::uint32_t kMaxLights = 16;      // gleichzeitig verwaltete Schattenlichter
 		constexpr std::uint32_t kMaxCams = 4;         // Schattenkarten je Licht (Fackel: 2 Halbkugeln)
 		constexpr std::uint32_t kStableFrames = 3;    // so lange muss ein Licht ruhen, bevor aufgebaut wird
-		constexpr std::uint32_t kMaxWaitFrames = 30;  // spaetestens dann aufbauen, auch mit Figuren im Radius
+		// spaetestens dann aufbauen, auch mit Figuren im Radius (deren Schatten fehlen im Aufbau-Frame -> sichtbares
+		// Blinken; 1.0.27 mit 30 Frames: rhythmisch ~1x pro Sekunde in der Drachenfeste)
+		constexpr std::uint32_t kMaxWaitFrames = 600;
 		constexpr std::uint32_t kMaxExtras = 256;     // so viele neu hinzugekommene werden zusaetzlich gezeichnet
 		constexpr float         kMoveEpsilon = 0.5f;  // Einheiten - darueber gilt das Licht als bewegt (Flackern)
 
@@ -51,8 +53,8 @@ namespace LightShadowCache
 			// Culling-Jobs (unter lock)
 			struct Entry
 			{
-				std::uint64_t hash;
-				std::uint32_t seen;  // Frame der letzten Pruefung (doppelte Aufnahme nur einmal zaehlen)
+				RE::NiTransform pose;  // Lage beim Aufbau
+				std::uint32_t   seen;  // Frame der letzten Pruefung (doppelte Aufnahme nur einmal zaehlen)
 			};
 			std::mutex                                       lock;
 			std::unordered_map<const RE::BSGeometry*, Entry> statics;   // Inhalt des Caches
@@ -84,6 +86,38 @@ namespace LightShadowCache
 		std::uint64_t Quant(float a_v, float a_scale) noexcept
 		{
 			return static_cast<std::uint64_t>(static_cast<std::int64_t>(a_v * a_scale));
+		}
+
+		// Bewegt im Sinne des Schattens? Winziges Zittern (Physik in Ruhe, Rechenungenauigkeit) zaehlt nicht - die
+		// gerundete Pruefsumme von 1.0.22-1.0.27 sprang dabei ueber Rundungsgrenzen und loeste staendig Neuaufbau aus
+		bool MeshMoved(const RE::NiTransform& a_a, const RE::NiTransform& a_b) noexcept
+		{
+			const float dx = a_a.translate.x - a_b.translate.x, dy = a_a.translate.y - a_b.translate.y, dz = a_a.translate.z - a_b.translate.z;
+			if (dx * dx + dy * dy + dz * dz > 2.0f * 2.0f || std::abs(a_a.scale - a_b.scale) > 0.01f) {
+				return true;
+			}
+			for (int r = 0; r < 3; ++r) {
+				for (int c = 0; c < 3; ++c) {
+					if (std::abs(a_a.rotate.entry[r][c] - a_b.rotate.entry[r][c]) > 0.01f) {
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+
+		std::mutex                                     g_moverLock;
+		std::unordered_map<std::string, std::uint32_t> g_movers;  // Namen der Meshes, die einen Neuaufbau ausloesten
+
+		void RecordMover(const RE::BSGeometry& a_geom) noexcept
+		{
+			try {
+				std::scoped_lock lock(g_moverLock);
+				if (g_movers.size() < 256) {
+					++g_movers[a_geom.name.c_str() ? a_geom.name.c_str() : ""];
+				}
+			} catch (...) {
+			}
 		}
 
 		std::uint64_t PoseHash(const RE::NiTransform& a_w) noexcept
@@ -493,7 +527,7 @@ namespace LightShadowCache
 				if (dynamic) {
 					return true;  // Aufbau-Frame: nur Unbewegliche in die Karte
 				}
-				l->statics[&a_geom] = { PoseHash(a_geom.world), 0 };
+				l->statics[&a_geom] = { a_geom.world, 0 };
 				return false;
 			}
 			// Cache-Frame
@@ -513,8 +547,9 @@ namespace LightShadowCache
 				it->second.seen = frame;
 				++l->matched;
 			}
-			if (it->second.hash != PoseHash(a_geom.world)) {
+			if (MeshMoved(it->second.pose, a_geom.world)) {
 				l->promoted.insert(&a_geom);  // bewegt sich -> ab jetzt immer neu zeichnen; alter Schatten steckt im Cache
+				RecordMover(a_geom);
 				l->broken = true;
 				return false;
 			}
@@ -696,6 +731,11 @@ namespace LightShadowCache
 					 "rebuilds: light moved {}, mesh removed {}, mesh started moving {}, too many added {} | failed {}, lights not supported {:.1f}",
 			Config::lightShadowCache.enabled ? "ON" : "OFF", w.cachedMaps / f, w.normalMaps / f, w.builds / f, g_saved.exchange(0) / f, g_drawnDynamic.exchange(0) / f,
 			g_drawnExtra.exchange(0) / f, w.lightMoved, w.removed, w.promoted, w.extraFull, w.buildFailed, w.unsupported / f);
+		std::scoped_lock lock(g_moverLock);
+		for (const auto& [name, count] : g_movers) {
+			logger::info("[LightCache]   started moving: {}x {}", count, name);
+		}
+		g_movers.clear();
 		w = {};
 	}
 }
