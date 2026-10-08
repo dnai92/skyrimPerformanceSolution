@@ -39,8 +39,9 @@ namespace ShadowCulling
 		struct MeshSample
 		{
 			const RE::BSGeometry* geom;
-			std::uint64_t         hash;  // Lage (Position, Drehung, Groesse)
-			const char*           name;  // gepoolter BSFixedString
+			std::uint64_t         hash;     // Lage (Position, Drehung, Groesse)
+			std::string           name;     // Kopie (das Mesh kann bis zur Auswertung geloescht sein)
+			bool                  dynamic;  // haengt an einer Figur oder ist ein Effekt -> wuerde jeden Frame neu gezeichnet
 		};
 		struct PointSlotDiag
 		{
@@ -49,19 +50,24 @@ namespace ShadowCulling
 			std::uint32_t           skinned = 0;
 		};
 		std::array<PointSlotDiag, kMaxPointCameras> g_pointDiag;
+		struct HistEntry
+		{
+			std::uint64_t hash;
+			std::string   name;
+		};
 		struct LightHistory
 		{
-			RE::NiPoint3                                              pos;
-			float                                                     radius = 0;
-			std::unordered_map<const RE::BSGeometry*, std::uint64_t> meshes;
-			std::uint32_t                                             lastFrame = 0;
+			RE::NiPoint3                                         pos;
+			float                                                radius = 0;
+			std::unordered_map<const RE::BSGeometry*, HistEntry> meshes;  // nur statische
+			std::uint32_t                                        lastFrame = 0;
 		};
 		std::unordered_map<const RE::NiCamera*, LightHistory> g_lightHist;  // Main-Thread
 		struct LightCacheWindow
 		{
-			std::uint64_t maps = 0, stable = 0, moved = 0, changed = 0, fresh = 0, setChanged = 0;
-			std::uint64_t meshes = 0, skinned = 0, savable = 0, savableIfDynamic = 0, changedMeshes = 0;
-			std::unordered_map<std::string, std::uint32_t> changedNames;
+			std::uint64_t maps = 0, stable = 0, moved = 0, changed = 0, setChanged = 0, fresh = 0;
+			std::uint64_t meshes = 0, skinned = 0, dynamic = 0, savable = 0;
+			std::unordered_map<std::string, std::uint32_t> changedNames, addedNames, removedNames, dynamicNames;
 		} g_lcw;
 		std::uint32_t g_lcFrame = 0;
 
@@ -78,6 +84,22 @@ namespace ShadowCulling
 			return static_cast<std::uint64_t>(static_cast<std::int64_t>(a_v * a_scale));
 		}
 
+		// Haengt das Mesh an einer Figur (Waffe, Schild, Pfeile, getragener Gegenstand) oder ist es ein Effekt?
+		bool IsDynamicCaster(RE::BSGeometry& a_geom) noexcept
+		{
+			const auto prop = a_geom.GetGeometryRuntimeData().shaderProperty.get();
+			if (prop && netimmerse_cast<RE::BSEffectShaderProperty*>(prop)) {
+				return true;
+			}
+			RE::NiAVObject* obj = &a_geom;
+			for (int depth = 0; obj && depth < 32; ++depth, obj = obj->parent) {
+				if (const auto ref = obj->GetUserData()) {
+					return ref->IsActor();
+				}
+			}
+			return false;
+		}
+
 		void RecordPointMesh(const RE::NiCamera* a_camera, RE::BSGeometry& a_geom) noexcept
 		{
 			if (!Config::analysis.load(std::memory_order_relaxed)) {
@@ -88,12 +110,13 @@ namespace ShadowCulling
 				if (g_pointCameras[i].load(std::memory_order_relaxed) != a_camera) {
 					continue;
 				}
-				auto&            d = g_pointDiag[i];
-				std::scoped_lock lock(d.lock);
+				auto& d = g_pointDiag[i];
 				if (a_geom.GetGeometryRuntimeData().skinInstance) {
+					std::scoped_lock lock(d.lock);
 					++d.skinned;
 					return;
 				}
+				const bool    dynamic = IsDynamicCaster(a_geom);
 				const auto&   w = a_geom.world;
 				std::uint64_t h = Mix64(Quant(w.translate.x, 4.0f));
 				h = Mix64(h ^ Quant(w.translate.y, 4.0f));
@@ -104,15 +127,23 @@ namespace ShadowCulling
 					}
 				}
 				h = Mix64(h ^ Quant(w.scale, 1000.0f));
+				std::scoped_lock lock(d.lock);
 				try {
-					d.meshes.push_back({ &a_geom, h, a_geom.name.c_str() });
+					d.meshes.push_back({ &a_geom, h, a_geom.name.c_str() ? a_geom.name.c_str() : "", dynamic });
 				} catch (...) {
 				}
 				return;
 			}
 		}
 
-		// Frame-Beginn (Main-Thread): Meshes des letzten Frames je Schattenkamera mit dem Frame davor vergleichen
+		void CountName(std::unordered_map<std::string, std::uint32_t>& a_map, const std::string& a_name)
+		{
+			if (a_map.size() < 4096 || a_map.contains(a_name)) {
+				++a_map[a_name];
+			}
+		}
+
+		// Frame-Beginn (Main-Thread): statische Meshes des letzten Frames je Schattenkamera mit dem Frame davor vergleichen
 		void FinishLightCacheDiag() noexcept
 		{
 			++g_lcFrame;
@@ -137,43 +168,62 @@ namespace ShadowCulling
 					const bool  known = h.lastFrame + 1 == g_lcFrame;
 					const float dx = p.x - h.pos.x, dy = p.y - h.pos.y, dz = p.z - h.pos.z;
 					const bool  moved = known && (dx * dx + dy * dy + dz * dz > 1.0f || std::abs(g_pointLightRadius[i] - h.radius) > 1.0f);
-					std::uint32_t changedMeshes = 0, added = 0, matched = 0;
-					std::unordered_map<const RE::BSGeometry*, std::uint64_t> now;
+					const bool  names = known && !moved;
+					std::uint32_t changed = 0, added = 0, matched = 0, dynamic = 0, statics = 0;
+					std::unordered_map<const RE::BSGeometry*, HistEntry> now;
 					now.reserve(meshes.size());
-					for (const auto& m : meshes) {
-						now[m.geom] = m.hash;
+					for (auto& m : meshes) {
+						if (m.dynamic) {
+							++dynamic;
+							if (names) {
+								CountName(g_lcw.dynamicNames, m.name);
+							}
+							continue;
+						}
+						++statics;
 						if (const auto it = h.meshes.find(m.geom); it != h.meshes.end()) {
 							++matched;
-							if (it->second != m.hash) {
-								++changedMeshes;
-								if (known && !moved && m.name) {
-									++g_lcw.changedNames[m.name];
+							if (it->second.hash != m.hash) {
+								++changed;
+								if (names) {
+									CountName(g_lcw.changedNames, m.name);
 								}
 							}
+							it->second.hash = 0;  // als gesehen markieren (Name bleibt fuer die Entfernt-Suche gueltig)
 						} else {
 							++added;
+							if (names) {
+								CountName(g_lcw.addedNames, m.name);
+							}
+						}
+						now[m.geom] = { m.hash, std::move(m.name) };
+					}
+					std::uint32_t removed = 0;
+					if (matched < h.meshes.size()) {
+						for (const auto& [geom, e] : h.meshes) {
+							if (!now.contains(geom)) {
+								++removed;
+								if (names) {
+									CountName(g_lcw.removedNames, e.name);
+								}
+							}
 						}
 					}
-					const std::uint32_t removed = static_cast<std::uint32_t>(h.meshes.size()) - matched;
-					const auto          total = static_cast<std::uint32_t>(meshes.size()) + skinned;
 					++g_lcw.maps;
-					g_lcw.meshes += total;
+					g_lcw.meshes += meshes.size() + skinned;
 					g_lcw.skinned += skinned;
+					g_lcw.dynamic += dynamic;
 					if (!known) {
 						++g_lcw.fresh;
 					} else if (moved) {
 						++g_lcw.moved;
 					} else if (added || removed) {
-						++g_lcw.setChanged;  // Meshes kamen dazu / fielen weg
-					} else if (changedMeshes) {
+						++g_lcw.setChanged;
+					} else if (changed) {
 						++g_lcw.changed;
-						g_lcw.changedMeshes += changedMeshes;
-						// wuerden die bewegten Meshes wie Figuren jeden Frame neu gezeichnet: der Rest kaeme aus dem Cache
-						g_lcw.savableIfDynamic += meshes.size() - changedMeshes;
 					} else {
 						++g_lcw.stable;
-						g_lcw.savable += meshes.size();
-						g_lcw.savableIfDynamic += meshes.size();
+						g_lcw.savable += statics;  // Figuren und bewegliche Meshes werden weiter jeden Frame gezeichnet
 					}
 					h.pos = p;
 					h.radius = g_pointLightRadius[i];
@@ -187,6 +237,15 @@ namespace ShadowCulling
 			}
 		}
 
+		void LogTop(const char* a_what, const std::unordered_map<std::string, std::uint32_t>& a_map, std::size_t a_n)
+		{
+			std::vector<std::pair<std::string, std::uint32_t>> v(a_map.begin(), a_map.end());
+			std::ranges::sort(v, [](const auto& a, const auto& b) { return a.second > b.second; });
+			for (std::size_t k = 0; k < v.size() && k < a_n; ++k) {
+				logger::info("[LightCache-Diag]     {:8} {:6}x  {}", a_what, v[k].second, v[k].first);
+			}
+		}
+
 		void ReportLightCacheDiag() noexcept
 		{
 			auto& w = g_lcw;
@@ -194,17 +253,14 @@ namespace ShadowCulling
 				return;
 			}
 			const double m = static_cast<double>(w.maps);
-			logger::info("[LightCache-Diag] point light shadow maps {} | unchanged {:.0f}% | light moved {:.0f}% | single meshes moved {:.0f}% (avg {:.1f} meshes) | "
-						 "meshes added/removed {:.0f}% | new {:.0f}% | meshes/map {:.0f} (skinned {:.0f})",
-				w.maps, 100.0 * w.stable / m, 100.0 * w.moved / m, 100.0 * w.changed / m, w.changed ? static_cast<double>(w.changedMeshes) / w.changed : 0.0,
-				100.0 * w.setChanged / m, 100.0 * w.fresh / m, w.meshes / m, w.skinned / m);
-			logger::info("[LightCache-Diag]   savable: {:.0f}% of all point light meshes as is, {:.0f}% if moving meshes are redrawn every frame like characters",
-				w.meshes ? 100.0 * w.savable / w.meshes : 0.0, w.meshes ? 100.0 * w.savableIfDynamic / w.meshes : 0.0);
-			std::vector<std::pair<std::string, std::uint32_t>> names(w.changedNames.begin(), w.changedNames.end());
-			std::ranges::sort(names, [](const auto& a, const auto& b) { return a.second > b.second; });
-			for (std::size_t k = 0; k < names.size() && k < 12; ++k) {
-				logger::info("[LightCache-Diag]     moving: {:6}x  {}", names[k].second, names[k].first);
-			}
+			logger::info("[LightCache-Diag] point light shadow maps {} | cacheable {:.0f}% | light moved {:.0f}% | static meshes moved {:.0f}% | static meshes added/removed {:.0f}% | new {:.0f}%",
+				w.maps, 100.0 * w.stable / m, 100.0 * w.moved / m, 100.0 * w.changed / m, 100.0 * w.setChanged / m, 100.0 * w.fresh / m);
+			logger::info("[LightCache-Diag]   meshes/map {:.0f} (characters {:.0f}, attached to characters / effects {:.0f}) | savable {:.0f}% of all point light meshes",
+				w.meshes / m, w.skinned / m, w.dynamic / m, w.meshes ? 100.0 * w.savable / w.meshes : 0.0);
+			LogTop("moved", w.changedNames, 8);
+			LogTop("added", w.addedNames, 8);
+			LogTop("removed", w.removedNames, 8);
+			LogTop("dynamic", w.dynamicNames, 6);
 			w = {};
 		}
 		std::atomic<const RE::NiCamera*>                               g_mainCamera{ nullptr };
