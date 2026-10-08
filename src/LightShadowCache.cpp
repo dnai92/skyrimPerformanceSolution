@@ -41,7 +41,8 @@ namespace LightShadowCache
 			bool                                  valid = false;        // Cache-Inhalt passt
 			bool                                  built = false;        // Aufbau-Frame: Kopie gesichert
 			bool                                  drawn = false;        // in diesem Frame gezeichnet
-			bool                                  unsupported = false;  // Karten in verschiedenen Ebenen
+			bool                                  unsupported = false;  // Karten in verschiedenen Ebenen / Culler ohne Trennung
+			std::atomic<bool>                     notCacheable{ false };  // Culling-Jobs: s. NotCacheable
 			REX::W32::ID3D11Texture2D*            tex = nullptr;        // eigene Kopie der Ebene
 			REX::W32::ID3D11Texture2D*            prevTex = nullptr;    // vollstaendige Karte des Vorframes (Aufbau ohne Blinken)
 			std::uint32_t                         prevW = 0, prevH = 0, prevFormat = 0;
@@ -231,6 +232,7 @@ namespace LightShadowCache
 				a_l.promoted.clear();
 			}
 			a_l.valid = a_l.built = a_l.drawn = a_l.unsupported = false;
+			a_l.notCacheable.store(false, std::memory_order_relaxed);
 			a_l.stableFrames = a_l.camCount = 0;
 			a_l.mode.store(static_cast<int>(Mode::kNormal), std::memory_order_relaxed);
 			for (auto& c : a_l.cams) {
@@ -590,9 +592,8 @@ namespace LightShadowCache
 				l->broken = true;
 				return false;
 			}
-			// Nie eine leere Liste: ohne ein einziges Mesh markiert die Engine das Schattenlicht offenbar als inaktiv
-			// (Schattenkanal 255) und Community Shaders laesst das ganze Licht weg -> Licht ging kurz aus (1.0.30).
-			// Ein Unbewegliches wird deshalb zusaetzlich gezeichnet (steckt auch im Cache, optisch gleich).
+			// Vorsicht aus 1.0.32: je Licht und Frame ein Unbewegliches zusaetzlich zeichnen, damit die Liste nie leer ist
+			// (steckt auch im Cache, optisch gleich). Das "Licht geht aus" hatte aber eine andere Ursache, s. ShadowCulling.
 			if (l->keptFrame != frame) {
 				l->keptFrame = frame;
 				return false;
@@ -602,6 +603,16 @@ namespace LightShadowCache
 		}
 		g_saved.fetch_add(1, std::memory_order_relaxed);
 		return true;
+	}
+
+	void NotCacheable(const RE::NiCamera* a_camera) noexcept
+	{
+		if (!g_installed) {
+			return;
+		}
+		if (LightState* l = FindByCamera(a_camera)) {
+			l->notCacheable.store(true, std::memory_order_relaxed);
+		}
 	}
 
 	void OnFrame()
@@ -619,6 +630,10 @@ namespace LightShadowCache
 				continue;
 			}
 			const auto mode = static_cast<Mode>(l.mode.load(std::memory_order_relaxed));
+			if (l.notCacheable.exchange(false, std::memory_order_relaxed)) {
+				l.unsupported = true;
+				l.valid = false;
+			}
 			if (l.unsupported) {
 				++g_win.unsupported;
 			}

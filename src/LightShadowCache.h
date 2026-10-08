@@ -17,8 +17,13 @@ namespace LightShadowCache
 	// Frame-Beginn (Main-Thread): letzten Frame auswerten, Modus je Schattenkarte fuer diesen Frame festlegen
 	void OnFrame();
 
-	// Culling-Jobs: Mesh kommt in die Schattenkarte dieser Kamera. true = nicht zeichnen (steckt im Cache)
+	// Culling-Jobs: Mesh kommt in die Schattenkarte dieser Kamera. true = keinen Schatten zeichnen (steckt im Cache);
+	// die Beleuchtung durch das Licht muss der Aufrufer trotzdem eintragen (s. ShadowCulling, AppendVirtualParabolic)
 	bool FilterAppend(const RE::NiCamera* a_camera, RE::BSGeometry& a_geom) noexcept;
+
+	// Culling-Jobs: Mesh einer Lichtkamera ueber einen Culler, bei dem sich Schatten und Beleuchtung nicht trennen
+	// lassen -> dieses Licht nicht zwischenspeichern
+	void NotCacheable(const RE::NiCamera* a_camera) noexcept;
 
 	// Bildausgabe (IDXGISwapChain::Present, jedes gezeichnete Bild - auch in Pause/Menues)
 	void OnPresent() noexcept;
