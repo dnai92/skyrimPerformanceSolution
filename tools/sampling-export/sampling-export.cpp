@@ -77,6 +77,13 @@ namespace
 		const auto  image = BaseName(a_worker.GetString(a_frame.imageName));
 		const auto& outer = a_frame.data[a_frame.size - 1];
 		std::string name = a_worker.GetString(outer.name);
+		// TRACE_ADDR_MODULE=<dll>: fuer dieses Modul immer Adresse (+ Symbol-Start), damit eigene PDB aufloesen kann
+		static const char* addrModule = std::getenv("TRACE_ADDR_MODULE");
+		if (addrModule && image == addrModule) {
+			char buf[96];
+			std::snprintf(buf, sizeof(buf), "@0x%" PRIx64 " (sym 0x%" PRIx64 ")", a_worker.GetCanonicalPointer(a_id), outer.symAddr);
+			return image + "!" + buf;
+		}
 		// Ohne Symbole liefert Tracy "[unknown]" o.ae. -> Adresse anhaengen, damit Hotspots unterscheidbar bleiben
 		if (name.empty() || name[0] == '[' || name.rfind("0x", 0) == 0) {
 			char buf[64];
@@ -119,14 +126,38 @@ int main(int argc, char** argv)
 	std::printf("Trace: %s\nDauer: %.1f s | Samples gesamt: %" PRIu64 " | Frames: %zu\n\n",
 		argv[1], worker.GetLastTime() / 1e9, worker.GetCallstackSampleCount(), worker.GetFrameCount(*worker.GetFramesBase()));
 
+	// Zeitfenster (Sekunden ab Trace-Beginn) per Umgebung: TRACE_FROM / TRACE_TO; TRACE_TIMELINE=1 -> Frame-Zeiten je 2 s
+	const char*  envFrom = std::getenv("TRACE_FROM");
+	const char*  envTo = std::getenv("TRACE_TO");
+	const double fromS = envFrom ? std::atof(envFrom) : 0.0;
+	const double toS = envTo ? std::atof(envTo) : 0.0;
+	if (std::getenv("TRACE_TIMELINE")) {
+		const auto& fd = *worker.GetFramesBase();
+		double      sum = 0.0;
+		int         cnt = 0, bucket = 0;
+		for (std::size_t i = 0; i < worker.GetFrameCount(fd); ++i) {
+			const int b2 = static_cast<int>(worker.GetFrameBegin(fd, i) / 2e9);
+			if (b2 != bucket && cnt) {
+				std::printf("  t=%3d-%3d s: %4d Frames, avg %.1f ms\n", bucket * 2, bucket * 2 + 2, cnt, sum / cnt);
+				sum = 0.0;
+				cnt = 0;
+			}
+			bucket = b2;
+			sum += worker.GetFrameTime(fd, i) / 1e6;
+			++cnt;
+		}
+		std::printf("\n");
+	}
+
 	FrameFilter filter;
-	const bool  useFilter = minFrameMs > 0.0 || maxFrameMs > 0.0;
+	const bool  useFilter = minFrameMs > 0.0 || maxFrameMs > 0.0 || fromS > 0.0 || toS > 0.0;
 	if (useFilter) {
 		const auto& fd = *worker.GetFramesBase();
 		int64_t     filteredNs = 0;
 		for (std::size_t i = 0; i < worker.GetFrameCount(fd); ++i) {
 			const auto ms = worker.GetFrameTime(fd, i) / 1e6;
-			if (ms >= minFrameMs && (maxFrameMs <= 0.0 || ms < maxFrameMs)) {
+			const auto t = worker.GetFrameBegin(fd, i) / 1e9;
+			if ((fromS <= 0.0 || t >= fromS) && (toS <= 0.0 || t < toS) && ms >= minFrameMs && (maxFrameMs <= 0.0 || ms < maxFrameMs)) {
 				filter.ranges.emplace_back(worker.GetFrameBegin(fd, i), worker.GetFrameEnd(fd, i));
 				filteredNs += worker.GetFrameTime(fd, i);
 			}

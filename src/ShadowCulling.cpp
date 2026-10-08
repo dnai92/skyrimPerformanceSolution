@@ -6,6 +6,7 @@
 #include "DetourHelper.h"
 #include "GpuTimer.h"
 #include "LightShadowCache.h"
+#include "SceneUtil.h"
 #include "Stats.h"
 
 #include <mutex>
@@ -94,7 +95,7 @@ namespace ShadowCulling
 			}
 			RE::NiAVObject* obj = &a_geom;
 			for (int depth = 0; obj && depth < 32; ++depth, obj = obj->parent) {
-				if (const auto ref = obj->GetUserData()) {
+				if (const auto ref = SceneUtil::OwnUserData(obj)) {
 					return ref->IsActor();
 				}
 			}
@@ -823,7 +824,7 @@ namespace ShadowCulling
 		{
 			const RE::NiAVObject* obj = &a_geom;
 			for (int depth = 0; obj && depth < 32; ++depth, obj = obj->parent) {
-				if (const auto ref = const_cast<RE::NiAVObject*>(obj)->GetUserData()) {
+				if (const auto ref = SceneUtil::OwnUserData(obj)) {
 					return ref->GetFormType() == RE::FormType::ActorCharacter;
 				}
 			}
@@ -1020,7 +1021,8 @@ namespace ShadowCulling
 
 		bool IsActorRoot(RE::NiAVObject* a_obj) noexcept
 		{
-			const auto ref = a_obj->GetUserData();
+			// nur der eigene Eintrag: Kinder einer Figur zaehlen ueber die Rekursion (g_insideActor) mit
+			const auto ref = SceneUtil::OwnUserData(a_obj);
 			return ref && (ref->GetFormType() == RE::FormType::ActorCharacter);
 		}
 

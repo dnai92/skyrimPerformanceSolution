@@ -4,6 +4,7 @@
 #include "Config.h"
 #include "DetourHelper.h"
 #include "GpuMemory.h"
+#include "SceneUtil.h"
 
 #include <condition_variable>
 #include <deque>
@@ -1394,7 +1395,7 @@ namespace TextureStream
 		{
 			auto obj = a_obj;
 			for (int depth = 0; obj && depth < 32; ++depth, obj = obj->parent) {
-				if (obj->GetUserData()) {
+				if (SceneUtil::OwnUserData(obj)) {  // GetUserData lieferte schon am Mesh die geerbte Referenz -> Mesh statt Wurzel
 					return obj;
 				}
 			}

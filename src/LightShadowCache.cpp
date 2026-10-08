@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include "Features.h"
+#include "SceneUtil.h"
 #include "Stats.h"
 
 #include <unordered_set>
@@ -154,7 +155,7 @@ namespace LightShadowCache
 			}
 			RE::NiAVObject* obj = &a_geom;
 			for (int depth = 0; obj && depth < 32; ++depth, obj = obj->parent) {
-				if (const auto ref = obj->GetUserData()) {
+				if (const auto ref = SceneUtil::OwnUserData(obj)) {
 					return ref->IsActor();
 				}
 			}
