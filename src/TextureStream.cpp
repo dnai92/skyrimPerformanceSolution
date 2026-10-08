@@ -363,7 +363,12 @@ namespace TextureStream
 			std::uint64_t     bytes;
 		};
 		std::deque<Deferred>    g_deferred;
-		constexpr std::uint64_t kReleaseBytesPerCall = 64ull << 20;
+		// 1.0.13: zweimal fiel die Freigabe einer 43-MB-Textur mit einem 200-250-ms-Frame zusammen -> kleinere Portionen
+		constexpr std::uint64_t kReleaseBytesPerCall = 32ull << 20;
+		// Neu geladene Texturen: hoechstens so viel pro Frame einsetzen (mind. eine)
+		constexpr double        kSwapMBPerFrame = 48.0;
+		Clock::time_point       g_swapWindow{};
+		double                  g_swapMB = 0;
 
 		// Ruckler-Protokoll (unter g_stateLock)
 		FrameActivity g_act;
@@ -1266,8 +1271,20 @@ namespace TextureStream
 				std::scoped_lock lock(g_qLock);
 				results.swap(g_results);
 			}
+			// Neu geladene Texturen nach Datenmenge pro Frame einsetzen (1.0.13: 14 Stueck / 112 MB in einem Frame fielen
+			// mit einem 246-ms-Frame zusammen) - der Rest wartet auf die naechsten Frames
+			// Zeitfenster statt Frame-Zaehler: in Menues (Spiel pausiert) laeuft nur PreviewTick
+			std::vector<Result> later;
+			if (const auto now = Clock::now(); now - g_swapWindow >= 12ms) {
+				g_swapWindow = now;
+				g_swapMB = 0;
+			}
 			for (auto& res : results) {
 				const auto& job = res.job;
+				if (job.reload && res.error.empty() && g_swapMB >= kSwapMBPerFrame) {
+					later.push_back(std::move(res));
+					continue;
+				}
 				g_inflightUp -= std::min(g_inflightUp, job.extraBytes);
 				const auto  it = g_tex.find(job.r);
 				const bool  valid = it != g_tex.end() && it->second.res == job.expectRes && job.r->texture == job.expectRes;
@@ -1331,11 +1348,17 @@ namespace TextureStream
 				st.curH = std::max(1u, job.fullH >> job.skip);
 				st.curMips = job.fullMips - job.skip;
 				st.lastReload = Clock::now();
+				const double mb = ChainBytes(st.fi, st.curW, st.curH, st.curMips) / 1048576.0;
 				++g_act.reloads;
-				g_act.reloadMB += ChainBytes(st.fi, st.curW, st.curH, st.curMips) / 1048576.0;
+				g_act.reloadMB += mb;
+				g_swapMB += mb;
 				++g_stats.ups;
 				g_stats.upMs += res.ms;
 				g_stats.upMB += res.mb;
+			}
+			if (!later.empty()) {
+				std::scoped_lock lock(g_qLock);
+				g_results.insert(g_results.begin(), std::make_move_iterator(later.begin()), std::make_move_iterator(later.end()));
 			}
 			ProcessDeferred();
 		}
@@ -2052,7 +2075,8 @@ namespace TextureStream
 		}
 
 		const auto ui = RE::UI::GetSingleton();
-		if (!ui || ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME)) {
+		// RaceMenu: baut Kopf, Koerper und Hauttoenung der Spielfigur neu auf - dort nichts verkleinern
+		if (!ui || ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME) || ui->IsMenuOpen(RE::RaceSexMenu::MENU_NAME)) {
 			// Ladebildschirm: Szene wird umgebaut - Durchlauf verwerfen
 			g_stack.clear();
 			g_passActive = false;
