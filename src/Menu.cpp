@@ -306,6 +306,12 @@ namespace Menu
 			MenuApi::SeparatorText(T("Torch / point light shadow culling", "Fackelschatten kleiner Objekte weglassen"));
 			Toggle(T("Enabled##point", "Aktiv##point"), Config::pointLightCulling.enabled,
 				T("Small, far objects do not cast shadows from torches and fires.", "Kleine, ferne Objekte werfen keinen Schatten von Fackeln und Feuern."));
+			AtomicToggle(T("Also in interiors##point", "Auch in Innenräumen##point"), Config::pointLightInteriors,
+				T("Interiors are lit almost only by torches and fires, missing shadows are noticeable there. Off = full torch shadows indoors.",
+					"Innenräume werden fast nur von Fackeln und Feuern beleuchtet, fehlende Schatten fallen dort auf. Aus = in Innenräumen volle Fackelschatten."));
+			RuleControls("point", Config::pointLightCulling, 5000.0f);
+
+			MenuApi::SeparatorText(T("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern"));
 			Toggle(T("Cache shadows of static lights (test)##point", "Schatten fester Lichter zwischenspeichern (Test)##point"), Config::lightShadowCache.enabled,
 				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters and moving objects are drawn again each frame. Flickering lights are always redrawn. Mainly for interiors with many lights.",
 					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren und Bewegliches neu gezeichnet. Flackernde Lichter werden immer neu gezeichnet. Vor allem für Innenräume mit vielen Lichtern."));
@@ -317,10 +323,6 @@ namespace Menu
 				Tip(T("0 normal | 1 never rebuild | 2 rebuild without previous frame | 3 restore cache but draw everything (must look like off)",
 					"0 normal | 1 nie neu aufbauen | 2 Aufbau ohne Vorframe-Karte | 3 Cache zurückkopieren, aber alles zeichnen (muss wie aus aussehen)"));
 			}
-			AtomicToggle(T("Also in interiors##point", "Auch in Innenräumen##point"), Config::pointLightInteriors,
-				T("Interiors are lit almost only by torches and fires, missing shadows are noticeable there. Off = full torch shadows indoors.",
-					"Innenräume werden fast nur von Fackeln und Feuern beleuchtet, fehlende Schatten fallen dort auf. Aus = in Innenräumen volle Fackelschatten."));
-			RuleControls("point", Config::pointLightCulling, 5000.0f);
 
 			MenuApi::SeparatorText(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"));
 			Toggle(T("Enabled##actor", "Aktiv##actor"), Config::actorShadowCulling.enabled,
