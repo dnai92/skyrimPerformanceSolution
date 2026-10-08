@@ -224,6 +224,47 @@ namespace Stats
 	}
 	void OnMenuEvent() noexcept { g_menuInFrame.store(true, std::memory_order_relaxed); }
 
+	namespace
+	{
+		// Vergleich AN/AUS: bei jedem Umschalten des Hauptschalters eine Zeile fuer den beendeten Abschnitt - auch ohne
+		// Analyse-Protokoll, das sonst nur eine Zeile pro Minute schreibt (Wechsel mitten in der Minute nicht trennbar)
+		std::vector<double> g_segMs;
+		std::uint64_t       g_segNpc = 0;
+		bool                g_segOn = true;
+		bool                g_segInit = false;
+
+		void TrackSegment(double a_frameMs, bool a_valid) noexcept
+		{
+			const bool on = Config::masterEnabled.load(std::memory_order_relaxed);
+			if (!g_segInit) {
+				g_segInit = true;
+				g_segOn = on;
+			}
+			if (on != g_segOn) {
+				double total = 0.0;
+				for (const auto v : g_segMs) {
+					total += v;
+				}
+				if (total >= 5000.0) {
+					const auto s = Summarize(g_segMs);
+					logger::info("[Compare] optimizations {} for {:.0f} s: {} frames | {:.1f} FPS | frame avg {:.2f} ms, p99 {:.2f} ms | NPC updates/frame {:.1f}",
+						g_segOn ? "ON" : "OFF", total / 1000.0, g_segMs.size(), 1000.0 * static_cast<double>(g_segMs.size()) / total, s.avg, s.p99,
+						static_cast<double>(g_segNpc) / static_cast<double>(g_segMs.size()));
+				}
+				g_segMs.clear();
+				g_segNpc = 0;
+				g_segOn = on;
+			}
+			if (a_valid) {
+				try {
+					g_segMs.push_back(a_frameMs);
+				} catch (...) {
+				}
+				g_segNpc += g_frameNpcCount.load(std::memory_order_relaxed);
+			}
+		}
+	}
+
 	void OnFrame() noexcept
 	{
 		const auto now = clock::now();
@@ -241,6 +282,7 @@ namespace Stats
 		} catch (...) {
 		}
 
+		TrackSegment(frameMs, frameMs < kMaxFrameMs);
 		if (frameMs < kMaxFrameMs) {
 			try {
 				g_frameMs.push_back(frameMs);
