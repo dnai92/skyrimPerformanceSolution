@@ -13,49 +13,63 @@ namespace LightShadowCache
 		enum class Mode : int
 		{
 			kNormal,  // wie die Engine: alles zeichnen
+			kWait,    // wie normal, zaehlt aber Bewegliche (Aufbau bevorzugt ohne Figuren im Radius)
 			kBuild,   // nur Unbewegliche zeichnen, danach in den Cache kopieren
-			kCached   // Cache zurueckkopieren, nur Bewegliche zeichnen
+			kCached   // Cache zurueckkopieren, nur Bewegliche (und neu Hinzugekommene) zeichnen
 		};
 
-		constexpr std::uint32_t kMaxMaps = 32;       // gleichzeitig verwaltete Schattenkarten
-		constexpr std::uint32_t kStableFrames = 3;   // so lange muss ein Licht ruhen, bevor aufgebaut wird
-		constexpr float         kMoveEpsilon = 0.5f; // Einheiten - darueber gilt das Licht als bewegt (Flackern)
+		constexpr std::uint32_t kMaxLights = 16;      // gleichzeitig verwaltete Schattenlichter
+		constexpr std::uint32_t kMaxCams = 4;         // Schattenkarten je Licht (Fackel: 2 Halbkugeln)
+		constexpr std::uint32_t kStableFrames = 3;    // so lange muss ein Licht ruhen, bevor aufgebaut wird
+		constexpr std::uint32_t kMaxWaitFrames = 30;  // spaetestens dann aufbauen, auch mit Figuren im Radius
+		constexpr std::uint32_t kMaxExtras = 256;     // so viele neu hinzugekommene werden zusaetzlich gezeichnet
+		constexpr float         kMoveEpsilon = 0.5f;  // Einheiten - darueber gilt das Licht als bewegt (Flackern)
 
-		struct MapState
+		// Eine Fackel zeichnet beide Halbkugeln in DIESELBE Ebene der Schattenkarten-Sammlung (zwei Bildhaelften).
+		// Tiefen-Texturen lassen sich nur ganz kopieren -> Cache je Licht: vor der ersten Karte zurueckkopieren,
+		// nach der letzten sichern. Lichter, deren Karten in verschiedenen Ebenen liegen, werden nicht gecacht.
+		struct LightState
 		{
-			std::atomic<const RE::NiCamera*> camera{ nullptr };
-			std::atomic<int>                 mode{ static_cast<int>(Mode::kNormal) };
+			std::atomic<const RE::BSShadowLight*>                  light{ nullptr };
+			std::array<std::atomic<const RE::NiCamera*>, kMaxCams> cams{};
+			std::atomic<int>                                       mode{ static_cast<int>(Mode::kNormal) };
 			// Main-Thread
-			RE::NiTransform            pose{};
-			float                      radius = 0;
-			std::uint32_t              stableFrames = 0;
-			std::uint32_t              lastSeen = 0;
-			bool                       valid = false;   // Cache-Inhalt passt
-			bool                       drawn = false;   // in diesem Frame gezeichnet (Zeichen-Aufruf gesehen)
-			REX::W32::ID3D11Texture2D* tex = nullptr;   // eigene Kopie einer Ebene
-			std::uint32_t              texW = 0, texH = 0, texFormat = 0;
+			std::array<RE::NiTransform, kMaxCams> pose{};
+			std::uint32_t                         camCount = 0;
+			float                                 radius = 0;
+			std::uint32_t                         stableFrames = 0;
+			std::uint32_t                         waitFrames = 0;
+			std::uint32_t                         lastSeen = 0;
+			bool                                  valid = false;        // Cache-Inhalt passt
+			bool                                  built = false;        // Aufbau-Frame: Kopie gesichert
+			bool                                  drawn = false;        // in diesem Frame gezeichnet
+			bool                                  unsupported = false;  // Karten in verschiedenen Ebenen
+			REX::W32::ID3D11Texture2D*            tex = nullptr;        // eigene Kopie der Ebene
+			std::uint32_t                         texW = 0, texH = 0, texFormat = 0;
 			// Culling-Jobs (unter lock)
-			std::mutex                                               lock;
 			struct Entry
 			{
 				std::uint64_t hash;
 				std::uint32_t seen;  // Frame der letzten Pruefung (doppelte Aufnahme nur einmal zaehlen)
 			};
-			std::unordered_map<const RE::BSGeometry*, Entry> statics;  // Inhalt des Caches
-			std::unordered_set<const RE::BSGeometry*>                promoted;  // gelernte Bewegliche
-			std::uint32_t                                            matched = 0;
-			bool                                                     broken = false;  // Abweichung -> neu aufbauen
+			std::mutex                                       lock;
+			std::unordered_map<const RE::BSGeometry*, Entry> statics;   // Inhalt des Caches
+			std::unordered_set<const RE::BSGeometry*>        extras;    // seit dem Aufbau hinzugekommen: zusaetzlich zeichnen
+			std::unordered_set<const RE::BSGeometry*>        promoted;  // gelernte Bewegliche
+			std::uint32_t                                    matched = 0;
+			std::uint32_t                                    dynamicSeen = 0;  // Bewegliche im letzten Frame
+			bool                                             broken = false;   // bewegt/weggefallen -> neu aufbauen
 		};
-		std::array<MapState, kMaxMaps> g_maps;
-		std::atomic<std::uint32_t>     g_frame{ 0 };
-		bool                           g_installed = false;
+		std::array<LightState, kMaxLights> g_lights;
+		std::atomic<std::uint32_t>         g_frame{ 0 };
+		bool                               g_installed = false;
 
 		struct Window
 		{
-			std::uint64_t frames = 0, cached = 0, builds = 0, normal = 0;
-			std::uint64_t lightMoved = 0, invAdded = 0, invRemoved = 0, invPromoted = 0, buildFailed = 0;
+			std::uint64_t frames = 0, cachedMaps = 0, builds = 0, normalMaps = 0;
+			std::uint64_t lightMoved = 0, removed = 0, promoted = 0, extraFull = 0, buildFailed = 0, unsupported = 0;
 		} g_win;
-		std::atomic<std::uint64_t> g_saved{ 0 }, g_drawnDynamic{ 0 }, g_invAddedJobs{ 0 }, g_invPromotedJobs{ 0 };
+		std::atomic<std::uint64_t> g_saved{ 0 }, g_drawnDynamic{ 0 }, g_drawnExtra{ 0 };
 
 		std::uint64_t Mix64(std::uint64_t a_x) noexcept
 		{
@@ -102,11 +116,29 @@ namespace LightShadowCache
 			return false;
 		}
 
-		MapState* Find(const RE::NiCamera* a_camera) noexcept
+		LightState* FindByCamera(const RE::NiCamera* a_camera, std::uint32_t* a_index = nullptr) noexcept
 		{
-			for (auto& m : g_maps) {
-				if (m.camera.load(std::memory_order_relaxed) == a_camera) {
-					return &m;
+			for (auto& l : g_lights) {
+				if (!l.light.load(std::memory_order_relaxed)) {
+					continue;
+				}
+				for (std::uint32_t i = 0; i < kMaxCams; ++i) {
+					if (l.cams[i].load(std::memory_order_relaxed) == a_camera) {
+						if (a_index) {
+							*a_index = i;
+						}
+						return &l;
+					}
+				}
+			}
+			return nullptr;
+		}
+
+		LightState* FindByLight(const RE::BSShadowLight* a_light) noexcept
+		{
+			for (auto& l : g_lights) {
+				if (l.light.load(std::memory_order_relaxed) == a_light) {
+					return &l;
 				}
 			}
 			return nullptr;
@@ -128,47 +160,37 @@ namespace LightShadowCache
 			return false;
 		}
 
-		void Drop(MapState& a_m) noexcept
+		void ClearSets(LightState& a_l) noexcept
 		{
-			if (a_m.tex) {
-				a_m.tex->Release();
-				a_m.tex = nullptr;
+			std::scoped_lock lock(a_l.lock);
+			a_l.statics.clear();
+			a_l.extras.clear();
+			a_l.matched = 0;
+			a_l.dynamicSeen = 0;
+			a_l.broken = false;
+		}
+
+		void Drop(LightState& a_l) noexcept
+		{
+			if (a_l.tex) {
+				a_l.tex->Release();
+				a_l.tex = nullptr;
 			}
+			ClearSets(a_l);
 			{
-				std::scoped_lock lock(a_m.lock);
-				a_m.statics.clear();
-				a_m.promoted.clear();
-				a_m.matched = 0;
-				a_m.broken = false;
+				std::scoped_lock lock(a_l.lock);
+				a_l.promoted.clear();
 			}
-			a_m.valid = false;
-			a_m.drawn = false;
-			a_m.stableFrames = 0;
-			a_m.mode.store(static_cast<int>(Mode::kNormal), std::memory_order_relaxed);
-			a_m.camera.store(nullptr, std::memory_order_relaxed);
+			a_l.valid = a_l.built = a_l.drawn = a_l.unsupported = false;
+			a_l.stableFrames = a_l.waitFrames = a_l.camCount = 0;
+			a_l.mode.store(static_cast<int>(Mode::kNormal), std::memory_order_relaxed);
+			for (auto& c : a_l.cams) {
+				c.store(nullptr, std::memory_order_relaxed);
+			}
+			a_l.light.store(nullptr, std::memory_order_relaxed);
 		}
 
-		// Deskriptor zur Kamera in den aktiven Schattenlichtern (Main-Thread; Platz/Ziel gelten erst nach der Zuteilung)
-		const RE::BSShadowLight::ShadowmapDescriptor* FindDescriptor(const RE::NiCamera* a_camera) noexcept
-		{
-			const auto ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
-			if (!ssn) {
-				return nullptr;
-			}
-			for (const auto& light : ssn->GetRuntimeData().activeShadowLights) {
-				if (!light) {
-					continue;
-				}
-				for (const auto& d : light->GetRuntimeData().shadowmapDescriptors) {
-					if (d.camera.get() == a_camera) {
-						return &d;
-					}
-				}
-			}
-			return nullptr;
-		}
-
-		// Ziel-Textur und Unterressource der Schattenkarte; Cache-Textur passend anlegen
+		// Ziel-Textur und Unterressource einer Schattenkarte
 		REX::W32::ID3D11Texture2D* TargetTexture(const RE::BSShadowLight::ShadowmapDescriptor& a_d, std::uint32_t& a_sub) noexcept
 		{
 			const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
@@ -189,16 +211,16 @@ namespace LightShadowCache
 			return tex;
 		}
 
-		bool EnsureCacheTexture(MapState& a_m, REX::W32::ID3D11Texture2D* a_src) noexcept
+		bool EnsureCacheTexture(LightState& a_l, REX::W32::ID3D11Texture2D* a_src) noexcept
 		{
 			REX::W32::D3D11_TEXTURE2D_DESC desc{};
 			a_src->GetDesc(&desc);
-			if (a_m.tex && a_m.texW == desc.width && a_m.texH == desc.height && a_m.texFormat == static_cast<std::uint32_t>(desc.format)) {
+			if (a_l.tex && a_l.texW == desc.width && a_l.texH == desc.height && a_l.texFormat == static_cast<std::uint32_t>(desc.format)) {
 				return true;
 			}
-			if (a_m.tex) {
-				a_m.tex->Release();
-				a_m.tex = nullptr;
+			if (a_l.tex) {
+				a_l.tex->Release();
+				a_l.tex = nullptr;
 			}
 			desc.arraySize = 1;
 			desc.mipLevels = 1;
@@ -207,13 +229,13 @@ namespace LightShadowCache
 			desc.cpuAccessFlags = 0;
 			desc.miscFlags = 0;
 			const auto device = RE::BSGraphics::Renderer::GetDevice();
-			if (!device || device->CreateTexture2D(&desc, nullptr, &a_m.tex) < 0 || !a_m.tex) {
-				a_m.tex = nullptr;
+			if (!device || device->CreateTexture2D(&desc, nullptr, &a_l.tex) < 0 || !a_l.tex) {
+				a_l.tex = nullptr;
 				return false;
 			}
-			a_m.texW = desc.width;
-			a_m.texH = desc.height;
-			a_m.texFormat = static_cast<std::uint32_t>(desc.format);
+			a_l.texW = desc.width;
+			a_l.texH = desc.height;
+			a_l.texFormat = static_cast<std::uint32_t>(desc.format);
 			return true;
 		}
 
@@ -237,34 +259,74 @@ namespace LightShadowCache
 			}
 		}
 
+		// Das aktive Schattenlicht zur Kamera samt Kartenindex (Main-Thread)
+		const RE::BSShadowLight* FindActiveLight(const RE::NiCamera* a_camera, std::uint32_t& a_index) noexcept
+		{
+			const auto ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+			if (!ssn) {
+				return nullptr;
+			}
+			for (const auto& light : ssn->GetRuntimeData().activeShadowLights) {
+				if (!light) {
+					continue;
+				}
+				const auto& descs = light->GetRuntimeData().shadowmapDescriptors;
+				for (std::uint32_t i = 0; i < descs.size(); ++i) {
+					if (descs[i].camera.get() == a_camera) {
+						a_index = i;
+						return light.get();
+					}
+				}
+			}
+			return nullptr;
+		}
+
 		// ID 107604 (+0x167) ruft hier das Zeichnen einer Schattenkarte auf (Kamera, Shader-Akkumulator, Flags)
 		struct DrawShadowmap
 		{
 			static void thunk(RE::NiCamera* a_camera, void* a_accumulator, std::uint32_t a_flags)
 			{
-				MapState* m = a_camera ? Find(a_camera) : nullptr;
-				const auto mode = m ? static_cast<Mode>(m->mode.load(std::memory_order_relaxed)) : Mode::kNormal;
-				if (mode == Mode::kNormal) {
+				LightState* l = a_camera ? FindByCamera(a_camera) : nullptr;
+				const auto  mode = l ? static_cast<Mode>(l->mode.load(std::memory_order_relaxed)) : Mode::kNormal;
+				if (mode != Mode::kBuild && mode != Mode::kCached) {
 					func(a_camera, a_accumulator, a_flags);
 					return;
 				}
-				const auto    desc = FindDescriptor(a_camera);
-				std::uint32_t sub = 0;
-				const auto    target = desc ? TargetTexture(*desc, sub) : nullptr;
-				if (!target || !EnsureCacheTexture(*m, target)) {
-					// Ohne Ziel kein Cache: dieser Frame zeichnet nur einen Teil -> verwerfen und neu aufbauen
+				std::uint32_t idx = 0;
+				const auto    light = FindActiveLight(a_camera, idx);
+				if (!light || light != l->light.load(std::memory_order_relaxed)) {
 					func(a_camera, a_accumulator, a_flags);
-					m->valid = false;
+					l->valid = false;
 					++g_win.buildFailed;
 					return;
 				}
-				m->drawn = true;
+				const auto&   descs = light->GetRuntimeData().shadowmapDescriptors;
+				const auto&   d = descs[idx];
+				const auto&   d0 = descs[0];
+				std::uint32_t sub = 0;
+				const auto    target = TargetTexture(d, sub);
+				// alle Karten eines Lichts muessen in derselben Ebene liegen (Fackel: 2 Halbkugeln, eine Ebene)
+				if (d.renderTarget != d0.renderTarget || d.shadowmapIndex != d0.shadowmapIndex) {
+					l->unsupported = true;
+				}
+				if (!target || l->unsupported || !EnsureCacheTexture(*l, target)) {
+					func(a_camera, a_accumulator, a_flags);
+					l->valid = false;
+					++g_win.buildFailed;
+					return;
+				}
+				l->drawn = true;
 				if (mode == Mode::kCached) {
-					CopyUnbound(target, sub, m->tex, 0);  // unbewegliche Schatten zurueck
+					if (idx == 0) {
+						CopyUnbound(target, sub, l->tex, 0);  // unbewegliche Schatten aller Karten zurueck
+					}
 					func(a_camera, a_accumulator, a_flags);  // nur Bewegliche
 				} else {
 					func(a_camera, a_accumulator, a_flags);  // nur Unbewegliche
-					CopyUnbound(m->tex, 0, target, sub);
+					if (idx + 1 == descs.size()) {
+						CopyUnbound(l->tex, 0, target, sub);  // nach der letzten Karte sichern
+						l->built = true;
+					}
 				}
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -294,23 +356,29 @@ namespace LightShadowCache
 		if (!g_installed) {
 			return false;
 		}
-		MapState* m = Find(a_camera);
-		if (!m) {
+		LightState* l = FindByCamera(a_camera);
+		if (!l) {
 			return false;
 		}
-		const auto mode = static_cast<Mode>(m->mode.load(std::memory_order_relaxed));
+		const auto mode = static_cast<Mode>(l->mode.load(std::memory_order_relaxed));
 		if (mode == Mode::kNormal) {
 			return false;
 		}
 		bool dynamic = IsDynamic(a_geom);
 		try {
-			std::scoped_lock lock(m->lock);
-			dynamic = dynamic || m->promoted.contains(&a_geom);
+			std::scoped_lock lock(l->lock);
+			dynamic = dynamic || l->promoted.contains(&a_geom);
+			if (mode == Mode::kWait) {
+				if (dynamic) {
+					++l->dynamicSeen;
+				}
+				return false;
+			}
 			if (mode == Mode::kBuild) {
 				if (dynamic) {
-					return true;  // Aufbau-Frame: nur Unbewegliche in die Karte (Bewegliche fehlen einen Frame)
+					return true;  // Aufbau-Frame: nur Unbewegliche in die Karte
 				}
-				m->statics[&a_geom] = { PoseHash(a_geom.world), 0 };
+				l->statics[&a_geom] = { PoseHash(a_geom.world), 0 };
 				return false;
 			}
 			// Cache-Frame
@@ -318,21 +386,21 @@ namespace LightShadowCache
 				g_drawnDynamic.fetch_add(1, std::memory_order_relaxed);
 				return false;
 			}
-			const auto it = m->statics.find(&a_geom);
-			if (it == m->statics.end()) {
-				m->broken = true;  // neu im Lichtradius: diesen Frame zusaetzlich zeichnen, dann neu aufbauen
-				g_invAddedJobs.fetch_add(1, std::memory_order_relaxed);
+			const auto it = l->statics.find(&a_geom);
+			if (it == l->statics.end()) {
+				// neu im Lichtradius: zusaetzlich zeichnen, der Cache bleibt gueltig (zu viele -> neu aufbauen)
+				l->extras.insert(&a_geom);
+				g_drawnExtra.fetch_add(1, std::memory_order_relaxed);
 				return false;
 			}
 			const auto frame = g_frame.load(std::memory_order_relaxed);
 			if (it->second.seen != frame) {
 				it->second.seen = frame;
-				++m->matched;
+				++l->matched;
 			}
 			if (it->second.hash != PoseHash(a_geom.world)) {
-				m->promoted.insert(&a_geom);  // bewegt sich -> ab jetzt immer neu zeichnen
-				m->broken = true;
-				g_invPromotedJobs.fetch_add(1, std::memory_order_relaxed);
+				l->promoted.insert(&a_geom);  // bewegt sich -> ab jetzt immer neu zeichnen; alter Schatten steckt im Cache
+				l->broken = true;
 				return false;
 			}
 		} catch (...) {
@@ -347,104 +415,141 @@ namespace LightShadowCache
 		if (!g_installed) {
 			return;
 		}
-		++g_frame;
+		const auto frame = g_frame.fetch_add(1, std::memory_order_relaxed) + 1;
 		const bool enabled = Config::lightShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed);
 
 		// 1. letzten Frame auswerten
-		for (auto& m : g_maps) {
-			if (!m.camera.load(std::memory_order_relaxed)) {
+		for (auto& l : g_lights) {
+			if (!l.light.load(std::memory_order_relaxed)) {
 				continue;
 			}
-			const auto mode = static_cast<Mode>(m.mode.load(std::memory_order_relaxed));
-			if (mode == Mode::kNormal || !m.drawn) {
-				m.drawn = false;
-				continue;
+			const auto mode = static_cast<Mode>(l.mode.load(std::memory_order_relaxed));
+			if (l.unsupported) {
+				++g_win.unsupported;
 			}
-			m.drawn = false;
-			std::scoped_lock lock(m.lock);
-			if (mode == Mode::kBuild) {
-				m.valid = !m.statics.empty();
-				++g_win.builds;
-			} else {
-				++g_win.cached;
-				if (m.broken || m.matched != m.statics.size()) {
-					if (!m.broken) {
-						++g_win.invRemoved;  // ein Unbewegliches fehlt (weggenommen, Tuer geoeffnet ...)
+			if ((mode == Mode::kBuild || mode == Mode::kCached) && l.drawn) {
+				std::scoped_lock lock(l.lock);
+				if (mode == Mode::kBuild) {
+					l.valid = l.built && !l.statics.empty() && !l.unsupported;
+					++g_win.builds;
+				} else {
+					if (l.broken) {
+						++g_win.promoted;
+						l.valid = false;
+					} else if (l.matched != l.statics.size()) {
+						++g_win.removed;  // ein Unbewegliches fehlt (weggenommen, Tuer geoeffnet ...) -> Geisterschatten
+						l.valid = false;
+					} else if (l.extras.size() > kMaxExtras) {
+						++g_win.extraFull;
+						l.valid = false;
 					}
-					m.valid = false;
 				}
+				l.broken = false;
+				l.matched = 0;
 			}
-			m.broken = false;
-			m.matched = 0;
+			l.drawn = false;
+			l.built = false;
 		}
 
-		// 2. Modus je Schattenkarte fuer diesen Frame
+		// 2. Modus je Licht fuer diesen Frame
 		const auto ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
 		if (ssn) {
 			auto& data = ssn->GetRuntimeData();
-			for (const auto& light : data.activeShadowLights) {
-				if (!light || light.get() == data.sunShadowDirLight) {
+			for (const auto& lightPtr : data.activeShadowLights) {
+				const auto light = lightPtr.get();
+				if (!light || light == data.sunShadowDirLight) {
 					continue;
 				}
-				const auto niLight = light->light.get();
+				const auto& descs = light->GetRuntimeData().shadowmapDescriptors;
+				if (descs.empty() || descs.size() > kMaxCams) {
+					continue;
+				}
+				LightState* l = FindByLight(light);
+				if (!l) {
+					for (auto& slot : g_lights) {
+						if (!slot.light.load(std::memory_order_relaxed)) {
+							slot.camCount = 0;
+							slot.stableFrames = slot.waitFrames = 0;
+							slot.valid = slot.unsupported = false;
+							slot.light.store(light, std::memory_order_relaxed);
+							l = &slot;
+							break;
+						}
+					}
+					if (!l) {
+						continue;  // voll: dieses Licht normal zeichnen
+					}
+				}
+				l->lastSeen = frame;
+				const auto  niLight = light->light.get();
 				const float radius = niLight ? niLight->GetLightRuntimeData().radius.x : 0.0f;
-				for (const auto& d : light->GetRuntimeData().shadowmapDescriptors) {
-					const auto cam = d.camera.get();
+				bool        moved = descs.size() != l->camCount || std::abs(radius - l->radius) > kMoveEpsilon;
+				for (std::uint32_t i = 0; i < descs.size(); ++i) {
+					const auto cam = descs[i].camera.get();
 					if (!cam) {
+						moved = true;
 						continue;
 					}
-					MapState* m = Find(cam);
-					if (!m) {
-						for (auto& slot : g_maps) {
-							if (!slot.camera.load(std::memory_order_relaxed)) {
-								slot.pose = cam->world;
-								slot.radius = radius;
-								slot.stableFrames = 0;
-								slot.valid = false;
-								slot.camera.store(cam, std::memory_order_relaxed);
-								m = &slot;
-								break;
-							}
-						}
-						if (!m) {
-							continue;  // voll: dieses Licht normal zeichnen
-						}
+					if (l->cams[i].load(std::memory_order_relaxed) != cam || PoseChanged(cam->world, l->pose[i])) {
+						moved = true;
 					}
-					m->lastSeen = g_frame.load(std::memory_order_relaxed);
-					if (PoseChanged(cam->world, m->pose) || std::abs(radius - m->radius) > kMoveEpsilon) {
-						if (m->valid) {
-							++g_win.lightMoved;
-						}
-						m->pose = cam->world;
-						m->radius = radius;
-						m->stableFrames = 0;
-						m->valid = false;
-					} else {
-						++m->stableFrames;
-					}
-					Mode mode = Mode::kNormal;
-					if (enabled && m->valid) {
-						mode = Mode::kCached;
-					} else if (enabled && m->stableFrames >= kStableFrames) {
-						mode = Mode::kBuild;
-						std::scoped_lock lock(m->lock);
-						m->statics.clear();
-					}
-					if (mode == Mode::kNormal) {
-						++g_win.normal;
-					}
-					m->mode.store(static_cast<int>(mode), std::memory_order_relaxed);
+					l->pose[i] = cam->world;
+					l->cams[i].store(cam, std::memory_order_relaxed);
 				}
+				for (std::uint32_t i = static_cast<std::uint32_t>(descs.size()); i < kMaxCams; ++i) {
+					l->cams[i].store(nullptr, std::memory_order_relaxed);
+				}
+				l->camCount = static_cast<std::uint32_t>(descs.size());
+				l->radius = radius;
+				if (moved) {
+					if (l->valid) {
+						++g_win.lightMoved;
+					}
+					l->stableFrames = 0;
+					l->waitFrames = 0;
+					l->valid = false;
+				} else {
+					++l->stableFrames;
+				}
+				Mode mode = Mode::kNormal;
+				if (enabled && !l->unsupported) {
+					if (l->valid) {
+						mode = Mode::kCached;
+					} else if (l->stableFrames >= kStableFrames) {
+						// Aufbau bevorzugt, wenn im letzten Frame keine Figur im Radius war (deren Schatten fehlen im
+						// Aufbau-Frame); spaetestens nach kMaxWaitFrames trotzdem
+						std::uint32_t dynamicSeen = 0;
+						{
+							std::scoped_lock lock(l->lock);
+							dynamicSeen = std::exchange(l->dynamicSeen, 0u);
+						}
+						const auto prev = static_cast<Mode>(l->mode.load(std::memory_order_relaxed));
+						if ((prev == Mode::kWait && dynamicSeen == 0) || ++l->waitFrames > kMaxWaitFrames) {
+							mode = Mode::kBuild;
+							l->waitFrames = 0;
+							ClearSets(*l);
+						} else {
+							mode = Mode::kWait;
+						}
+					}
+				}
+				if (mode != Mode::kCached) {
+					g_win.normalMaps += descs.size();
+				} else {
+					g_win.cachedMaps += descs.size();
+				}
+				l->mode.store(static_cast<int>(mode), std::memory_order_relaxed);
 			}
 		}
-		// Karten, die gerade nicht aktiv sind: normal; lange nicht gesehen -> freigeben
-		for (auto& m : g_maps) {
-			const auto frame = g_frame.load(std::memory_order_relaxed);
-			if (m.camera.load(std::memory_order_relaxed) && m.lastSeen != frame) {
-				m.mode.store(static_cast<int>(Mode::kNormal), std::memory_order_relaxed);
-				if (frame - m.lastSeen > 600 || !enabled) {
-					Drop(m);
+		// Lichter, die gerade nicht aktiv sind: normal; lange nicht gesehen oder Cache aus -> freigeben
+		for (auto& l : g_lights) {
+			if (l.light.load(std::memory_order_relaxed) && l.lastSeen != frame) {
+				l.mode.store(static_cast<int>(Mode::kNormal), std::memory_order_relaxed);
+				if (frame - l.lastSeen > 600 || !enabled) {
+					Drop(l);
 				}
+			} else if (l.light.load(std::memory_order_relaxed) && !enabled) {
+				Drop(l);
 			}
 		}
 		++g_win.frames;
@@ -452,9 +557,9 @@ namespace LightShadowCache
 
 	void Reset()
 	{
-		for (auto& m : g_maps) {
-			if (m.camera.load(std::memory_order_relaxed)) {
-				Drop(m);
+		for (auto& l : g_lights) {
+			if (l.light.load(std::memory_order_relaxed)) {
+				Drop(l);
 			}
 		}
 	}
@@ -466,10 +571,10 @@ namespace LightShadowCache
 		}
 		auto&        w = g_win;
 		const double f = static_cast<double>(w.frames);
-		logger::info("[LightCache] {} | maps/frame: from cache {:.1f}, built {:.2f}, drawn normally {:.1f} | meshes/frame saved {:.0f}, still drawn (moving) {:.0f} | "
-					 "rebuilds: light moved {}, mesh added {}, mesh removed {}, mesh started moving {} | failed {}",
-			Config::lightShadowCache.enabled ? "ON" : "OFF", w.cached / f, w.builds / f, w.normal / f, g_saved.exchange(0) / f, g_drawnDynamic.exchange(0) / f, w.lightMoved,
-			g_invAddedJobs.exchange(0), w.invRemoved, g_invPromotedJobs.exchange(0), w.buildFailed);
+		logger::info("[LightCache] {} | maps/frame from cache {:.1f}, drawn normally {:.1f} | builds/frame {:.3f} | meshes/frame saved {:.0f}, still drawn: moving {:.0f}, added {:.0f} | "
+					 "rebuilds: light moved {}, mesh removed {}, mesh started moving {}, too many added {} | failed {}, lights not supported {:.1f}",
+			Config::lightShadowCache.enabled ? "ON" : "OFF", w.cachedMaps / f, w.normalMaps / f, w.builds / f, g_saved.exchange(0) / f, g_drawnDynamic.exchange(0) / f,
+			g_drawnExtra.exchange(0) / f, w.lightMoved, w.removed, w.promoted, w.extraFull, w.buildFailed, w.unsupported / f);
 		w = {};
 	}
 }
