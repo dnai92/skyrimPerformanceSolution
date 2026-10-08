@@ -665,6 +665,25 @@ namespace ShadowCulling
 		constexpr float kNearLightAngular = 0.1f;
 		std::atomic<bool> g_pointCullAllowed{ true };  // false = Innenraum und dort nicht erlaubt  // Radius/Abstand zum Licht darueber -> Schatten immer behalten
 
+		// Punktlicht: Der Schatten auf einer Flaeche hinter dem Objekt ist um (Abstand Licht-Flaeche / Abstand Licht-Objekt)
+		// groesser als das Objekt; die Flaeche liegt hoechstens im Leuchtradius. Bewertet wird deshalb die moegliche
+		// Schattengroesse (wie bei der Sonne die Schattenlaenge), nicht das Objekt - grosse Schatten an der Wand fehlten.
+		float PointShadowScale(const RE::NiCamera* a_lightCamera, const RE::BSGeometry& a_geom) noexcept
+		{
+			const auto count = g_pointCameraCount.load(std::memory_order_relaxed);
+			for (std::uint32_t i = 0; i < count && i < kMaxPointCameras; ++i) {
+				if (g_pointCameras[i].load(std::memory_order_relaxed) != a_lightCamera) {
+					continue;
+				}
+				const auto& p = g_pointLightPos[i];
+				const auto& b = a_geom.worldBound;
+				const float dx = b.center.x - p.x, dy = b.center.y - p.y, dz = b.center.z - p.z;
+				const float d = std::max(std::sqrt(dx * dx + dy * dy + dz * dz) - b.radius, 1.0f);
+				return std::clamp(g_pointLightRadius[i] / d, 1.0f, 50.0f);
+			}
+			return 1.0f;
+		}
+
 		bool NearPointLight(const RE::NiCamera* a_lightCamera, const RE::BSGeometry& a_geom) noexcept
 		{
 			if (!a_lightCamera) {
@@ -906,7 +925,8 @@ namespace ShadowCulling
 						return;
 					}
 					// minCascade gilt nur fuer die Sonne -> hier Kaskade als "hinreichend gross" uebergeben
-					if (g_pointCullAllowed.load(std::memory_order_relaxed) && !NearPointLight(a_this->camera, a_visible) && ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX)) {
+					if (g_pointCullAllowed.load(std::memory_order_relaxed) && !NearPointLight(a_this->camera, a_visible) &&
+						ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX, PointShadowScale(a_this->camera, a_visible))) {
 						Stats::Count(Stats::Counter::PointCulled);
 						return;
 					}
@@ -945,7 +965,8 @@ namespace ShadowCulling
 			static void thunk(RE::BSCullingProcess* a_this, RE::BSGeometry& a_visible, std::int32_t a_alphaGroupIndex)
 			{
 				DiagRecord(a_this->camera);
-				if (g_pointCullAllowed.load(std::memory_order_relaxed) && !NearPointLight(a_this->camera, a_visible) && ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX)) {
+				if (g_pointCullAllowed.load(std::memory_order_relaxed) && !NearPointLight(a_this->camera, a_visible) &&
+					ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX, PointShadowScale(a_this->camera, a_visible))) {
 					Stats::Count(Stats::Counter::PointCulled);
 					return;
 				}

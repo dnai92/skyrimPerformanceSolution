@@ -31,6 +31,7 @@ namespace LightShadowCache
 		{
 			std::atomic<const RE::BSShadowLight*>                  light{ nullptr };
 			std::array<std::atomic<const RE::NiCamera*>, kMaxCams> cams{};
+			std::array<std::atomic<const void*>, kMaxCams>          accums{};  // Zeichenliste (Shader-Akkumulator) je Karte
 			std::atomic<int>                                       mode{ static_cast<int>(Mode::kNormal) };
 			// Main-Thread
 			std::array<RE::NiTransform, kMaxCams> pose{};
@@ -72,6 +73,7 @@ namespace LightShadowCache
 		std::atomic<bool> g_stalled{ false };
 		bool                               g_installed = false;
 		bool                               g_drawFilter = false;
+		bool                               g_registerFilter = false;  // Uebergabe-Hooks installiert
 		// Gerade gezeichnete Schattenkarte (Render-Thread, nur waehrend des Zeichen-Aufrufs gesetzt)
 		LightState*   g_curLight = nullptr;
 		Mode          g_curMode = Mode::kNormal;
@@ -194,6 +196,48 @@ namespace LightShadowCache
 			return static_cast<int>(Config::lightShadowCache.debugMode + 0.5f);
 		}
 
+		LightState* FindByAccumulator(const void* a_accumulator) noexcept
+		{
+			if (!a_accumulator) {
+				return nullptr;
+			}
+			for (auto& l : g_lights) {
+				if (!l.light.load(std::memory_order_relaxed)) {
+					continue;
+				}
+				for (const auto& a : l.accums) {
+					if (a.load(std::memory_order_relaxed) == a_accumulator) {
+						return &l;
+					}
+				}
+			}
+			return nullptr;
+		}
+
+		bool Filter(LightState* l, Mode mode, RE::BSGeometry& geom) noexcept;
+
+		// BSShaderAccumulator::RegisterObject (ID 106567): Mesh kommt in die Zeichenliste. Aufgerufen nach dem Einsammeln
+		// (Culling-Jobs, mehrere Threads): ID 76558 +0xd3 (eingesammelte Liste), +0x199 (Alpha-Gruppen), ID 108604 +0x134
+		// (zweite Fackel-Halbkugel direkt)
+		struct RegisterObject
+		{
+			static void thunk(void* a_accumulator, RE::NiAVObject* a_object, std::uintptr_t a_extra)
+			{
+				if (a_object && !g_stalled.load(std::memory_order_relaxed) && DebugMode() != 4) {
+					if (LightState* l = FindByAccumulator(a_accumulator)) {
+						const auto mode = static_cast<Mode>(l->mode.load(std::memory_order_relaxed));
+						if (mode == Mode::kBuild || mode == Mode::kCached) {
+							if (const auto geom = a_object->AsGeometry(); geom && Filter(l, mode, *geom)) {
+								return;  // steckt im Cache (bzw. Figur im Aufbau-Frame)
+							}
+						}
+					}
+				}
+				func(a_accumulator, a_object, a_extra);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		bool PoseChanged(const RE::NiTransform& a_a, const RE::NiTransform& a_b) noexcept
 		{
 			const float dx = a_a.translate.x - a_b.translate.x, dy = a_a.translate.y - a_b.translate.y, dz = a_a.translate.z - a_b.translate.z;
@@ -240,6 +284,9 @@ namespace LightShadowCache
 			a_l.mode.store(static_cast<int>(Mode::kNormal), std::memory_order_relaxed);
 			for (auto& c : a_l.cams) {
 				c.store(nullptr, std::memory_order_relaxed);
+			}
+			for (auto& a : a_l.accums) {
+				a.store(nullptr, std::memory_order_relaxed);
 			}
 			a_l.light.store(nullptr, std::memory_order_relaxed);
 		}
@@ -543,6 +590,23 @@ namespace LightShadowCache
 		}
 		DrawShadowmap::func = SKSE::GetTrampoline().write_call<5>(site.address(), DrawShadowmap::thunk);
 		g_installed = true;
+
+		const REL::Relocation<std::uintptr_t> reg{ REL::ID(106567) };
+		const REL::Relocation<std::uintptr_t> regSites[] = { REL::Relocation<std::uintptr_t>{ REL::ID(76558), 0xd3 }, REL::Relocation<std::uintptr_t>{ REL::ID(76558), 0x199 },
+			REL::Relocation<std::uintptr_t>{ REL::ID(108604), 0x134 } };
+		bool regOk = true;
+		for (const auto& s : regSites) {
+			regOk = regOk && Features::IsCall(s.address(), reg.address());
+		}
+		if (regOk) {
+			for (const auto& s : regSites) {
+				RegisterObject::func = SKSE::GetTrampoline().write_call<5>(s.address(), RegisterObject::thunk);
+			}
+			g_registerFilter = true;
+			logger::info("Hooks installed: RegisterObject call sites (ID 76558+0xd3/+0x199, 108604+0x134) - shadow cache filter");
+		} else {
+			logger::info("Shadow cache: RegisterObject call sites differ - filtering at draw level only");
+		}
 		Features::Report("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern", true);
 		logger::info("Hook installed: shadow map draw (ID 107604+0x167) - shadow cache for static lights");
 	}
@@ -559,18 +623,15 @@ namespace LightShadowCache
 		}
 	}
 
-	namespace
-	{
-		bool Filter(LightState* l, RE::BSGeometry& geom) noexcept;
-	}
-
 	bool SkipDraw(const RE::BSRenderPass& a_pass) noexcept
 	{
 		LightState* const l = g_curLight;
 		if (!l) {
 			return false;
 		}
-		const bool skip = a_pass.geometry && Filter(l, *a_pass.geometry);
+		// Uebergabe-Filter aktiv: Cache-Frames sind schon gefiltert; im Aufbau-Frame zur Sicherheit nochmals Figuren weg
+		const bool check = !g_registerFilter || DebugMode() == 4 || g_curMode == Mode::kBuild;
+		const bool skip = check && a_pass.geometry && Filter(l, g_curMode, *a_pass.geometry);
 		if (!skip) {
 			++g_curPasses;  // wird gezeichnet -> SetupGeometry folgt
 		}
@@ -579,9 +640,8 @@ namespace LightShadowCache
 
 	namespace
 	{
-	bool Filter(LightState* l, RE::BSGeometry& geom) noexcept
+	bool Filter(LightState* l, Mode mode, RE::BSGeometry& geom) noexcept
 	{
-		const auto mode = g_curMode;
 		bool       dynamic = IsDynamic(geom);
 		try {
 			std::scoped_lock lock(l->lock);
@@ -717,9 +777,11 @@ namespace LightShadowCache
 					}
 					l->pose[i] = cam->world;
 					l->cams[i].store(cam, std::memory_order_relaxed);
+					l->accums[i].store(descs[i].shaderAccumulator.get(), std::memory_order_relaxed);
 				}
 				for (std::uint32_t i = static_cast<std::uint32_t>(descs.size()); i < kMaxCams; ++i) {
 					l->cams[i].store(nullptr, std::memory_order_relaxed);
+					l->accums[i].store(nullptr, std::memory_order_relaxed);
 				}
 				l->camCount = static_cast<std::uint32_t>(descs.size());
 				l->radius = radius;
@@ -800,7 +862,7 @@ namespace LightShadowCache
 		const double f = static_cast<double>(w.frames);
 		logger::info("[LightCache] {} (test mode {}) | maps/frame from cache {:.1f}, drawn normally {:.1f} | builds/frame {:.3f} | meshes/frame saved {:.0f}, still drawn: moving {:.0f}, added {:.0f} | "
 					 "rebuilds: light moved {}, mesh removed {}, mesh started moving {}, too many added {} | failed {}, lights not supported {:.1f} | draws outside filter {}",
-			Config::lightShadowCache.enabled ? "ON" : "OFF", DebugMode(), w.cachedMaps / f, w.normalMaps / f, w.builds / f, g_saved.exchange(0) / f, g_drawnDynamic.exchange(0) / f,
+			Config::lightShadowCache.enabled ? "ON" : "OFF", DebugMode() == 4 ? 4 : DebugMode(), w.cachedMaps / f, w.normalMaps / f, w.builds / f, g_saved.exchange(0) / f, g_drawnDynamic.exchange(0) / f,
 			g_drawnExtra.exchange(0) / f, w.lightMoved, w.removed, w.promoted, w.extraFull, w.buildFailed, w.unsupported / f, w.uncoveredDraws);
 		std::scoped_lock lock(g_moverLock);
 		for (const auto& [name, count] : g_movers) {
