@@ -61,6 +61,7 @@ namespace LightShadowCache
 			std::unordered_set<const RE::BSGeometry*>        promoted;  // gelernte Bewegliche
 			std::uint32_t                                    matched = 0;
 			bool                                             broken = false;   // bewegt/weggefallen -> neu aufbauen
+			std::uint32_t                                    keptFrame = 0;    // Frame, in dem schon ein Unbewegliches gezeichnet wurde
 		};
 		std::array<LightState, kMaxLights> g_lights;
 		std::atomic<std::uint32_t>         g_frame{ 0 };
@@ -587,6 +588,13 @@ namespace LightShadowCache
 				l->promoted.insert(&a_geom);  // bewegt sich -> ab jetzt immer neu zeichnen; alter Schatten steckt im Cache
 				RecordMover(a_geom);
 				l->broken = true;
+				return false;
+			}
+			// Nie eine leere Liste: ohne ein einziges Mesh markiert die Engine das Schattenlicht offenbar als inaktiv
+			// (Schattenkanal 255) und Community Shaders laesst das ganze Licht weg -> Licht ging kurz aus (1.0.30).
+			// Ein Unbewegliches wird deshalb zusaetzlich gezeichnet (steckt auch im Cache, optisch gleich).
+			if (l->keptFrame != frame) {
+				l->keptFrame = frame;
 				return false;
 			}
 		} catch (...) {
