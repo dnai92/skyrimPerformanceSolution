@@ -1017,14 +1017,19 @@ namespace ShadowCulling
 		};
 
 		// ---- Teilbaeume ueberspringen (Process = vfunc 0x16, wird fuer jeden Knoten/jedes Objekt im Durchlauf aufgerufen) ----
-		thread_local int g_insideActor = 0;  // Figuren nie ueberspringen (ihre Schatten haben eigene Regeln)
-
-		bool IsActorRoot(RE::NiAVObject* a_obj) noexcept
+		// Figuren nie ueberspringen (ihre Schatten haben eigene Regeln). Geprueft wird nur fuer Knoten, die sonst
+		// uebersprungen wuerden: erster Vorfahr mit Referenz entscheidet. Bis 1.0.41 wurde jedes Objekt jedes Durchlaufs
+		// vorab geprueft (Lesezugriff ausserhalb des Caches) - ~2 % des Haupt-Threads am Markt (Tracy)
+		bool BelongsToActorNode(const RE::NiAVObject* a_obj) noexcept
 		{
-			// nur der eigene Eintrag: Kinder einer Figur zaehlen ueber die Rekursion (g_insideActor) mit
-			const auto ref = SceneUtil::OwnUserData(a_obj);
-			return ref && (ref->GetFormType() == RE::FormType::ActorCharacter);
+			for (int depth = 0; a_obj && depth < 32; ++depth, a_obj = a_obj->parent) {
+				if (const auto ref = SceneUtil::OwnUserData(a_obj)) {
+					return ref->GetFormType() == RE::FormType::ActorCharacter;
+				}
+			}
+			return false;
 		}
+
 
 		// Kamera der Niederschlags-/Skylighting-Verdeckungskarte. Erkennung ueber die Kamera, nicht ueber den Culler:
 		// das Spiel verteilt den Durchlauf auf Kopien des Cullers (Zeigervergleich traf nie).
@@ -1037,8 +1042,11 @@ namespace ShadowCulling
 		// true = Knoten samt Inhalt ueberspringen
 		bool ShouldPrune(RE::BSCullingProcess* a_this, RE::NiAVObject* a_obj, bool a_parabolic) noexcept
 		{
-			const auto node = a_obj ? a_obj->AsNode() : nullptr;
-			if (!node || g_insideActor > 0 || !Config::subtreePruning.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+			if (!a_obj || !Config::subtreePruning.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+				return false;
+			}
+			const auto node = a_obj->AsNode();
+			if (!node) {
 				return false;
 			}
 			const auto& bound = node->worldBound;
@@ -1093,13 +1101,7 @@ namespace ShadowCulling
 		{
 			static void thunk(RE::BSCullingProcess* a_this, RE::NiAVObject* a_obj, std::uint32_t a_arg)
 			{
-				if (a_obj && IsActorRoot(a_obj)) {
-					++g_insideActor;
-					func(a_this, a_obj, a_arg);
-					--g_insideActor;
-					return;
-				}
-				if (ShouldPrune(a_this, a_obj, Parabolic)) {
+				if (ShouldPrune(a_this, a_obj, Parabolic) && !BelongsToActorNode(a_obj)) {
 					return;
 				}
 				func(a_this, a_obj, a_arg);
