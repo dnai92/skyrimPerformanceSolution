@@ -315,14 +315,6 @@ namespace Menu
 			Toggle(T("Cache shadows of static lights (test)##point", "Schatten fester Lichter zwischenspeichern (Test)##point"), Config::lightShadowCache.enabled,
 				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters and moving objects are drawn again each frame. Flickering lights are always redrawn. Mainly for interiors with many lights.",
 					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren und Bewegliches neu gezeichnet. Flackernde Lichter werden immer neu gezeichnet. Vor allem für Innenräume mit vielen Lichtern."));
-			if (Config::analysis.load(std::memory_order_relaxed)) {
-				float dbg = Config::lightShadowCache.debugMode;
-				if (MenuApi::SliderFloat(T("Cache test mode (0-3)##lcdbg", "Cache-Prüfmodus (0-3)##lcdbg"), &dbg, 0.0f, 3.0f, "%.0f")) {
-					Config::lightShadowCache.debugMode = std::round(dbg);
-				}
-				Tip(T("0 normal | 1 never rebuild | 2 rebuild without previous frame | 3 restore cache but draw everything (must look like off)",
-					"0 normal | 1 nie neu aufbauen | 2 Aufbau ohne Vorframe-Karte | 3 Cache zurückkopieren, aber alles zeichnen (muss wie aus aussehen)"));
-			}
 
 			MenuApi::SeparatorText(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"));
 			Toggle(T("Enabled##actor", "Aktiv##actor"), Config::actorShadowCulling.enabled,
