@@ -302,6 +302,9 @@ namespace Menu
 					T("With a low sun shadows get long - below this elevation nothing is culled.", "Bei tiefer Sonne werden Schatten lang - darunter wird nichts weggelassen."))) {
 				Config::sunMinElevation.store(elevation);
 			}
+			AtomicToggle(T("Skip shadows that cannot reach the view (test)##sun", "Schatten außerhalb des Sichtfelds weglassen (Test)##sun"), Config::sunViewCulling,
+				T("Objects whose sun shadow cannot fall into the picture (e.g. behind you, shadow pointing away) are left out of the sun shadow map - also large ones. The shadow direction is taken into account.",
+					"Objekte, deren Sonnenschatten nicht ins Bild fallen kann (z. B. hinter dir, Schatten zeigt weg), werden aus der Sonnen-Schattenkarte weggelassen - auch große. Die Schattenrichtung wird berücksichtigt."));
 
 			MenuApi::SeparatorText(T("Torch / point light shadow culling", "Fackelschatten kleiner Objekte weglassen"));
 			Toggle(T("Enabled##point", "Aktiv##point"), Config::pointLightCulling.enabled,

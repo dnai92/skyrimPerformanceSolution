@@ -50,6 +50,105 @@ namespace ShadowCulling
 		constexpr float    kMinSunSin = 0.05f;
 		std::atomic<bool>  g_sunCullAllowed{ true };  // false, solange die Sonne unter fMinSunElevation steht
 
+		// Sichtfeld-Culling der Sonnenschatten (Test, bViewCulling): Kann der Schatten eines Objekts das Sichtfeld der
+		// Hauptkamera ueberhaupt erreichen? Die Huellkugel wird gedanklich entlang der Lichtrichtung unendlich
+		// verlaengert. Liegt sie komplett ausserhalb einer Seitenebene des Sichtfelds und laeuft das Licht von dieser
+		// Ebene weg, faellt der Schatten nie ins Bild - auch nicht in Lichtstrahlen/Nebel entlang der Sichtstrahlen.
+		// Ebenen und Lichtrichtung setzt der Main-Thread vor dem Sonnen-Accumulate, die Culling-Jobs lesen danach.
+		struct ViewPlanes
+		{
+			float n[4][3]{};  // nach innen zeigend, normiert
+			float d[4]{};
+			bool  usable[4]{};  // Licht laeuft von der Ebene weg (n . L <= 0) -> darf cullen
+		};
+		ViewPlanes        g_view;
+		std::atomic<bool> g_viewValid{ false };
+		// Rand: veraltete Huellen geskinnter Figuren (sitzende NPCs), weiche Schattenraender, Bewegung im selben Frame
+		constexpr float kViewMargin = 256.0f;
+
+		float PlaneDist(int a_i, const RE::NiPoint3& a_p) noexcept
+		{
+			return g_view.n[a_i][0] * a_p.x + g_view.n[a_i][1] * a_p.y + g_view.n[a_i][2] * a_p.z + g_view.d[a_i];
+		}
+
+		bool ShadowOutsideView(const RE::NiBound& a_bound) noexcept
+		{
+			if (!g_viewValid.load(std::memory_order_acquire) || a_bound.radius <= 0.0f) {
+				return false;
+			}
+			const float r = a_bound.radius + kViewMargin;
+			for (int i = 0; i < 4; ++i) {
+				if (g_view.usable[i] && PlaneDist(i, a_bound.center) < -r) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// Kontrolle: Objekt der Hauptszene komplett ausserhalb der Ebenen? (sollte bei richtigen Ebenen nie vorkommen)
+		bool OutsideViewPlanes(const RE::NiBound& a_bound) noexcept
+		{
+			if (!g_viewValid.load(std::memory_order_acquire) || a_bound.radius <= 0.0f) {
+				return false;
+			}
+			for (int i = 0; i < 4; ++i) {
+				if (PlaneDist(i, a_bound.center) < -a_bound.radius - 16.0f) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		void UpdateViewPlanes(RE::BSShadowDirectionalLight* a_light) noexcept
+		{
+			g_viewValid.store(false, std::memory_order_relaxed);
+			if (!Config::sunViewCulling.load(std::memory_order_relaxed) || !Config::masterEnabled.load(std::memory_order_relaxed) || !a_light) {
+				return;
+			}
+			const auto  cam = RE::Main::WorldRootCamera();
+			const auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
+			if (!cam || descs.empty() || !descs[0].camera) {
+				return;
+			}
+			const auto& fr = cam->GetRuntimeData2().viewFrustum;
+			// nur symmetrische Perspektive: dann ist egal, ob Spalte 1/2 der Kamera nach oben/rechts oder gespiegelt zeigen
+			const float w = fr.fRight - fr.fLeft, h = fr.fTop - fr.fBottom;
+			if (fr.bOrtho || !(w > 0.0f) || !(h > 0.0f) || std::abs(fr.fRight + fr.fLeft) > 0.02f * w || std::abs(fr.fTop + fr.fBottom) > 0.02f * h) {
+				return;
+			}
+			// Lichtrichtung = Blickrichtung der Schattenkamera (Spalte 0), muss nach unten zeigen
+			const auto& lr = descs[0].camera->world.rotate;
+			const float L[3]{ lr.entry[0][0], lr.entry[1][0], lr.entry[2][0] };
+			const float lLen = std::sqrt(L[0] * L[0] + L[1] * L[1] + L[2] * L[2]);
+			if (!(lLen > 0.5f) || L[2] / lLen > -0.02f) {
+				return;
+			}
+			const auto& r = cam->world.rotate;
+			const auto& p = cam->world.translate;
+			const float D[3]{ r.entry[0][0], r.entry[1][0], r.entry[2][0] };  // Blickrichtung
+			const float U[3]{ r.entry[0][1], r.entry[1][1], r.entry[2][1] };
+			const float R[3]{ r.entry[0][2], r.entry[1][2], r.entry[2][2] };
+			const float a = fr.fRight, t = fr.fTop;
+			const float planes[4][3]{
+				{ a * D[0] - R[0], a * D[1] - R[1], a * D[2] - R[2] },
+				{ a * D[0] + R[0], a * D[1] + R[1], a * D[2] + R[2] },
+				{ t * D[0] - U[0], t * D[1] - U[1], t * D[2] - U[2] },
+				{ t * D[0] + U[0], t * D[1] + U[1], t * D[2] + U[2] },
+			};
+			for (int i = 0; i < 4; ++i) {
+				const float len = std::sqrt(planes[i][0] * planes[i][0] + planes[i][1] * planes[i][1] + planes[i][2] * planes[i][2]);
+				if (!(len > 1e-4f)) {
+					return;
+				}
+				for (int k = 0; k < 3; ++k) {
+					g_view.n[i][k] = planes[i][k] / len;
+				}
+				g_view.d[i] = -(g_view.n[i][0] * p.x + g_view.n[i][1] * p.y + g_view.n[i][2] * p.z);
+				g_view.usable[i] = g_view.n[i][0] * L[0] + g_view.n[i][1] * L[1] + g_view.n[i][2] * L[2] <= 0.0f;
+			}
+			g_viewValid.store(true, std::memory_order_release);
+		}
+
 		// Kaskaden-Cache (nur Main-Thread schreibt; Culling-Jobs lesen g_cacheSkip)
 		std::atomic<bool> g_cacheSkip{ false };  // dieser Frame: ferne Kaskade(n) nicht neu zeichnen
 		std::uint32_t     g_cacheCounter = 0;
@@ -513,6 +612,9 @@ namespace ShadowCulling
 		// Die Hauptkamera ('WorldRoot Camera') laeuft NICHT ueber AppendVirtual -> Aufruf aus GetRenderPasses (vfunc 0x2A).
 		bool ShouldCullMain(RE::BSGeometry& a_geom) noexcept
 		{
+			if (OutsideViewPlanes(a_geom.worldBound)) {
+				Stats::Count(Stats::Counter::ViewCheckOutside);
+			}
 			const auto  property = a_geom.GetGeometryRuntimeData().shaderProperty.get();
 			const bool  isDecal = property && property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kDecal, RE::BSShaderProperty::EShaderPropertyFlag::kDynamicDecal);
 			const auto& dec = Config::decalCulling;
@@ -550,6 +652,10 @@ namespace ShadowCulling
 					if (g_cacheSkip.load(std::memory_order_relaxed) && Config::cascadeCache.skipDraws && cascade >= Config::cascadeCache.cascade) {
 						Stats::Count(Stats::Counter::CascadeSkipped);
 						return;  // Kaskade kommt diesen Frame aus dem Cache
+					}
+					if (!a_visible.GetGeometryRuntimeData().skinInstance && ShadowOutsideView(a_visible.worldBound)) {
+						Stats::Count(Stats::Counter::SunViewCulled);
+						return;
 					}
 					if (g_sunCullAllowed.load(std::memory_order_relaxed) && CullActorShadow(a_visible, false)) {
 						return;
@@ -701,6 +807,10 @@ namespace ShadowCulling
 			case Kind::kSun:
 				if (g_cacheSkip.load(std::memory_order_relaxed) && Config::cascadeCache.skipDraws && cascade >= Config::cascadeCache.cascade) {
 					return false;  // Kaskaden-Cache entscheidet selbst
+				}
+				if (ShadowOutsideView(bound)) {
+					Stats::Count(Stats::Counter::PrunedSunView);
+					return true;
 				}
 				if (sp.sun && g_sunCullAllowed.load(std::memory_order_relaxed) &&
 					ShouldCullBound(Config::shadowCulling, bound, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
@@ -1005,6 +1115,7 @@ namespace ShadowCulling
 
 	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept
 	{
+		UpdateViewPlanes(a_light);
 		const auto& cfg = Config::cascadeCache;
 		// Kamera-Stand der Engine aus dem letzten Cache-Frame zuruecklegen (auch wenn der Cache inzwischen aus ist)
 		if (a_light) {
@@ -1278,6 +1389,7 @@ namespace ShadowCulling
 	{
 		Config::ReloadIfChanged();
 		TextureStream::OnFrame();
+		g_viewValid.store(false, std::memory_order_relaxed);  // neu erst beim naechsten Sonnen-Accumulate (Innenraeume: nie)
 
 		if (const auto camera = RE::PlayerCamera::GetSingleton(); camera && camera->cameraRoot) {
 			const auto& pos = camera->cameraRoot->world.translate;
