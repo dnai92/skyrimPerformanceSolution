@@ -7,9 +7,8 @@
 // zugeteilten Platz der Schattenkarten-Sammlung kopiert, gezeichnet werden nur noch Figuren, an Figuren haengende
 // Meshes, Effekte und gelernte Bewegliche. Eingesammelt wird alles wie ohne Cache, weggelassen wird erst beim
 // einzelnen Draw: das Einsammeln hat Nebenwirkungen (bis 1.0.33 ging dadurch das Licht aus).
-// Ab 1.0.35 wird bereits bei der Uebergabe in die Zeichenliste der Karte gefiltert (RegisterObject, ID 106567, an
-// den drei Stellen nach dem Einsammeln) - das Einsammeln selbst bleibt unberuehrt, die Liste aber klein.
-// Pruefmodus 4: nur beim Draw weglassen (Stand 1.0.34). Flackernde (sich bewegende) Lichter werden nie zwischengespeichert.
+// 1.0.35 filterte schon bei der Uebergabe in die Zeichenliste (RegisterObject, ID 106567) - Licht flackerte ebenso:
+// die Engine wertet die Zeichenliste der Karte noch fuer etwas anderes aus. Deshalb bleibt es beim Draw-Filter. Flackernde (sich bewegende) Lichter werden nie zwischengespeichert.
 // Neu aufgebaut wird, wenn sich ein unbewegliches Mesh bewegt (es gilt ab dann als beweglich), hinzukommt oder
 // wegfaellt. Ablauf in der Engine (ID 107604, je Schattenkarte): Platz zuteilen, leeren, zeichnen (ID 106436),
 // Matrix berechnen - der Cache haengt sich an den Zeichen-Aufruf.
