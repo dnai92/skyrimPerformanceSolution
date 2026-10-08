@@ -20,6 +20,9 @@ namespace LightShadowCache
 	// Culling-Jobs: Mesh kommt in die Schattenkarte dieser Kamera. true = nicht zeichnen (steckt im Cache)
 	bool FilterAppend(const RE::NiCamera* a_camera, RE::BSGeometry& a_geom) noexcept;
 
+	// Bildausgabe (IDXGISwapChain::Present, jedes gezeichnete Bild - auch in Pause/Menues)
+	void OnPresent() noexcept;
+
 	// Ladebildschirm / Hauptmenue: alles verwerfen
 	void Reset();
 

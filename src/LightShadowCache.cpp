@@ -66,6 +66,11 @@ namespace LightShadowCache
 		};
 		std::array<LightState, kMaxLights> g_lights;
 		std::atomic<std::uint32_t>         g_frame{ 0 };
+		// Spiel pausiert (F1-Menue, Menues): gezeichnet wird weiter, der Frame-Beginn (Spieler-Update) laeuft aber nicht.
+		// Ohne ihn stimmen die Modi nicht mehr (1.0.28: Lichter gingen im F1-Menue nacheinander aus) -> in solchen
+		// Bildern alles normal zeichnen. Entschieden je Bild an der Bildausgabe: lief seit der letzten kein Frame-Beginn?
+		std::atomic<bool> g_onFrameSeen{ false };
+		std::atomic<bool> g_stalled{ false };
 		bool                               g_installed = false;
 
 		struct Window
@@ -439,6 +444,11 @@ namespace LightShadowCache
 					func(a_camera, a_accumulator, a_flags);
 					return;
 				}
+				if (g_stalled.load(std::memory_order_relaxed)) {
+					func(a_camera, a_accumulator, a_flags);  // Pause: alles wurde normal aufgenommen
+					l->valid = false;                        // nach dem Fortsetzen neu aufbauen
+					return;
+				}
 				std::uint32_t idx = 0;
 				const auto    light = FindActiveLight(a_camera, idx);
 				if (!light || light != l->light.load(std::memory_order_relaxed)) {
@@ -505,6 +515,9 @@ namespace LightShadowCache
 		if (!g_installed) {
 			return false;
 		}
+		if (g_stalled.load(std::memory_order_relaxed)) {
+			return false;
+		}
 		LightState* l = FindByCamera(a_camera);
 		if (!l) {
 			return false;
@@ -566,6 +579,7 @@ namespace LightShadowCache
 			return;
 		}
 		const auto frame = g_frame.fetch_add(1, std::memory_order_relaxed) + 1;
+		g_onFrameSeen.store(true, std::memory_order_relaxed);
 		const bool enabled = Config::lightShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed);
 
 		// 1. letzten Frame auswerten
@@ -709,6 +723,11 @@ namespace LightShadowCache
 		} else if (Config::analysis.load(std::memory_order_relaxed) && !enabled && ++g_targetDiagFrame % 300 == 0) {  // nur ohne Cache (umgeht ihn)
 			g_targetDiagLeft = 2;
 		}
+	}
+
+	void OnPresent() noexcept
+	{
+		g_stalled.store(!g_onFrameSeen.exchange(false, std::memory_order_relaxed), std::memory_order_relaxed);
 	}
 
 	void Reset()

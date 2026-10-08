@@ -138,6 +138,7 @@ namespace Hooks
 		{
 			static long thunk(void* a_swapChain, std::uint32_t a_syncInterval, std::uint32_t a_flags)
 			{
+				LightShadowCache::OnPresent();
 				Stats::ScopedTimer timer{ Stats::Zone::PresentWait };
 				return func(a_swapChain, a_syncInterval, a_flags);
 			}
