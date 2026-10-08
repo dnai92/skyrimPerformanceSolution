@@ -289,9 +289,17 @@ namespace Menu
 			}
 			Tip(T("Deletes SPS_User.ini and reloads the defaults from SPS.ini (takes up to 2 s).",
 				"Löscht SPS_User.ini und lädt die Standardwerte aus SPS.ini (dauert bis zu 2 s)."));
-			AtomicToggle(T("Analysis logging (costs performance)", "Analyse-Protokoll (kostet Leistung)"), Config::analysis,
-				T("Extra diagnostics in SPS.log (incl. detailed texture streaming report every 10 s). Costs 2-4 ms per frame - only for troubleshooting.",
-					"Zusätzliche Diagnose in SPS.log (inkl. ausführlichem Textur-Streaming-Bericht alle 10 s). Kostet 2-4 ms pro Frame - nur zur Fehlersuche."));
+			if (AtomicToggle(T("Analysis logging (costs performance)", "Analyse-Protokoll (kostet Leistung)"), Config::analysis,
+					T("Extra diagnostics in SPS.log (incl. detailed texture streaming report every 10 s). Costs 2-4 ms per frame - only for troubleshooting. Not saved - always starts OFF.",
+						"Zusätzliche Diagnose in SPS.log (inkl. ausführlichem Textur-Streaming-Bericht alle 10 s). Kostet 2-4 ms pro Frame - nur zur Fehlersuche. Wird nicht gespeichert - startet immer AUS."),
+					false) &&
+				Config::analysis.load()) {
+				RE::DebugNotification(T("SPS: analysis logging ON - costs performance (off again after restart)", "SPS: Analyse-Protokoll AN - kostet Leistung (nach Neustart wieder aus)"));
+			}
+			if (Config::analysis.load()) {
+				MenuApi::TextWrapped("%s", T("Analysis logging is active and costs 2-4 ms per frame. Switch it off for normal play and FPS comparisons.",
+												"Das Analyse-Protokoll ist aktiv und kostet 2-4 ms pro Bild. Für normales Spielen und FPS-Vergleiche ausschalten."));
+			}
 		}
 
 		void __stdcall RenderShadows()

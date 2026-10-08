@@ -42,7 +42,6 @@ namespace Config
 					ini.SetDoubleValue(s, k, v, nullptr, true);
 				}
 			};
-			b("General", "bAnalysis", analysis.load());
 			{
 				const long key = static_cast<long>(toggleKey.load());
 				if (!haveBase || !base.GetValue("General", "iToggleKey") || base.GetLongValue("General", "iToggleKey", key) != key) {
@@ -150,7 +149,8 @@ namespace Config
 		}
 
 		// Werte einzeln setzen; die Culling-Jobs lesen parallel (einzelne Felder, kein Absturz-Risiko)
-		analysis.store(ini.GetBoolValue("General", "bAnalysis", analysis.load()), std::memory_order_relaxed);
+		// bAnalysis wird nicht gelesen: das Analyse-Protokoll startet immer aus und gilt nur fuer die laufende Sitzung (Menue),
+		// damit es niemand versehentlich dauerhaft an laesst (kostet Hauptthread-Zeit)
 		engineProbes = ini.GetBoolValue("General", "bEngineProbes", engineProbes);
 		toggleKey.store(static_cast<std::uint32_t>(ini.GetLongValue("General", "iToggleKey", toggleKey.load())), std::memory_order_relaxed);
 
