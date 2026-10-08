@@ -282,10 +282,79 @@ namespace LightShadowCache
 		}
 
 		// ID 107604 (+0x167) ruft hier das Zeichnen einer Schattenkarte auf (Kamera, Shader-Akkumulator, Flags)
+		// Diagnose (Analyse-Protokoll): wohin zeichnet jede Schattenkarte wirklich? Ebene/Ausschnitt laut Deskriptor
+		// gegen den tatsaechlich gebundenen Tiefenpuffer und Viewport (vor und nach dem Zeichnen)
+		std::uint32_t g_targetDiagLeft = 0;
+		std::uint32_t g_targetDiagFrame = 0;
+
+		struct BoundTarget
+		{
+			std::int64_t  slice = -1, arraySize = -1;
+			float         vx = -1, vy = -1, vw = -1, vh = -1;
+		};
+
+		BoundTarget ReadBound() noexcept
+		{
+			BoundTarget b;
+			const auto  context = RE::BSGraphics::Renderer::GetSingleton()->GetRuntimeData().context;
+			REX::W32::ID3D11RenderTargetView* rtvs[1]{};
+			REX::W32::ID3D11DepthStencilView* dsv = nullptr;
+			context->OMGetRenderTargets(1, rtvs, &dsv);
+			if (rtvs[0]) {
+				rtvs[0]->Release();
+			}
+			if (dsv) {
+				REX::W32::D3D11_DEPTH_STENCIL_VIEW_DESC d{};
+				dsv->GetDesc(&d);
+				if (static_cast<int>(d.viewDimension) == 4) {  // TEXTURE2DARRAY
+					b.slice = d.texture2DArray.firstArraySlice;
+					b.arraySize = d.texture2DArray.arraySize;
+				} else {
+					b.slice = 1000 + static_cast<int>(d.viewDimension);
+				}
+				dsv->Release();
+			}
+			std::uint32_t            n = 1;
+			REX::W32::D3D11_VIEWPORT vp{};
+			context->RSGetViewports(&n, &vp);
+			if (n) {
+				b.vx = vp.topLeftX;
+				b.vy = vp.topLeftY;
+				b.vw = vp.width;
+				b.vh = vp.height;
+			}
+			return b;
+		}
+
 		struct DrawShadowmap
 		{
+			static void DiagDraw(RE::NiCamera* a_camera, void* a_accumulator, std::uint32_t a_flags)
+			{
+				std::uint32_t idx = 0;
+				const auto    light = FindActiveLight(a_camera, idx);
+				const auto    before = ReadBound();
+				func(a_camera, a_accumulator, a_flags);
+				const auto after = ReadBound();
+				if (!light) {
+					logger::info("[LightCache-Target] sun/other camera {} | bound slice {} (of {}) vp {:.0f},{:.0f} {:.0f}x{:.0f} -> after slice {} vp {:.0f},{:.0f} {:.0f}x{:.0f}",
+						static_cast<const void*>(a_camera), before.slice, before.arraySize, before.vx, before.vy, before.vw, before.vh, after.slice, after.vx, after.vy, after.vw, after.vh);
+					return;
+				}
+				const auto& d = light->GetRuntimeData().shadowmapDescriptors[idx];
+				const auto  port = reinterpret_cast<const std::int32_t*>(&d.port);  // NiRect-Felder sind protected
+				logger::info("[LightCache-Target] light {} ({}) map {}/{} | desc target {} slice {} port L{} R{} T{} B{} clear {} | bound slice {} (of {}) vp {:.0f},{:.0f} {:.0f}x{:.0f} -> after slice {} vp {:.0f},{:.0f} {:.0f}x{:.0f}",
+					static_cast<const void*>(light), const_cast<RE::BSShadowLight*>(light)->GetIsParabolicLight() ? "omni" : (const_cast<RE::BSShadowLight*>(light)->GetIsFrustumLight() ? "spot" : "other"), idx,
+					light->GetRuntimeData().shadowmapDescriptors.size(), static_cast<std::uint32_t>(d.renderTarget), d.shadowmapIndex, port[0], port[1], port[2],
+					port[3], d.clearRenderTarget, before.slice, before.arraySize, before.vx, before.vy, before.vw, before.vh, after.slice, after.vx, after.vy, after.vw, after.vh);
+			}
+
 			static void thunk(RE::NiCamera* a_camera, void* a_accumulator, std::uint32_t a_flags)
 			{
+				// Diagnose: alle 5 s die Schattenkarten von 3 Frames protokollieren
+				if (g_targetDiagLeft > 0 && Config::analysis.load(std::memory_order_relaxed)) {
+					DiagDraw(a_camera, a_accumulator, a_flags);
+					return;
+				}
 				LightState* l = a_camera ? FindByCamera(a_camera) : nullptr;
 				const auto  mode = l ? static_cast<Mode>(l->mode.load(std::memory_order_relaxed)) : Mode::kNormal;
 				if (mode != Mode::kBuild && mode != Mode::kCached) {
@@ -553,6 +622,12 @@ namespace LightShadowCache
 			}
 		}
 		++g_win.frames;
+		// Ziel-Diagnose: alle ~5 s zwei Frames lang jede Schattenkarte protokollieren
+		if (g_targetDiagLeft > 0) {
+			--g_targetDiagLeft;
+		} else if (Config::analysis.load(std::memory_order_relaxed) && ++g_targetDiagFrame % 300 == 0) {
+			g_targetDiagLeft = 2;
+		}
 	}
 
 	void Reset()
