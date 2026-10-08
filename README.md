@@ -32,7 +32,7 @@ so you can compare with and without the plugin at any time.
 | **Subtree pruning** | Whole scene-graph branches are skipped in the sun shadow and skylighting passes when the branch as a whole already meets the culling rule. Same result, less traversal. | ON |
 | **In-game menu** | All switches and sliders via SKSE Menu Framework, English and German, saved automatically. | — |
 | **Hotkey** | One key toggles every optimization (default *Page Up*, freely assignable in the menu). | — |
-| **Logging & diagnostics** | One summary line per minute in `SPS.log`; every frame over 100 ms is logged with what SPS did in it (`[Hitch]`). The *Analysis logging* switch adds a detailed 10-second report (counters per optimization, VRAM, streaming), and *Log textures under crosshair* writes path and current size of every texture you look at — handy for bug reports. Optional Tracy timeline. | analysis off |
+| **Logging & diagnostics** | One summary line per minute in `SPS.log`; every frame over 100 ms is logged with what SPS did in it (`[Hitch]`). With *Analysis logging* also GPU times of the shadow passes and the depth pre-pass and the CPU wait in Present (`[GPU]`). The *Analysis logging* switch adds a detailed 10-second report (counters per optimization, VRAM, streaming), and *Log textures under crosshair* writes path and current size of every texture you look at — handy for bug reports. Optional Tracy timeline. | analysis off |
 
 Experimental and **off** by default (known side effects): depth pre-pass culling, main view micro culling, far shadow
 cascade cache.

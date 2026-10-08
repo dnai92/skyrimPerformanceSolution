@@ -57,7 +57,6 @@ namespace Config
 			};
 			rule("ShadowCulling", shadowCulling);
 			f("ShadowCulling", "fMinSunElevation", sunMinElevation.load());
-			b("ShadowCulling", "bViewCulling", sunViewCulling.load());
 			rule("PointLightShadowCulling", pointLightCulling);
 			b("PointLightShadowCulling", "bInteriors", pointLightInteriors.load());
 			b("DepthPrepassCulling", "bEnabled", depthPrepassCulling.enabled);
@@ -164,8 +163,6 @@ namespace Config
 		};
 		readRule("ShadowCulling", shadowCulling);
 		sunMinElevation.store(static_cast<float>(ini.GetDoubleValue("ShadowCulling", "fMinSunElevation", sunMinElevation.load())), std::memory_order_relaxed);
-		sunViewCulling.store(ini.GetBoolValue("ShadowCulling", "bViewCulling", sunViewCulling.load()), std::memory_order_relaxed);
-		logger::info("ShadowViewCulling (test): {}", sunViewCulling.load() ? "ON" : "OFF");
 		readRule("PointLightShadowCulling", pointLightCulling);
 		pointLightInteriors.store(ini.GetBoolValue("PointLightShadowCulling", "bInteriors", pointLightInteriors.load()), std::memory_order_relaxed);
 		readRule("DepthPrepassCulling", depthPrepassCulling);
