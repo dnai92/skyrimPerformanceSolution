@@ -596,7 +596,9 @@ namespace InstancingAnalysis
 					// Zustand des ersten normal gezeichneten Meshes merken (Pixel-Shader, Kamera, Raster-/Tiefenzustand)
 					InstancedDraw::CaptureState(D3DContext());
 					g_instCaptured = true;
-					DebugCompareWorld(*a_pass);
+					if (Config::analysis.load(std::memory_order_relaxed)) {
+						DebugCompareWorld(*a_pass);  // liest Konstanten per Staging-Kopie zurueck (GPU-Sync) - nur zur Fehlersuche
+					}
 				}
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -781,7 +783,7 @@ namespace InstancingAnalysis
 			g_debugCompareBudget = 3;
 			std::uint32_t mism = 0, tot = 0;
 			InstancedDraw::DebugFlushStats(mism, tot);
-			if (tot) {
+			if (tot && Config::analysis.load(std::memory_order_relaxed)) {
 				logger::info("[Instancing-Debug] flushes {} | of which with a different depth target than the first draw: {}", tot, mism);
 			}
 			g_sunRenderNs = 0;
