@@ -1844,7 +1844,7 @@ namespace TextureStream
 			const auto& s = g_stats;
 			logger::info("[TextureStream] {} | textures {} (downscalable {}, file mismatch {}) | downscaled {} -> {:.0f} MB instead of {:.0f} MB = {:.0f} MB saved",
 				Active() ? "ON" : "OFF", managed, eligible, probeBad, reduced, curMB, fullMB, fullMB - curMB);
-			// Figuren (geskinnt) werden nie verkleinert - wie viel VRAM steckt darin? (aktueller und letzter Durchlauf)
+			// Figuren (geskinnt): wie viel VRAM steckt darin (ohne bStreamClothing/bStreamCharacters immer voll)? (aktueller und letzter Durchlauf)
 			{
 				std::uint32_t nChar = 0, nOther = 0, nBig = 0;
 				double        mbChar = 0, mbOther = 0, mbBig = 0, mbAll = 0;
@@ -1866,7 +1866,7 @@ namespace TextureStream
 						mbBig += mb;
 					}
 				}
-				logger::info("[TextureStream]   figures (skinned, always full size): {} textures, {:.0f} MB of {:.0f} MB seen | body/face/hair {} ({:.0f} MB), armor/clothing/other {} ({:.0f} MB) | 4K+ {} ({:.0f} MB)",
+				logger::info("[TextureStream]   figures (skinned, current size): {} textures, {:.0f} MB of {:.0f} MB seen | body/face/hair {} ({:.0f} MB), armor/clothing/other {} ({:.0f} MB) | 4K+ {} ({:.0f} MB)",
 					nChar + nOther, mbChar + mbOther, mbAll, nChar, mbChar, nOther, mbOther, nBig, mbBig);
 			}
 			logger::info("[TextureStream]   10 s: downscaled {} | reloaded {} ({:.0f} MB, avg {:.0f} ms) | load errors {} | ping-pong {} | refilled {} | queue {} | passes {} (avg {:.0f} frames, {:.0f} nodes, {:.2f} ms total)",
