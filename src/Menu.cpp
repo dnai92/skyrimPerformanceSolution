@@ -36,6 +36,14 @@ namespace Menu
 
 		void Tip(const char* a_text);
 
+		// Meldung oben links im Spiel (Debug::Notification der Engine, SE 52050 / AE 52933 - Funktion offline geprueft)
+		void Notify(const char* a_text)
+		{
+			using func_t = void(const char*, const char*, bool);
+			static REL::Relocation<func_t> func{ RELOCATION_ID(52050, 52933) };
+			func(a_text, nullptr, true);
+		}
+
 		// ---- Taste fuer den Hauptschalter: ImGui-Taste -> Windows-VK -> DirectInput-Scancode (wie das Spiel ihn meldet) ----
 		extern "C" __declspec(dllimport) unsigned int __stdcall MapVirtualKeyW(unsigned int a_code, unsigned int a_mapType);
 
@@ -294,7 +302,7 @@ namespace Menu
 						"Zusätzliche Diagnose in SPS.log (inkl. ausführlichem Textur-Streaming-Bericht alle 10 s). Kostet 2-4 ms pro Frame - nur zur Fehlersuche. Wird nicht gespeichert - startet immer AUS."),
 					false) &&
 				Config::analysis.load()) {
-				RE::DebugNotification(T("SPS: analysis logging ON - costs performance (off again after restart)", "SPS: Analyse-Protokoll AN - kostet Leistung (nach Neustart wieder aus)"));
+				Notify(T("SPS: analysis logging ON - costs performance (off again after restart)", "SPS: Analyse-Protokoll AN - kostet Leistung (nach Neustart wieder aus)"));
 			}
 			if (Config::analysis.load()) {
 				MenuApi::TextWrapped("%s", T("Analysis logging is active and costs 2-4 ms per frame. Switch it off for normal play and FPS comparisons.",
