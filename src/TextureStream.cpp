@@ -769,7 +769,8 @@ namespace TextureStream
 					auto       tok = cfg.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
 					std::ranges::transform(tok, tok.begin(), [](char c) { return c == '/' ? '\\' : static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
 					std::erase(tok, ' ');
-					if (!tok.empty()) {
+					// Figuren-Pfad steuert der eigene Schalter (bStreamCharacters), nicht die Ausschlussliste
+					if (!tok.empty() && tok != "actors\\character\\") {
 						g_excludeTokens.push_back(std::move(tok));
 					}
 					if (end == std::string::npos) {
@@ -779,6 +780,12 @@ namespace TextureStream
 				}
 			}
 			return std::ranges::any_of(g_excludeTokens, [&](const std::string& t) { return a_path.find(t) != std::string::npos; });
+		}
+
+		// Koerper, Gesichter, Haare (textures\actors\character\...)
+		bool IsCharacterPath(std::string_view a_path) noexcept
+		{
+			return a_path.find("actors\\character\\") != std::string_view::npos;
 		}
 
 		bool Active() noexcept
@@ -950,6 +957,9 @@ namespace TextureStream
 			}
 			try {
 				const auto path = NormalizePath(src->name.c_str());
+				if (!Config::textureStream.streamCharacters && IsCharacterPath(path)) {
+					return 0;
+				}
 				std::scoped_lock lock(g_sizeLock);
 				const auto it = g_loadEdge.find(path);
 				if (it == g_loadEdge.end()) {
@@ -1131,6 +1141,10 @@ namespace TextureStream
 			st.lastSeen = Clock::now();
 			if (a_skinned) {
 				st.skinPass = g_passId;
+			}
+			// Koerper/Gesicht/Haare nur mit eigenem Schalter (schwarze/lila Gesichter 1.0.8) - sonst immer voll
+			if (IsCharacterPath(st.path) ? !Config::textureStream.streamCharacters : (a_skinned && !Config::textureStream.streamClothing)) {
+				a_needPx = 1.0e6f;
 			}
 			if (st.passId != g_passId) {
 				st.passId = g_passId;
@@ -1349,6 +1363,18 @@ namespace TextureStream
 			}
 		}
 
+		// Wurzelknoten der Figur (traegt die Referenz als UserData), null = nicht gefunden -> Textur bleibt voll
+		RE::NiAVObject* FigureAnchor(RE::NiAVObject* a_obj) noexcept
+		{
+			auto obj = a_obj;
+			for (int depth = 0; obj && depth < 32; ++depth, obj = obj->parent) {
+				if (obj->GetUserData()) {
+					return obj;
+				}
+			}
+			return nullptr;
+		}
+
 		void VisitGeometry(RE::BSGeometry* a_geom, float a_forceNeed)
 		{
 			const auto prop = a_geom->GetGeometryRuntimeData().shaderProperty.get();
@@ -1362,8 +1388,19 @@ namespace TextureStream
 			// Figuren (geskinnt: Koerper, Haare, Kleidung) nie verkleinern: ihre Huelle ist oft veraltet (Animation bewegt
 			// die Figur, die Huelle bleibt am Ausgangspunkt - besonders bei sitzenden NPCs). Snilf in Rifton: Haare galten
 			// als 9 px gross und wurden verkleinert -> flaechig blaue Haare (1.0.4). Volle Groesse auch fuer Stufe 3 merken.
+			// Mit bStreamClothing/bStreamCharacters zaehlt statt der Huelle die Position der Figur selbst (Wurzelknoten der
+			// Referenz, bewegt sich mit); welche Texturen dann wirklich verkleinert werden duerfen, entscheidet OnSeen je Pfad.
 			if (need <= 0 && skinned) {
 				need = 1.0e6f;
+				if (Config::textureStream.streamClothing || Config::textureStream.streamCharacters) {
+					if (const auto anchor = FigureAnchor(a_geom)) {
+						const auto& p = anchor->world.translate;
+						const float radius = std::clamp(a_geom->worldBound.radius, 48.0f, 512.0f);
+						const float dx = p.x - g_camX, dy = p.y - g_camY, dz = p.z + 64.0f - g_camZ;  // Mitte einer Figur statt Fuesse
+						const float dist = std::sqrt(dx * dx + dy * dy + dz * dz) - radius;
+						need = dist <= 1.0f ? 1.0e6f : 2.0f * radius / dist * g_pixelsPerUnit;
+					}
+				}
 			}
 			if (need <= 0) {
 				const auto& b = a_geom->worldBound;
