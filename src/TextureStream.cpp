@@ -856,7 +856,9 @@ namespace TextureStream
 		std::vector<std::string>   g_missSamples;
 		thread_local RE::NiSourceTexture*              t_loadingSrc = nullptr;
 
-		constexpr std::string_view kSizesHeader = "# SPS texture sizes v2";
+		// v3 (1.0.24): v2-Dateien enthalten verkleinerte Groessen von Kleidung/Ruestung (bStreamClothing seit 1.0.14) -
+		// beim Laden verkleinert legte RaceMenu beim Zellenladen Overlays auf solche Figuren und stuerzte ab -> verwerfen
+		constexpr std::string_view kSizesHeader = "# SPS texture sizes v3";
 
 		std::filesystem::path SizesFile()
 		{
@@ -1622,7 +1624,12 @@ namespace TextureStream
 					++g_reducedCount;
 				}
 				// Benoetigte Groesse immer lernen (Stufe 3 wendet sie beim Laden nur bei Druck an)
-				if (seen && st.eligible && (st.probe == Probe::kOk || st.probe == Probe::kNone)) {
+				// Texturen an Figuren (Koerper, Kleidung, Ruestung) nie fuer das Laden merken: RaceMenu legt beim Zellenladen
+				// Overlays auf die Figuren und stuerzte mit verkleinert geladenen Texturen ab (skee64+D9830, 08.10.).
+				// Im laufenden Spiel duerfen sie weiter verkleinert werden.
+				if (seen && st.skinPass != 0) {
+					RememberEdge(st.path, 0);
+				} else if (seen && st.eligible && (st.probe == Probe::kOk || st.probe == Probe::kNone)) {
 					RememberEdge(st.path, SafeLoadEdge(st, NeededEdge(st, st.passNeed)));
 				}
 				if (wantRefill && seen && st.eligible && !st.busy && st.hold && st.probe == Probe::kOk && st.Reduced()) {
