@@ -4,6 +4,7 @@
 #include "Config.h"
 #include "TextureStream.h"
 #include "DetourHelper.h"
+#include "GpuTimer.h"
 #include "Stats.h"
 
 #include <mutex>
@@ -588,7 +589,9 @@ namespace ShadowCulling
 			static void thunk(bool a_arg1, bool a_arg2)
 			{
 				g_inDepthPrepass.store(true, std::memory_order_relaxed);
+				GpuTimer::Begin(GpuTimer::kDepthPrepass);
 				func(a_arg1, a_arg2);
+				GpuTimer::End(GpuTimer::kDepthPrepass);
 				g_inDepthPrepass.store(false, std::memory_order_relaxed);
 			}
 			static inline void (*func)(bool, bool) = nullptr;

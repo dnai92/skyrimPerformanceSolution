@@ -3,6 +3,7 @@
 
 #include "Config.h"
 #include "DetourHelper.h"
+#include "GpuTimer.h"
 #include "InstancedDraw.h"
 #include "ShadowCulling.h"
 #include "Stats.h"
@@ -519,10 +520,25 @@ namespace InstancingAnalysis
 				Stats::ScopedTimer timer{ Stats::Zone::SunShadowRender };
 				g_inSunShadows.store(true, std::memory_order_relaxed);
 				const auto start = std::chrono::steady_clock::now();
+				GpuTimer::Begin(GpuTimer::kSunShadows);
 				func(a_this, a_index);
+				GpuTimer::End(GpuTimer::kSunShadows);
 				g_sunRenderNs += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
 				g_inSunShadows.store(false, std::memory_order_relaxed);
 				ShadowCulling::AfterSunRender();
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// Render der Punkt-/Spotlicht-Schatten (eine Schattenkarte je Licht) - nur GPU-Zeitmessung
+		template <int I>
+		struct LightShadowRender
+		{
+			static void thunk(RE::BSShadowLight* a_this, std::uint32_t& a_index)
+			{
+				GpuTimer::Begin(GpuTimer::kLightShadows);
+				func(a_this, a_index);
+				GpuTimer::End(GpuTimer::kLightShadows);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -717,6 +733,11 @@ namespace InstancingAnalysis
 		SunShadowAccumulate::func = sunVtbl.write_vfunc(0x9, SunShadowAccumulate::thunk);
 		SunUpdateCamera::func = sunVtbl.write_vfunc(0x10, SunUpdateCamera::thunk);
 		logger::info("Hooks installed: BSShadowDirectionalLight::Accumulate (0x9) / Render (0xA)");
+		REL::Relocation<std::uintptr_t> parabolicVtbl{ RE::VTABLE_BSShadowParabolicLight[0] };
+		REL::Relocation<std::uintptr_t> frustumVtbl{ RE::VTABLE_BSShadowFrustumLight[0] };
+		LightShadowRender<0>::func = parabolicVtbl.write_vfunc(0xA, LightShadowRender<0>::thunk);
+		LightShadowRender<1>::func = frustumVtbl.write_vfunc(0xA, LightShadowRender<1>::thunk);
+		logger::info("Hooks installed: BSShadowParabolicLight / BSShadowFrustumLight::Render (0xA) - GPU timing");
 
 		RenderBatches::func = reinterpret_cast<decltype(RenderBatches::func)>(REL::RelocationID(100852, 107642).address());
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&RenderBatches::func), reinterpret_cast<void*>(&RenderBatches::thunk)); err != 0) {

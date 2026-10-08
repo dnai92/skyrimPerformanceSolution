@@ -1,6 +1,7 @@
 #include "Hooks.h"
 
 #include "Config.h"
+#include "GpuTimer.h"
 
 #include "InstancingAnalysis.h"
 #include "ShadowCulling.h"
@@ -101,6 +102,9 @@ namespace Hooks
 				ShadowCulling::OnFrame();
 				InstancingAnalysis::OnFrame();
 				ReportEngineWaits();
+				if (const auto renderer = RE::BSGraphics::Renderer::GetSingleton()) {
+					GpuTimer::FrameBoundary(renderer->GetRuntimeData().forwarder, renderer->GetRuntimeData().context, Config::analysis.load(std::memory_order_relaxed));
+				}
 #endif
 				ZoneScopedN("Player Update");
 				Stats::ScopedTimer timer{ Stats::Zone::PlayerUpdate };

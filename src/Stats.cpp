@@ -1,6 +1,7 @@
 #include "Stats.h"
 
 #include "Config.h"
+#include "GpuTimer.h"
 #include "TextureStream.h"
 
 namespace Stats
@@ -151,6 +152,19 @@ namespace Stats
 				g_counterValues[i].clear();
 			}
 			csv << '\n';
+
+			// GPU-Zeiten (Timestamp-Queries, einige Frames verspaetet): Frame = Frame-Grenze bis Frame-Grenze inkl. Leerlauf
+			if (const auto gpu = GpuTimer::Take(); gpu.frames > 0) {
+				double      parts = 0;
+				std::string sections;
+				for (int i = 0; i < GpuTimer::kSectionCount; ++i) {
+					parts += gpu.sectionAvg[i];
+					sections += std::format(" | {} {:.2f} ms ({:.0f}%, {:.1f}x)", GpuTimer::kSectionNames[i], gpu.sectionAvg[i],
+						gpu.frameAvg > 0 ? gpu.sectionAvg[i] / gpu.frameAvg * 100.0 : 0.0, gpu.callsPerFrame[i]);
+				}
+				logger::info("[GPU] {} frames | frame avg {:.2f} ms, max {:.2f} ms{} | rest {:.2f} ms | skipped {} disjoint {}", gpu.frames, gpu.frameAvg,
+					gpu.frameMax, sections, gpu.frameAvg - parts, gpu.skipped, gpu.disjoint);
+			}
 
 			g_frameMs.clear();
 			g_npcUpdatesInWindow = 0;
