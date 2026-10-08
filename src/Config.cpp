@@ -150,7 +150,10 @@ namespace Config
 
 		// Werte einzeln setzen; die Culling-Jobs lesen parallel (einzelne Felder, kein Absturz-Risiko)
 		// bAnalysis wird nicht gelesen: das Analyse-Protokoll startet immer aus und gilt nur fuer die laufende Sitzung (Menue),
-		// damit es niemand versehentlich dauerhaft an laesst (kostet Hauptthread-Zeit)
+		// damit es niemand versehentlich dauerhaft an laesst (kostet Hauptthread-Zeit). VR hat kein Menue -> dort per INI.
+#ifdef SPS_VR
+		analysis.store(ini.GetBoolValue("General", "bAnalysis", analysis.load()), std::memory_order_relaxed);
+#endif
 		engineProbes = ini.GetBoolValue("General", "bEngineProbes", engineProbes);
 		toggleKey.store(static_cast<std::uint32_t>(ini.GetLongValue("General", "iToggleKey", toggleKey.load())), std::memory_order_relaxed);
 
