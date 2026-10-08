@@ -13,17 +13,14 @@ namespace LightShadowCache
 		enum class Mode : int
 		{
 			kNormal,  // wie die Engine: alles zeichnen
-			kWait,    // wie normal, zaehlt aber Bewegliche (Aufbau bevorzugt ohne Figuren im Radius)
-			kBuild,   // nur Unbewegliche zeichnen, danach in den Cache kopieren
+			kWait,    // wie normal; danach die vollstaendige Karte sichern (fuer den Aufbau-Frame, s. kBuild)
+			kBuild,   // nur Unbewegliche zeichnen, in den Cache kopieren, dann die vollstaendige Karte des Vorframes zurueck
 			kCached   // Cache zurueckkopieren, nur Bewegliche (und neu Hinzugekommene) zeichnen
 		};
 
 		constexpr std::uint32_t kMaxLights = 16;      // gleichzeitig verwaltete Schattenlichter
 		constexpr std::uint32_t kMaxCams = 4;         // Schattenkarten je Licht (Fackel: 2 Halbkugeln)
 		constexpr std::uint32_t kStableFrames = 3;    // so lange muss ein Licht ruhen, bevor aufgebaut wird
-		// spaetestens dann aufbauen, auch mit Figuren im Radius (deren Schatten fehlen im Aufbau-Frame -> sichtbares
-		// Blinken; 1.0.27 mit 30 Frames: rhythmisch ~1x pro Sekunde in der Drachenfeste)
-		constexpr std::uint32_t kMaxWaitFrames = 600;
 		constexpr std::uint32_t kMaxExtras = 256;     // so viele neu hinzugekommene werden zusaetzlich gezeichnet
 		constexpr float         kMoveEpsilon = 0.5f;  // Einheiten - darueber gilt das Licht als bewegt (Flackern)
 
@@ -40,13 +37,15 @@ namespace LightShadowCache
 			std::uint32_t                         camCount = 0;
 			float                                 radius = 0;
 			std::uint32_t                         stableFrames = 0;
-			std::uint32_t                         waitFrames = 0;
 			std::uint32_t                         lastSeen = 0;
 			bool                                  valid = false;        // Cache-Inhalt passt
 			bool                                  built = false;        // Aufbau-Frame: Kopie gesichert
 			bool                                  drawn = false;        // in diesem Frame gezeichnet
 			bool                                  unsupported = false;  // Karten in verschiedenen Ebenen
 			REX::W32::ID3D11Texture2D*            tex = nullptr;        // eigene Kopie der Ebene
+			REX::W32::ID3D11Texture2D*            prevTex = nullptr;    // vollstaendige Karte des Vorframes (Aufbau ohne Blinken)
+			std::uint32_t                         prevW = 0, prevH = 0, prevFormat = 0;
+			bool                                  prebuilt = false;     // prevTex im letzten Frame gesichert
 			REX::W32::ID3D11Texture2D*            boundTex = nullptr;   // Ebene der 1. Karte in diesem Frame (Vergleich)
 			std::uint32_t                         boundSub = 0;
 			std::uint32_t                         texW = 0, texH = 0, texFormat = 0;
@@ -61,7 +60,6 @@ namespace LightShadowCache
 			std::unordered_set<const RE::BSGeometry*>        extras;    // seit dem Aufbau hinzugekommen: zusaetzlich zeichnen
 			std::unordered_set<const RE::BSGeometry*>        promoted;  // gelernte Bewegliche
 			std::uint32_t                                    matched = 0;
-			std::uint32_t                                    dynamicSeen = 0;  // Bewegliche im letzten Frame
 			bool                                             broken = false;   // bewegt/weggefallen -> neu aufbauen
 		};
 		std::array<LightState, kMaxLights> g_lights;
@@ -207,7 +205,6 @@ namespace LightShadowCache
 			a_l.statics.clear();
 			a_l.extras.clear();
 			a_l.matched = 0;
-			a_l.dynamicSeen = 0;
 			a_l.broken = false;
 		}
 
@@ -217,13 +214,18 @@ namespace LightShadowCache
 				a_l.tex->Release();
 				a_l.tex = nullptr;
 			}
+			if (a_l.prevTex) {
+				a_l.prevTex->Release();
+				a_l.prevTex = nullptr;
+			}
+			a_l.prebuilt = false;
 			ClearSets(a_l);
 			{
 				std::scoped_lock lock(a_l.lock);
 				a_l.promoted.clear();
 			}
 			a_l.valid = a_l.built = a_l.drawn = a_l.unsupported = false;
-			a_l.stableFrames = a_l.waitFrames = a_l.camCount = 0;
+			a_l.stableFrames = a_l.camCount = 0;
 			a_l.mode.store(static_cast<int>(Mode::kNormal), std::memory_order_relaxed);
 			for (auto& c : a_l.cams) {
 				c.store(nullptr, std::memory_order_relaxed);
@@ -252,16 +254,16 @@ namespace LightShadowCache
 			return tex;
 		}
 
-		bool EnsureCacheTexture(LightState& a_l, REX::W32::ID3D11Texture2D* a_src) noexcept
+		bool EnsureTexture(REX::W32::ID3D11Texture2D*& a_tex, std::uint32_t& a_w, std::uint32_t& a_h, std::uint32_t& a_format, REX::W32::ID3D11Texture2D* a_src) noexcept
 		{
 			REX::W32::D3D11_TEXTURE2D_DESC desc{};
 			a_src->GetDesc(&desc);
-			if (a_l.tex && a_l.texW == desc.width && a_l.texH == desc.height && a_l.texFormat == static_cast<std::uint32_t>(desc.format)) {
+			if (a_tex && a_w == desc.width && a_h == desc.height && a_format == static_cast<std::uint32_t>(desc.format)) {
 				return true;
 			}
-			if (a_l.tex) {
-				a_l.tex->Release();
-				a_l.tex = nullptr;
+			if (a_tex) {
+				a_tex->Release();
+				a_tex = nullptr;
 			}
 			desc.arraySize = 1;
 			desc.mipLevels = 1;
@@ -270,14 +272,19 @@ namespace LightShadowCache
 			desc.cpuAccessFlags = 0;
 			desc.miscFlags = 0;
 			const auto device = RE::BSGraphics::Renderer::GetDevice();
-			if (!device || device->CreateTexture2D(&desc, nullptr, &a_l.tex) < 0 || !a_l.tex) {
-				a_l.tex = nullptr;
+			if (!device || device->CreateTexture2D(&desc, nullptr, &a_tex) < 0 || !a_tex) {
+				a_tex = nullptr;
 				return false;
 			}
-			a_l.texW = desc.width;
-			a_l.texH = desc.height;
-			a_l.texFormat = static_cast<std::uint32_t>(desc.format);
+			a_w = desc.width;
+			a_h = desc.height;
+			a_format = static_cast<std::uint32_t>(desc.format);
 			return true;
+		}
+
+		bool EnsureCacheTexture(LightState& a_l, REX::W32::ID3D11Texture2D* a_src) noexcept
+		{
+			return EnsureTexture(a_l.tex, a_l.texW, a_l.texH, a_l.texFormat, a_src) && EnsureTexture(a_l.prevTex, a_l.prevW, a_l.prevH, a_l.prevFormat, a_src);
 		}
 
 		// Kopieren bei abgehaengten Render-Zielen (die Schattenkarte ist gerade als Tiefenpuffer gebunden)
@@ -440,7 +447,7 @@ namespace LightShadowCache
 				}
 				LightState* l = a_camera ? FindByCamera(a_camera) : nullptr;
 				const auto  mode = l ? static_cast<Mode>(l->mode.load(std::memory_order_relaxed)) : Mode::kNormal;
-				if (mode != Mode::kBuild && mode != Mode::kCached) {
+				if (mode != Mode::kBuild && mode != Mode::kCached && mode != Mode::kWait) {
 					func(a_camera, a_accumulator, a_flags);
 					return;
 				}
@@ -474,6 +481,14 @@ namespace LightShadowCache
 					++g_win.buildFailed;
 					return;
 				}
+				if (mode == Mode::kWait) {
+					func(a_camera, a_accumulator, a_flags);  // normal, alles
+					if (idx + 1 == descs.size()) {
+						CopyUnbound(l->prevTex, 0, target, sub);  // vollstaendige Karte fuer den Aufbau-Frame sichern
+						l->prebuilt = true;
+					}
+					return;
+				}
 				l->drawn = true;
 				if (mode == Mode::kCached) {
 					if (idx == 0) {
@@ -483,7 +498,8 @@ namespace LightShadowCache
 				} else {
 					func(a_camera, a_accumulator, a_flags);  // nur Unbewegliche
 					if (idx + 1 == descs.size()) {
-						CopyUnbound(l->tex, 0, target, sub);  // nach der letzten Karte sichern
+						CopyUnbound(l->tex, 0, target, sub);      // nach der letzten Karte: nur Unbewegliche sichern
+						CopyUnbound(target, sub, l->prevTex, 0);  // sichtbar bleibt die vollstaendige Karte des Vorframes
 						l->built = true;
 					}
 				}
@@ -531,9 +547,6 @@ namespace LightShadowCache
 			std::scoped_lock lock(l->lock);
 			dynamic = dynamic || l->promoted.contains(&a_geom);
 			if (mode == Mode::kWait) {
-				if (dynamic) {
-					++l->dynamicSeen;
-				}
 				return false;
 			}
 			if (mode == Mode::kBuild) {
@@ -633,7 +646,7 @@ namespace LightShadowCache
 					for (auto& slot : g_lights) {
 						if (!slot.light.load(std::memory_order_relaxed)) {
 							slot.camCount = 0;
-							slot.stableFrames = slot.waitFrames = 0;
+							slot.stableFrames = 0;
 							slot.valid = slot.unsupported = false;
 							slot.light.store(light, std::memory_order_relaxed);
 							l = &slot;
@@ -670,7 +683,6 @@ namespace LightShadowCache
 						++g_win.lightMoved;
 					}
 					l->stableFrames = 0;
-					l->waitFrames = 0;
 					l->valid = false;
 				} else {
 					++l->stableFrames;
@@ -680,21 +692,16 @@ namespace LightShadowCache
 					if (l->valid) {
 						mode = Mode::kCached;
 					} else if (l->stableFrames >= kStableFrames) {
-						// Aufbau bevorzugt, wenn im letzten Frame keine Figur im Radius war (deren Schatten fehlen im
-						// Aufbau-Frame); spaetestens nach kMaxWaitFrames trotzdem
-						std::uint32_t dynamicSeen = 0;
-						{
-							std::scoped_lock lock(l->lock);
-							dynamicSeen = std::exchange(l->dynamicSeen, 0u);
-						}
+						// erst die vollstaendige Karte sichern (kWait), im Frame danach aufbauen (kBuild) - Figuren fehlen dann
+						// nicht, sichtbar ist fuer ein Bild der Stand des Vorframes
 						const auto prev = static_cast<Mode>(l->mode.load(std::memory_order_relaxed));
-						if ((prev == Mode::kWait && dynamicSeen == 0) || ++l->waitFrames > kMaxWaitFrames) {
+						if (prev == Mode::kWait && l->prebuilt) {
 							mode = Mode::kBuild;
-							l->waitFrames = 0;
 							ClearSets(*l);
 						} else {
 							mode = Mode::kWait;
 						}
+						l->prebuilt = false;
 					}
 				}
 				if (mode != Mode::kCached) {
