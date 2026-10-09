@@ -351,7 +351,7 @@ namespace TextureStream
 			const double mb = static_cast<double>(budget) / 1048576.0;
 			const auto   round64 = [](double a_v) { return static_cast<float>(std::round(a_v / 64.0) * 64.0); };
 			if (cfg.legacyStartPct >= 0.0f) {
-				cfg.reserveMB = std::clamp(round64(mb * (100.0 - cfg.legacyStartPct) / 100.0), 256.0f, 8192.0f);
+				cfg.reserveMB = std::clamp(static_cast<float>(std::round(mb * (100.0 - cfg.legacyStartPct) / 100.0 / 256.0) * 256.0), 256.0f, 6144.0f);
 			}
 			if (cfg.legacyGapPct >= 0.0f) {
 				cfg.refillGapMB = std::clamp(round64(mb * cfg.legacyGapPct / 100.0), 256.0f, 4096.0f);

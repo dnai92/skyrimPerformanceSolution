@@ -390,10 +390,10 @@ namespace Menu
 			Toggle(T("Only when VRAM gets full##ts", "Nur wenn der VRAM knapp wird##ts"), Config::textureStream.budgetMode,
 				T("Textures are only shrunk when less than the reserve below of the video memory Windows grants the game is free. With enough VRAM nothing happens and nothing is spent.",
 					"Texturen werden nur verkleinert, wenn vom Grafikspeicher, den Windows dem Spiel zuteilt, weniger als der Puffer unten frei ist. Mit genug VRAM passiert nichts und es kostet nichts."));
-			if (Slider(T("Keep free (MB)##ts", "Frei halten (MB)##ts"), Config::textureStream.reserveMB, 256.0f, 4096.0f, "%.0f",
+			if (Slider(T("Keep free (MB)##ts", "Frei halten (MB)##ts"), Config::textureStream.reserveMB, 256.0f, 6144.0f, "%.0f",
 					T("Downscaling starts when less VRAM than this is free. It absorbs sudden jumps (doors, new cells, turning around). Smaller = VRAM used more fully, larger = fewer overflows. 1024 fits most setups.",
 						"Verkleinert wird, sobald weniger VRAM frei ist. Der Puffer fängt plötzliche Sprünge ab (Türen, neue Zellen, Umdrehen). Kleiner = VRAM voller ausgenutzt, größer = seltener Überlauf. 1024 passt für die meisten."))) {
-				Config::textureStream.reserveMB = std::round(Config::textureStream.reserveMB / 64.0f) * 64.0f;
+				Config::textureStream.reserveMB = std::clamp(std::round(Config::textureStream.reserveMB / 256.0f) * 256.0f, 256.0f, 6144.0f);  // feste 256-MB-Schritte
 			}
 			Toggle(T("Refill VRAM when there is room##ts", "VRAM wieder auffüllen, wenn Platz ist##ts"), Config::textureStream.refill,
 				T("When clearly more than the reserve is free, downscaled textures are reloaded at full size again (most needed first).",

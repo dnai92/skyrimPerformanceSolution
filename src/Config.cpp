@@ -265,7 +265,7 @@ namespace Config
 		ts.refill = ini.GetBoolValue("TextureStream", "bRefill", ts.refill);
 		ts.refillGapMB = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fRefillGapMB", ts.refillGapMB)), 256.0f, 4096.0f);
 		ts.ramCacheMB = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fRamCacheMB", ts.ramCacheMB)), 0.0f, 16384.0f);
-		ts.reserveMB = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fReserveMB", ts.reserveMB)), 256.0f, 8192.0f);
+		ts.reserveMB = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fReserveMB", ts.reserveMB)), 256.0f, 6144.0f);
 		{
 			// Im Menue gespeicherte Prozent-Schwelle (bis 1.0.46) einmalig uebernehmen - Umrechnung braucht das VRAM-Budget
 			CSimpleIniA user;
