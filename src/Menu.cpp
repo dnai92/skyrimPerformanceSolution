@@ -397,7 +397,7 @@ namespace Menu
 				T("Draws identical simple meshes in sun shadows with one draw call. Small gain, off by default - switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn, standardmäßig aus - bei flackernden Schatten oder Objekten wieder ausschalten."));
 		}
 
-		void __stdcall RenderScene()
+		void RenderLightsAndPruning()
 		{
 			MenuApi::SeparatorText(T("Light assignment throttle", "Licht-Zuordnung drosseln"));
 			Toggle(T("Enabled##light", "Aktiv##light"), Config::lightGather.enabled,
@@ -420,7 +420,10 @@ namespace Menu
 			Toggle(T("Rain / skylighting map##prune", "Regen-/Himmelslicht-Karte##prune"), Config::subtreePruning.precip,
 				T("Apply in the precipitation / skylighting occlusion pass.", "Im Durchlauf für Regen und Himmelslicht anwenden."));
 
-			MenuApi::SeparatorText(T("Texture streaming", "Textur-Streaming"));
+		}
+
+		void __stdcall RenderTextures()
+		{
 			if (TextureStream::OtherDownscalerLoaded()) {
 				MenuApi::TextWrapped("%s", T("Texture Downscaler is installed. SPS keeps the sizes it loads and only shrinks further when VRAM gets tight. If textures look wrong, switch off texture streaming here.",
 												"Texture Downscaler ist installiert. SPS behält die Größen, die er lädt, und verkleinert nur weiter, wenn der VRAM knapp wird. Sehen Texturen falsch aus, hier das Textur-Streaming ausschalten."));
@@ -503,11 +506,13 @@ namespace Menu
 			Toggle(T("Also bodies, faces and hair (test)##ts", "Auch Körper, Gesichter und Haare (Test)##ts"), Config::textureStream.streamCharacters,
 				T("Body, face and hair textures (textures/actors/character) of far characters are shrunk as well. If faces or hair look wrong (black, purple, blurry), turn this off.",
 					"Körper-, Gesichts- und Haartexturen (textures/actors/character) ferner Figuren werden ebenfalls verkleinert. Sehen Gesichter oder Haare falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
-			if (MenuApi::Button(T("Log textures under crosshair##ts", "Texturen unter dem Fadenkreuz protokollieren##ts"))) {
-				TextureStream::RequestCenterProbe();
-			}
-			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log. For bug reports.",
-				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log. Für Fehlerberichte."));
+			MenuApi::TextWrapped("%s", T("Logging the textures under the crosshair and testing excluded texture types: page Debug.",
+											"Texturen unter dem Fadenkreuz protokollieren und ausgenommene Texturarten testen: Seite Debug."));
+		}
+
+		void __stdcall RenderScene()
+		{
+			RenderLightsAndPruning();
 
 			MenuApi::SeparatorText(T("Skylighting culling (Community Shaders)", "Himmelslicht: kleine Objekte weglassen (Community Shaders)"));
 			Toggle(T("Enabled##sky", "Aktiv##sky"), Config::skylightingCulling.enabled,
@@ -553,17 +558,17 @@ namespace Menu
 
 			MenuApi::SeparatorText(T("Textures", "Texturen"));
 			HelpEntry(T("Textures are blurry up close or get sharp only after a moment", "Texturen sind aus der Nähe unscharf oder werden erst nach einem Moment scharf"),
-				T("Lights and scene > Texture streaming (or raise 'Safety factor' / 'Min. size')", "Licht und Szene > Textur-Streaming (oder 'Sicherheitsfaktor' / 'Min. Größe' erhöhen)"));
+				T("Texture streaming > Downscale distant textures (or raise 'Safety factor' / 'Min. size')", "Textur-Streaming > Ferne Texturen verkleinern (oder 'Sicherheitsfaktor' / 'Min. Größe' erhöhen)"));
 			HelpEntry(T("Faces or hair look black, purple or blurry", "Gesichter oder Haare sehen schwarz, lila oder unscharf aus"),
-				T("Lights and scene > Also bodies, faces and hair", "Licht und Szene > Auch Körper, Gesichter und Haare"));
+				T("Texture streaming > Also bodies, faces and hair", "Textur-Streaming > Auch Körper, Gesichter und Haare"));
 			if (TextureStream::OtherDownscalerLoaded()) {
 				HelpEntry(T("Texture errors with Texture Downscaler installed", "Texturfehler mit installiertem Texture Downscaler"),
-					T("Lights and scene > Texture streaming off (Texture Downscaler then handles VRAM alone)", "Licht und Szene > Textur-Streaming aus (Texture Downscaler regelt dann den VRAM allein)"));
+					T("Texture streaming > Downscale distant textures off (Texture Downscaler then handles VRAM alone)", "Textur-Streaming > Ferne Texturen verkleinern aus (Texture Downscaler regelt dann den VRAM allein)"));
 			}
 			HelpEntry(T("Clothing or armor of NPCs looks blurry", "Kleidung oder Rüstung von NPCs ist unscharf"),
-				T("Lights and scene > Also clothing and armor of characters", "Licht und Szene > Auch Kleidung und Rüstung von Figuren"));
+				T("Texture streaming > Also clothing and armor of characters", "Textur-Streaming > Auch Kleidung und Rüstung von Figuren"));
 			HelpEntry(T("Use 'Log textures under crosshair' to report a texture issue (writes path and size to SPS.log)", "Für Texturfehler 'Texturen unter dem Fadenkreuz protokollieren' nutzen (schreibt Pfad und Größe in SPS.log)"),
-				T("Lights and scene > Texture streaming", "Licht und Szene > Textur-Streaming"));
+				T("Debug > Log textures under crosshair", "Debug > Texturen unter dem Fadenkreuz protokollieren"));
 
 			MenuApi::SeparatorText(T("Scene", "Szene"));
 			HelpEntry(T("Footprints, blood or leaves on the ground are missing in the distance", "Fußspuren, Blut oder Laub auf dem Boden fehlen in der Ferne"),
@@ -596,6 +601,7 @@ namespace Menu
 		g_german = IsGerman();
 		MenuApi::AddSectionItem(kSection + T("Overview", "Übersicht"), RenderOverview);
 		MenuApi::AddSectionItem(kSection + T("Shadows", "Schatten"), RenderShadows);
+		MenuApi::AddSectionItem(kSection + T("Texture streaming", "Textur-Streaming"), RenderTextures);
 		MenuApi::AddSectionItem(kSection + T("Lights and scene", "Licht und Szene"), RenderScene);
 		MenuApi::AddSectionItem(kSection + T("Help with visual issues", "Hilfe bei Bildfehlern"), RenderHelp);
 		MenuApi::AddSectionItem(kSection + "Debug", RenderDebug);
