@@ -7,6 +7,9 @@
 // Wert aller Kacheln, die es abdeckt, waere es verdeckt. Minutenbericht in SPS.log ([Occlusion]).
 namespace Occlusion
 {
+	// Main::RenderDepth beginnt (Main-Thread): GPU-Matrix der Hauptkamera merken
+	void OnDepthPrepassBegin() noexcept;
+
 	// Main::RenderDepth fertig (Main-Thread): Kamera dieses Frames merken
 	void OnDepthPrepassEnd() noexcept;
 

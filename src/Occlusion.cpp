@@ -37,6 +37,10 @@ namespace Occlusion
 			bool          reversed = false;
 			std::uint64_t frame = 0;
 			bool          valid = false;
+			// GPU-Matrix vom Beginn des Tiefenvorpasses (damit entsteht das Tiefenbild) - nur dann wird weggelassen
+			bool          gpu = false;
+			CamSnap       gm{};
+			float         sx = 1.0f, sy = 1.0f;  // Projektions-Skalierung x/y der GPU-Matrix
 		};
 
 		float         g_rightSign = 1.0f, g_upSign = 1.0f;
@@ -142,6 +146,11 @@ namespace Occlusion
 		std::uint64_t g_prepassCalls = 0, g_camFail = 0, g_captures = 0, g_ringFull = 0, g_noSrv = 0, g_reads = 0, g_latencySum = 0;
 		float         g_camFailErrSum = 0.0f;
 		const char*   g_camLayout = "unknown";
+		// GPU-Matrix vom Beginn des Tiefenvorpasses (Main-Thread)
+		CamSnap       g_beginCam{};
+		float         g_beginSx = 1.0f, g_beginSy = 1.0f;
+		bool          g_beginValid = false;
+		std::uint64_t g_beginOk = 0, g_beginFail = 0;
 
 		void Mul(const CamSnap& a_c, const RE::NiPoint3& a_world, float a_out[4]) noexcept
 		{
@@ -158,7 +167,15 @@ namespace Occlusion
 		{
 			const auto& c = a_s.cam;
 			float       x, y, z;
-			Project(c, a_b.center, x, y, z);
+			if (c.gpu) {
+				float clip[4];
+				Mul(c.gm, a_b.center, clip);
+				z = clip[3];
+				x = z != 0.0f ? clip[0] / z : 0.0f;
+				y = z != 0.0f ? clip[1] / z : 0.0f;
+			} else {
+				Project(c, a_b.center, x, y, z);
+			}
 			const float rad = std::max(a_b.radius, 0.0f);
 			const float wn = z - rad;
 			if (!(wn > 16.0f)) {
@@ -166,7 +183,8 @@ namespace Occlusion
 			}
 			// Ausdehnung konservativ mit der naechsten Tiefe; x/y aus dem Mittelpunkt (perspektivisch leicht zu klein,
 			// deshalb unten eine Kachel Rand)
-			const float ex = rad / wn * 2.0f / (c.r - c.l), ey = rad / wn * 2.0f / (c.t - c.b);
+			const float ex = c.gpu ? rad * c.sx / wn : rad / wn * 2.0f / (c.r - c.l);
+			const float ey = c.gpu ? rad * c.sy / wn : rad / wn * 2.0f / (c.t - c.b);
 			constexpr float W = static_cast<float>(OcclusionGpu::kWidth), H = static_cast<float>(OcclusionGpu::kHeight);
 			// eine Kachel Rand: Bild ist 1-2 Frames alt
 			const int u0 = std::max(0, static_cast<int>(std::floor(((x - ex) * 0.5f + 0.5f) * W)) - 1);
@@ -237,8 +255,8 @@ namespace Occlusion
 					sky += cur->cam.reversed ? cur->rb.minDepth[i] <= 1e-6f : cur->rb.maxDepth[i] >= 0.99999f;
 				}
 			}
-			logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera matrix {} usable {} frames, not {} (avg w error {:.0f}) | own projection: right {:+.0f} up {:+.0f} (GPU check {} frames), depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
-				secs, frames, g_prepassCalls, g_camLayout, g_learnFrames, g_camFail, g_camFail ? g_camFailErrSum / g_camFail : 0.0f, g_rightSign, g_upSign, g_gpuSignFrames,
+			logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera matrix {} usable {} frames, not {} (avg w error {:.0f}) | GPU matrix at prepass start {} ok / {} not | own projection: right {:+.0f} up {:+.0f} (compared {} frames), depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
+				secs, frames, g_prepassCalls, g_camLayout, g_learnFrames, g_camFail, g_camFail ? g_camFailErrSum / g_camFail : 0.0f, g_beginOk, g_beginFail, g_rightSign, g_upSign, g_gpuSignFrames,
 				g_learned ? "learned" : "formula", g_learnA, g_learnB, g_learnRev ? " reversed" : "", g_learnMaxErr, g_lastSource == 0 ? "post-prepass copy" : "main",
 				g_lastSrcW, g_lastSrcH, g_captures, g_ringFull, g_noSrv, g_reads, g_reads ? static_cast<double>(g_latencySum) / g_reads : 0.0,
 				cur ? 100.0 * sky / cur->rb.maxDepth.size() : 0.0, g_testNs.exchange(0) / 1e6 / frames, g_noSnapshot.exchange(0));
@@ -263,9 +281,54 @@ namespace Occlusion
 			g_camFailErrSum = 0.0f;
 			g_learnFrames = 0;
 			g_gpuSignFrames = 0;
+			g_beginOk = g_beginFail = 0;
 			g_learnMaxErr = 0.0f;
 			g_frame = 0;
 		}
+	}
+
+	void OnDepthPrepassBegin() noexcept
+	{
+		g_beginValid = false;
+		if (!Active()) {
+			return;
+		}
+		const auto state = RE::BSGraphics::RendererShadowState::GetSingleton();
+		const auto cam = RE::Main::WorldRootCamera();
+		if (!state || !cam) {
+			return;
+		}
+		auto&      rd = state->GetRuntimeData();
+		const auto view = rd.cameraData.getEye();
+		CamSnap    g{};
+		std::memcpy(g.m, &view.viewProjMatrixUnjittered, sizeof(g.m));
+		g.posAdjust = rd.posAdjust.getEye();
+		// gehoert die Matrix zur Hauptkamera? Ein Punkt 1000 Einheiten vor der Kamera muss w ~ 1000 ergeben
+		const auto&        pos = cam->world.translate;
+		const auto&        rot = cam->world.rotate;
+		const RE::NiPoint3 p{ pos.x + rot.entry[0][0] * 1000.0f, pos.y + rot.entry[1][0] * 1000.0f, pos.z + rot.entry[2][0] * 1000.0f };
+		float              best = 1e9f;
+		for (int k = 0; k < 4; ++k) {
+			CamSnap t = g;
+			t.colVec = (k & 1) == 0;
+			t.relative = (k & 2) == 0;
+			float c[4];
+			Mul(t, p, c);
+			if (const float err = std::abs(c[3] - 1000.0f); err < best) {
+				best = err;
+				g.colVec = t.colVec;
+				g.relative = t.relative;
+			}
+		}
+		if (best > 20.0f) {
+			++g_beginFail;
+			return;
+		}
+		g_beginCam = g;
+		g_beginSx = std::abs(view.projMatrixUnjittered.m[0][0]);
+		g_beginSy = std::abs(view.projMatrixUnjittered.m[1][1]);
+		g_beginValid = true;
+		++g_beginOk;
 	}
 
 	void OnDepthPrepassEnd() noexcept
@@ -307,6 +370,23 @@ namespace Occlusion
 		}
 		own.frame = g_frame;
 		own.valid = true;
+		if (g_beginValid) {
+			// das Tiefenbild entsteht mit dieser Matrix - Projektion und Tiefenformel direkt daraus
+			own.gpu = true;
+			own.gm = g_beginCam;
+			own.sx = g_beginSx;
+			own.sy = g_beginSy;
+			const RE::NiPoint3 a{ camPos.x + own.dir.x * 100.0f, camPos.y + own.dir.y * 100.0f, camPos.z + own.dir.z * 100.0f };
+			const RE::NiPoint3 b{ camPos.x + own.dir.x * 10000.0f, camPos.y + own.dir.y * 10000.0f, camPos.z + own.dir.z * 10000.0f };
+			float c1[4], c2[4];
+			Mul(own.gm, a, c1);
+			Mul(own.gm, b, c2);
+			const float d1 = c1[2] / c1[3], d2 = c2[2] / c2[3];
+			own.reversed = d1 > d2;
+			own.depthB = (d1 - d2) / (1.0f / c1[3] - 1.0f / c2[3]);
+			own.depthA = d1 - own.depthB / c1[3];
+		}
+		g_beginValid = false;
 		g_snapPending = true;
 
 		// Weglassen nur, wenn sich die Kamera seit dem geltenden Tiefenbild kaum bewegt hat (< 2 Grad, < 64 Einheiten)
@@ -370,31 +450,18 @@ namespace Occlusion
 			g_camFailErrSum += std::min(best, 1e6f);
 		}
 
-		// 2) Achsen-Vorzeichen nur aus der Matrix, mit der die Grafikkarte zeichnet. worldToCam hat eine eigene
-		// Konvention fuer oben/rechts - daran abgeglichen liess 1.1.0 sichtbare Objekte weg (Markt Weisslauf).
-		// Die Renderer-Matrix gehoert nur in einem Teil der Frames zur Hauptkamera, das reicht zum Abgleich.
-		CamSnap g{};
-		std::memcpy(g.m, &view.viewProjMatrixUnjittered, sizeof(g.m));
-		g.posAdjust = posAdj;
-		if (understand(g) <= 50.0f) {
+		// 2) Diagnose: eigene Projektion gegen die GPU-Matrix vom Beginn des Tiefenvorpasses (Achsen werden nicht mehr
+		// daraus gelernt - ein falscher Treffer am Ende des Vorpasses drehte im Test beide Achsen um)
+		if (own.gpu) {
 			const RE::NiPoint3 rawUp{ rot.entry[0][1], rot.entry[1][1], rot.entry[2][1] };
 			const RE::NiPoint3 rawRight{ rot.entry[0][2], rot.entry[1][2], rot.entry[2][2] };
 			const RE::NiPoint3 p{ camPos.x + own.dir.x * 1000.0f + rawRight.x * 200.0f + rawUp.x * 100.0f, camPos.y + own.dir.y * 1000.0f + rawRight.y * 200.0f + rawUp.y * 100.0f,
 				camPos.z + own.dir.z * 1000.0f + rawRight.z * 200.0f + rawUp.z * 100.0f };
 			float rc[4];
-			Mul(g, p, rc);
-			const float rx = rc[0] / rc[3], ry = rc[1] / rc[3];
-			OwnCam      probe = own;
-			probe.right = rawRight;
-			probe.up = rawUp;
+			Mul(own.gm, p, rc);
 			float ox, oy, oz;
-			Project(probe, p, ox, oy, oz);
-			g_rightSign = (rx > 0.0f) == (ox > 0.0f) ? 1.0f : -1.0f;
-			g_upSign = (ry > 0.0f) == (oy > 0.0f) ? 1.0f : -1.0f;
-			const float frameErr = std::max(std::abs(rx - ox * g_rightSign), std::abs(ry - oy * g_upSign));
-			g_learnMaxErr = std::max(g_learnMaxErr, frameErr);
-			// Weglassen nur, solange die eigene Projektion zur GPU passt (anderes Sichtfeld, z. B. Kamera-Mods -> aus)
-			g_signsVerified = frameErr < 0.02f;
+			Project(own, p, ox, oy, oz);
+			g_learnMaxErr = std::max({ g_learnMaxErr, std::abs(rc[0] / rc[3] - ox), std::abs(rc[1] / rc[3] - oy) });
 			++g_gpuSignFrames;
 		}
 	}
@@ -512,7 +579,7 @@ namespace Occlusion
 		if (skinned) {
 			s.occSkinned.fetch_add(a_draws, std::memory_order_relaxed);
 		}
-		if (cullOn && twice && g_signsVerified && g_cullAllowed.load(std::memory_order_relaxed)) {
+		if (cullOn && twice && snap->cam.gpu && g_cullAllowed.load(std::memory_order_relaxed)) {
 			s.culledDraws.fetch_add(a_draws, std::memory_order_relaxed);
 			return true;
 		}

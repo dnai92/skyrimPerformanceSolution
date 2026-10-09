@@ -952,6 +952,7 @@ namespace ShadowCulling
 			static void thunk(bool a_arg1, bool a_arg2)
 			{
 				g_inDepthPrepass.store(true, std::memory_order_relaxed);
+				Occlusion::OnDepthPrepassBegin();
 				GpuTimer::Begin(GpuTimer::kDepthPrepass);
 				func(a_arg1, a_arg2);
 				GpuTimer::End(GpuTimer::kDepthPrepass);
