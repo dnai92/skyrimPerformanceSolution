@@ -441,10 +441,18 @@ namespace Menu
 			Toggle(T("Only when VRAM gets full##ts", "Nur wenn der VRAM knapp wird##ts"), Config::textureStream.budgetMode,
 				T("Textures are only shrunk when less than the reserve below of the video memory Windows grants the game is free. With enough VRAM nothing happens and nothing is spent.",
 					"Texturen werden nur verkleinert, wenn vom Grafikspeicher, den Windows dem Spiel zuteilt, weniger als der Puffer unten frei ist. Mit genug VRAM passiert nichts und es kostet nichts."));
-			if (Slider(T("Keep free (MB)##ts", "Frei halten (MB)##ts"), Config::textureStream.reserveMB, 256.0f, 6144.0f, "%.0f",
-					T("Downscaling starts when less VRAM than this is free. It absorbs sudden jumps (doors, new cells, turning around). Smaller = VRAM used more fully, larger = fewer overflows. 1024 fits most setups.",
-						"Verkleinert wird, sobald weniger VRAM frei ist. Der Puffer fängt plötzliche Sprünge ab (Türen, neue Zellen, Umdrehen). Kleiner = VRAM voller ausgenutzt, größer = seltener Überlauf. 1024 passt für die meisten."))) {
-				Config::textureStream.reserveMB = std::clamp(std::round(Config::textureStream.reserveMB / 256.0f) * 256.0f, 256.0f, 6144.0f);  // feste 256-MB-Schritte
+			{
+				// feste 256-MB-Stufen (Regler ueber den Index - frei gezogen landeten Zwischenwerte im Regler)
+				int  step = std::clamp(static_cast<int>(std::lround(Config::textureStream.reserveMB / 256.0f)), 1, 24);
+				const auto text = std::format("{} MB", step * 256);
+				float      v = static_cast<float>(step);
+				if (MenuApi::SliderFloat(T("Keep free##ts", "Frei halten##ts"), &v, 1.0f, 24.0f, text.c_str())) {
+					step = std::clamp(static_cast<int>(std::lround(v)), 1, 24);
+					Config::textureStream.reserveMB = step * 256.0f;
+					Config::MarkDirty();
+				}
+				Tip(T("Downscaling starts when less VRAM than this is free. It absorbs sudden jumps (doors, new cells, turning around). Smaller = VRAM used more fully, larger = fewer overflows. 1024 MB fits most setups.",
+					"Verkleinert wird, sobald weniger VRAM frei ist. Der Puffer fängt plötzliche Sprünge ab (Türen, neue Zellen, Umdrehen). Kleiner = VRAM voller ausgenutzt, größer = seltener Überlauf. 1024 MB passt für die meisten."));
 			}
 			{
 				float recommend = 0.0f, jump = 0.0f;
