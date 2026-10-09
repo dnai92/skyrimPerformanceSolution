@@ -175,7 +175,7 @@ namespace Occlusion
 					sky += cur->cam.reversed ? cur->rb.minDepth[i] <= 1e-6f : cur->rb.maxDepth[i] >= 0.99999f;
 				}
 			}
-			logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | renderer matrix {} usable {} frames, not {} (avg w error {:.0f}) | own projection: right {:+.0f} up {:+.0f}, depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
+			logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera matrix {} usable {} frames, not {} (avg w error {:.0f}) | own projection: right {:+.0f} up {:+.0f}, depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
 				secs, frames, g_prepassCalls, g_camLayout, g_learnFrames, g_camFail, g_camFail ? g_camFailErrSum / g_camFail : 0.0f, g_rightSign, g_upSign,
 				g_learned ? "learned" : "formula", g_learnA, g_learnB, g_learnRev ? " reversed" : "", g_learnMaxErr, g_lastSource == 0 ? "post-prepass copy" : "main",
 				g_lastSrcW, g_lastSrcH, g_captures, g_ringFull, g_noSrv, g_reads, g_reads ? static_cast<double>(g_latencySum) / g_reads : 0.0,
@@ -243,10 +243,12 @@ namespace Occlusion
 		g_snapPending = true;
 
 		// Abgleich mit der Renderer-Matrix, wenn sie in diesem Frame zur Hauptkamera gehoert
+		// Referenz: worldToCam der Spielkamera selbst (gehoert sicher zur Hauptkamera; die Renderer-Matrix war im Test
+		// in keinem Frame verwendbar). Konvention und posAdjust-Bezug werden wie bisher selbst bestimmt.
 		auto&      rd = state->GetRuntimeData();
 		const auto view = rd.cameraData.getEye();
 		CamSnap    s{};
-		std::memcpy(s.m, &view.viewProjMatrixUnjittered, sizeof(s.m));
+		std::memcpy(s.m, cam->GetRuntimeData().worldToCam, sizeof(s.m));
 		s.posAdjust = rd.posAdjust.getEye();
 		// Konvention bestimmen: ein Punkt 1000 Einheiten vor der Kamera muss w ~ 1000 ergeben
 		const RE::NiPoint3 fwds[2]{ own.dir, { view.viewForward.x, view.viewForward.y, view.viewForward.z } };
