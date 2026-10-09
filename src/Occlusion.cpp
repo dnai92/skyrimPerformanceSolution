@@ -44,6 +44,8 @@ namespace Occlusion
 		float         g_learnA = 0.0f, g_learnB = 0.0f;
 		bool          g_learnRev = false;
 		std::uint64_t g_learnFrames = 0;
+		bool          g_signsVerified = false;  // Achsen einmal an der GPU-Matrix bestaetigt - vorher wird nichts weggelassen
+		std::uint64_t g_gpuSignFrames = 0;
 		float         g_learnMaxErr = 0.0f;  // groesste Abweichung eigene vs. Renderer-Projektion (NDC) im Bericht
 
 		float Dot(const RE::NiPoint3& a_a, const RE::NiPoint3& a_b) noexcept { return a_a.x * a_b.x + a_a.y * a_b.y + a_a.z * a_b.z; }
@@ -162,7 +164,6 @@ namespace Occlusion
 			if (!(wn > 16.0f)) {
 				return 1;  // reicht bis an die Kamera oder dahinter
 			}
-			const float dn = c.depthA + c.depthB / wn;  // naechste Stelle der Kugel
 			// Ausdehnung konservativ mit der naechsten Tiefe; x/y aus dem Mittelpunkt (perspektivisch leicht zu klein,
 			// deshalb unten eine Kachel Rand)
 			const float ex = rad / wn * 2.0f / (c.r - c.l), ey = rad / wn * 2.0f / (c.t - c.b);
@@ -183,7 +184,12 @@ namespace Occlusion
 			for (int v = v0; v <= v1; ++v) {
 				const auto row = static_cast<std::size_t>(v) * OcclusionGpu::kWidth;
 				for (int u = u0; u <= u1; ++u) {
-					if (c.reversed ? dn >= lo[row + u] : dn <= hi[row + u]) {
+					// fernste Tiefe der Kachel als Entfernung; verdeckt nur, wenn die naechste Stelle der Kugel klar dahinter
+					// liegt (2 % + 16 Einheiten Sicherheitsabstand). Himmel ergibt eine riesige Entfernung -> sichtbar.
+					const float dFar = c.reversed ? lo[row + u] : hi[row + u];
+					const float den = dFar - c.depthA;
+					const float zFar = den != 0.0f ? c.depthB / den : 0.0f;
+					if (!(zFar > 0.0f) || !(wn > zFar * 1.02f + 16.0f)) {
 						return 1;
 					}
 				}
@@ -231,8 +237,8 @@ namespace Occlusion
 					sky += cur->cam.reversed ? cur->rb.minDepth[i] <= 1e-6f : cur->rb.maxDepth[i] >= 0.99999f;
 				}
 			}
-			logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera matrix {} usable {} frames, not {} (avg w error {:.0f}) | own projection: right {:+.0f} up {:+.0f}, depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
-				secs, frames, g_prepassCalls, g_camLayout, g_learnFrames, g_camFail, g_camFail ? g_camFailErrSum / g_camFail : 0.0f, g_rightSign, g_upSign,
+			logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera matrix {} usable {} frames, not {} (avg w error {:.0f}) | own projection: right {:+.0f} up {:+.0f} (GPU check {} frames), depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
+				secs, frames, g_prepassCalls, g_camLayout, g_learnFrames, g_camFail, g_camFail ? g_camFailErrSum / g_camFail : 0.0f, g_rightSign, g_upSign, g_gpuSignFrames,
 				g_learned ? "learned" : "formula", g_learnA, g_learnB, g_learnRev ? " reversed" : "", g_learnMaxErr, g_lastSource == 0 ? "post-prepass copy" : "main",
 				g_lastSrcW, g_lastSrcH, g_captures, g_ringFull, g_noSrv, g_reads, g_reads ? static_cast<double>(g_latencySum) / g_reads : 0.0,
 				cur ? 100.0 * sky / cur->rb.maxDepth.size() : 0.0, g_testNs.exchange(0) / 1e6 / frames, g_noSnapshot.exchange(0));
@@ -256,6 +262,7 @@ namespace Occlusion
 			ClearStreaks();  // Verlauf nicht unbegrenzt wachsen lassen (wiederverwendete Objekt-Adressen)
 			g_camFailErrSum = 0.0f;
 			g_learnFrames = 0;
+			g_gpuSignFrames = 0;
 			g_learnMaxErr = 0.0f;
 			g_frame = 0;
 		}
@@ -317,24 +324,16 @@ namespace Occlusion
 			g_cullAllowed.store(allowed, std::memory_order_relaxed);
 		}
 
-		// Abgleich mit der Renderer-Matrix, wenn sie in diesem Frame zur Hauptkamera gehoert
-		// Referenz: worldToCam der Spielkamera selbst (gehoert sicher zur Hauptkamera; die Renderer-Matrix war im Test
-		// in keinem Frame verwendbar). Konvention und posAdjust-Bezug werden wie bisher selbst bestimmt.
-		auto&      rd = state->GetRuntimeData();
-		const auto view = rd.cameraData.getEye();
-		CamSnap    s{};
-		std::memcpy(s.m, cam->GetRuntimeData().worldToCam, sizeof(s.m));
-		s.posAdjust = rd.posAdjust.getEye();
-		// Konvention bestimmen: ein Punkt 1000 Einheiten vor der Kamera muss w ~ 1000 ergeben
-		const RE::NiPoint3 fwds[2]{ own.dir, { view.viewForward.x, view.viewForward.y, view.viewForward.z } };
-		RE::NiPoint3       fwd = fwds[0];
-		const auto         at = [&](float a_d) { return RE::NiPoint3{ camPos.x + fwd.x * a_d, camPos.y + fwd.y * a_d, camPos.z + fwd.z * a_d }; };
-		float              best = 1e9f;
-		RE::NiPoint3       bestFwd = fwds[0];
-		for (const auto& f : fwds) {
-			fwd = f;
+		auto&              rd = state->GetRuntimeData();
+		const auto         view = rd.cameraData.getEye();
+		const RE::NiPoint3 posAdj = rd.posAdjust.getEye();
+		const auto         at = [&](float a_d) { return RE::NiPoint3{ camPos.x + own.dir.x * a_d, camPos.y + own.dir.y * a_d, camPos.z + own.dir.z * a_d }; };
+		// Konvention einer Matrix bestimmen: ein Punkt 1000 Einheiten vor der Kamera muss w ~ 1000 ergeben
+		const auto understand = [&](CamSnap& a_s) {
+			float best = 1e9f;
+			bool  col = true, rel = true;
 			for (int k = 0; k < 4; ++k) {
-				CamSnap t = s;
+				CamSnap t = a_s;
 				t.colVec = (k & 1) == 0;
 				t.relative = (k & 2) == 0;
 				float c[4];
@@ -342,47 +341,63 @@ namespace Occlusion
 				const float err = std::abs(c[3] - 1000.0f);
 				if (err < best) {
 					best = err;
-					s.colVec = t.colVec;
-					s.relative = t.relative;
-					bestFwd = f;
+					col = t.colVec;
+					rel = t.relative;
 				}
 			}
-		}
-		fwd = bestFwd;
-		if (best > 50.0f) {
-			++g_camFail;  // Renderer-Matrix gehoert gerade nicht zur Hauptkamera - eigene Projektion gilt trotzdem
-			g_camFailErrSum += std::min(best, 1e6f);
-			return;
-		}
-		g_camLayout = s.colVec ? (s.relative ? "col/rel" : "col/abs") : (s.relative ? "row/rel" : "row/abs");
-		// Tiefenformel aus der Renderer-Matrix
-		float c1[4], c2[4];
-		Mul(s, at(100.0f), c1);
-		Mul(s, at(10000.0f), c2);
-		const float d1 = c1[2] / c1[3], d2 = c2[2] / c2[3];
-		g_learnRev = d1 > d2;
-		g_learnB = (d1 - d2) / (1.0f / c1[3] - 1.0f / c2[3]);
-		g_learnA = d1 - g_learnB / c1[3];
-		// Achsen-Vorzeichen: Testpunkt rechts oben vor der Kamera, Renderer- gegen eigene Projektion
-		const RE::NiPoint3 rawUp{ rot.entry[0][1], rot.entry[1][1], rot.entry[2][1] };
-		const RE::NiPoint3 rawRight{ rot.entry[0][2], rot.entry[1][2], rot.entry[2][2] };
-		const RE::NiPoint3 p{ camPos.x + own.dir.x * 1000.0f + rawRight.x * 200.0f + rawUp.x * 100.0f, camPos.y + own.dir.y * 1000.0f + rawRight.y * 200.0f + rawUp.y * 100.0f,
-			camPos.z + own.dir.z * 1000.0f + rawRight.z * 200.0f + rawUp.z * 100.0f };
-		float rc[4];
-		Mul(s, p, rc);
-		const float rx = rc[0] / rc[3], ry = rc[1] / rc[3];
-		OwnCam probe = own;
-		probe.right = rawRight;
-		probe.up = rawUp;
-		float ox, oy, oz;
-		Project(probe, p, ox, oy, oz);
-		g_rightSign = (rx > 0.0f) == (ox > 0.0f) ? 1.0f : -1.0f;
-		g_upSign = (ry > 0.0f) == (oy > 0.0f) ? 1.0f : -1.0f;
-		g_learnMaxErr = std::max({ g_learnMaxErr, std::abs(rx - ox * g_rightSign), std::abs(ry - oy * g_upSign) });
-		g_learned = true;
-		++g_learnFrames;
-	}
+			a_s.colVec = col;
+			a_s.relative = rel;
+			return best;
+		};
 
+		// 1) Tiefenformel aus worldToCam der Spielkamera (gehoert sicher zur Hauptkamera)
+		CamSnap s{};
+		std::memcpy(s.m, cam->GetRuntimeData().worldToCam, sizeof(s.m));
+		s.posAdjust = posAdj;
+		if (const float best = understand(s); best <= 50.0f) {
+			g_camLayout = s.colVec ? (s.relative ? "col/rel" : "col/abs") : (s.relative ? "row/rel" : "row/abs");
+			float c1[4], c2[4];
+			Mul(s, at(100.0f), c1);
+			Mul(s, at(10000.0f), c2);
+			const float d1 = c1[2] / c1[3], d2 = c2[2] / c2[3];
+			g_learnRev = d1 > d2;
+			g_learnB = (d1 - d2) / (1.0f / c1[3] - 1.0f / c2[3]);
+			g_learnA = d1 - g_learnB / c1[3];
+			g_learned = true;
+			++g_learnFrames;
+		} else {
+			++g_camFail;
+			g_camFailErrSum += std::min(best, 1e6f);
+		}
+
+		// 2) Achsen-Vorzeichen nur aus der Matrix, mit der die Grafikkarte zeichnet. worldToCam hat eine eigene
+		// Konvention fuer oben/rechts - daran abgeglichen liess 1.1.0 sichtbare Objekte weg (Markt Weisslauf).
+		// Die Renderer-Matrix gehoert nur in einem Teil der Frames zur Hauptkamera, das reicht zum Abgleich.
+		CamSnap g{};
+		std::memcpy(g.m, &view.viewProjMatrixUnjittered, sizeof(g.m));
+		g.posAdjust = posAdj;
+		if (understand(g) <= 50.0f) {
+			const RE::NiPoint3 rawUp{ rot.entry[0][1], rot.entry[1][1], rot.entry[2][1] };
+			const RE::NiPoint3 rawRight{ rot.entry[0][2], rot.entry[1][2], rot.entry[2][2] };
+			const RE::NiPoint3 p{ camPos.x + own.dir.x * 1000.0f + rawRight.x * 200.0f + rawUp.x * 100.0f, camPos.y + own.dir.y * 1000.0f + rawRight.y * 200.0f + rawUp.y * 100.0f,
+				camPos.z + own.dir.z * 1000.0f + rawRight.z * 200.0f + rawUp.z * 100.0f };
+			float rc[4];
+			Mul(g, p, rc);
+			const float rx = rc[0] / rc[3], ry = rc[1] / rc[3];
+			OwnCam      probe = own;
+			probe.right = rawRight;
+			probe.up = rawUp;
+			float ox, oy, oz;
+			Project(probe, p, ox, oy, oz);
+			g_rightSign = (rx > 0.0f) == (ox > 0.0f) ? 1.0f : -1.0f;
+			g_upSign = (ry > 0.0f) == (oy > 0.0f) ? 1.0f : -1.0f;
+			const float frameErr = std::max(std::abs(rx - ox * g_rightSign), std::abs(ry - oy * g_upSign));
+			g_learnMaxErr = std::max(g_learnMaxErr, frameErr);
+			// Weglassen nur, solange die eigene Projektion zur GPU passt (anderes Sichtfeld, z. B. Kamera-Mods -> aus)
+			g_signsVerified = frameErr < 0.02f;
+			++g_gpuSignFrames;
+		}
+	}
 	void OnPresent() noexcept
 	{
 		++g_frame;
@@ -497,7 +512,7 @@ namespace Occlusion
 		if (skinned) {
 			s.occSkinned.fetch_add(a_draws, std::memory_order_relaxed);
 		}
-		if (cullOn && twice && g_cullAllowed.load(std::memory_order_relaxed)) {
+		if (cullOn && twice && g_signsVerified && g_cullAllowed.load(std::memory_order_relaxed)) {
 			s.culledDraws.fetch_add(a_draws, std::memory_order_relaxed);
 			return true;
 		}
