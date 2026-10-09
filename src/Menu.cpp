@@ -336,6 +336,12 @@ namespace Menu
 			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
 				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
 
+			MenuApi::SeparatorText(T("Occlusion test (experiment)", "Verdeckungs-Test (Experiment)"));
+			AtomicToggle(T("Measure hidden objects##occ", "Verdeckte Objekte messen##occ"), Config::occlusionProbe,
+				T("Counts how many objects in the main view are hidden behind the depth of the previous frame and writes it to SPS.log every minute. Nothing is left out.",
+					"Zählt, wie viele Objekte im Hauptbild hinter der Tiefe des vorigen Bildes verdeckt sind, und schreibt das jede Minute in SPS.log. Es wird nichts weggelassen."),
+				false);
+
 			MenuApi::SeparatorText(T("Texture streaming: also include excluded types", "Textur-Streaming: ausgenommene Arten mit einbeziehen"));
 			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size.",
 											"Diese Texturarten werden normalerweise nie verkleinert. Häkchen setzen, um live zu sehen, wie sie sich verhalten, am besten zusammen mit einer kleinen max. Texturgröße (1K). Häkchen weg, dann kommen sie wieder in voller Größe."));

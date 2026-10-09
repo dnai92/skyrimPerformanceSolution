@@ -156,6 +156,8 @@ namespace Config
 		analysis.store(ini.GetBoolValue("General", "bAnalysis", analysis.load()), std::memory_order_relaxed);
 #endif
 		engineProbes = ini.GetBoolValue("General", "bEngineProbes", engineProbes);
+		occlusionProbe.store(ini.GetBoolValue("Occlusion", "bProbe", occlusionProbe.load()), std::memory_order_relaxed);
+		occlusionDepthSource.store(static_cast<std::uint32_t>(std::clamp(ini.GetLongValue("Occlusion", "iDepthSource", 0), 0L, 1L)), std::memory_order_relaxed);
 		toggleKey.store(static_cast<std::uint32_t>(ini.GetLongValue("General", "iToggleKey", toggleKey.load())), std::memory_order_relaxed);
 
 		const auto readRule = [&](const char* a_section, CullRule& a_rule) {

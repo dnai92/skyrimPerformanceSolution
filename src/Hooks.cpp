@@ -1,4 +1,5 @@
 #include "Hooks.h"
+#include "Occlusion.h"
 
 #include "Config.h"
 #include "GpuTimer.h"
@@ -139,6 +140,7 @@ namespace Hooks
 			static long thunk(void* a_swapChain, std::uint32_t a_syncInterval, std::uint32_t a_flags)
 			{
 				LightShadowCache::OnPresent();
+				Occlusion::OnPresent();
 				Stats::ScopedTimer timer{ Stats::Zone::PresentWait };
 				return func(a_swapChain, a_syncInterval, a_flags);
 			}
@@ -173,6 +175,7 @@ namespace Hooks
 				if (a_event && a_event->opening && (a_event->menuName == RE::MainMenu::MENU_NAME || a_event->menuName == RE::LoadingMenu::MENU_NAME)) {
 					TextureStream::Reset(a_event->menuName == RE::MainMenu::MENU_NAME ? "main menu" : "loading screen");
 					LightShadowCache::Reset();
+					Occlusion::Reset();
 				}
 				if (TracyIsConnected && a_event) {
 					const auto msg = std::format("Menue {}: {}", a_event->opening ? "auf" : "zu", a_event->menuName.c_str());

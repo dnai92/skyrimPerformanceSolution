@@ -6,6 +6,7 @@
 #include "DetourHelper.h"
 #include "GpuTimer.h"
 #include "LightShadowCache.h"
+#include "Occlusion.h"
 #include "SceneUtil.h"
 #include "Stats.h"
 
@@ -955,6 +956,7 @@ namespace ShadowCulling
 				func(a_arg1, a_arg2);
 				GpuTimer::End(GpuTimer::kDepthPrepass);
 				g_inDepthPrepass.store(false, std::memory_order_relaxed);
+				Occlusion::OnDepthPrepassEnd();
 			}
 			static inline void (*func)(bool, bool) = nullptr;
 		};
@@ -988,6 +990,12 @@ namespace ShadowCulling
 				const auto passes = func(a_this, a_geometry, a_renderFlags, a_accumulator);
 				if (passes && passes->head && a_geometry && ShouldCullMain(*a_geometry)) {
 					passes->Clear();
+				} else if (passes && passes->head && a_geometry) {
+					std::uint32_t draws = 0;
+					for (auto p = passes->head; p && draws < 64; p = p->next) {
+						++draws;
+					}
+					Occlusion::CountMain(*a_geometry, a_accumulator, draws);
 				}
 				return passes;
 			}

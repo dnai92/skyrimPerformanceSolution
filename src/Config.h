@@ -8,6 +8,10 @@ namespace Config
 	inline bool                       engineProbes = false;  // nur INI, nur beim Start: WaitProbe + Engine-Zeitmessung (Entwickler)
 	inline std::atomic<bool>          analysis{ false };  // Diagnose-Auswertungen (Instancing-Analyse, Decal-/Culled-Listen, Kamera-Zaehler). Kosten Hauptthread-Zeit -> Standard AUS
 	inline std::atomic<std::uint32_t> toggleKey{ 0xC9 };  // DirectInput-Scancode, 0xC9 = Bild auf (Page Up)
+	// Verdeckungs-Experiment (exp/occlusion): nur messen. [Occlusion] bProbe, iDepthSource (0 = Kopie nach dem
+	// Tiefenvorpass, 1 = Haupt-Tiefenpuffer). Nicht im Menue gespeichert.
+	inline std::atomic<bool>          occlusionProbe{ true };
+	inline std::atomic<std::uint32_t> occlusionDepthSource{ 0 };
 
 	// Regel fuer das Kleinobjekt-Culling in einer Schattenkarte. Ein Mesh wird verworfen, wenn ALLE Bedingungen zutreffen.
 	struct CullRule
