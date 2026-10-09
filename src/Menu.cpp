@@ -471,13 +471,18 @@ namespace Menu
 				int  step = std::clamp(static_cast<int>(std::lround(Config::textureStream.refillGapMB / 256.0f)), 1, 16);
 				const auto text = std::format("{} MB", step * 256);
 				float      v = static_cast<float>(step);
-				if (MenuApi::SliderFloat(T("Refill when this much more is free##ts", "Auffüllen, wenn so viel mehr frei ist##ts"), &v, 1.0f, 16.0f, text.c_str())) {
+				if (MenuApi::SliderFloat(T("Gap until refilling##ts", "Abstand bis zum Wiederauffüllen##ts"), &v, 1.0f, 16.0f, text.c_str())) {
 					step = std::clamp(static_cast<int>(std::lround(v)), 1, 16);
 					Config::textureStream.refillGapMB = step * 256.0f;
 					Config::MarkDirty();
 				}
-				Tip(T("Downscaled textures are reloaded at full size when this much more than the reserve is free. Gap between downscaling and refilling, so textures do not go back and forth.",
-					"Verkleinerte Texturen werden wieder voll geladen, wenn so viel mehr als der Puffer frei ist. Abstand zwischen Verkleinern und Auffüllen, damit Texturen nicht hin und her wechseln."));
+				Tip(T("Added on top of 'Keep free'. Downscaled textures are only reloaded at full size when that much is free. The gap keeps textures from going back and forth. Most users do not need to change it.",
+					"Kommt zu 'Frei halten' hinzu. Erst wenn so viel frei ist, werden verkleinerte Texturen wieder voll geladen. Der Abstand verhindert, dass Texturen hin und her wechseln. Die meisten müssen ihn nicht ändern."));
+				// beide Schwellen im Klartext (Regler 2 ist ein Abstand, kein eigener Grenzwert - verwirrte im Test)
+				const auto keep = static_cast<int>(Config::textureStream.reserveMB), refillAt = keep + static_cast<int>(Config::textureStream.refillGapMB);
+				MenuApi::TextWrapped("%s", (g_german ? std::format("Verkleinern, wenn weniger als {} MB frei sind. Wieder voll laden, wenn mehr als {} MB frei sind.", keep, refillAt) :
+				                                       std::format("Downscale when less than {} MB is free. Reload at full size when more than {} MB is free.", keep, refillAt)).c_str());
+				MenuApi::TextWrapped("%s", T("Most users only need 'Keep free'. Leave the gap at its default.", "Die meisten brauchen nur 'Frei halten'. Den Abstand am besten auf Standard lassen."));
 			}
 			Slider(T("RAM buffer (MB)##ts", "RAM-Puffer (MB)##ts"), Config::textureStream.ramCacheMB, 0.0f, 8192.0f, "%.0f",
 				T("Texture data that was reloaded stays in RAM up to this size, so the next reload needs no disk access. Least recently used is dropped first. 0 = off.",
