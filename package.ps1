@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $version = (Get-Content "$root\vcpkg.json" -Raw | ConvertFrom-Json).'version-semver'
 $build = if ($Profile) { "$root\build\profile" } elseif ($Vr) { "$root\build\vr" } else { "$root\build\release" }
-$name = if ($Profile) { "SPS-PROFILE-$version-NOT-FOR-RELEASE" } elseif ($Vr) { "SPS-VR-$version" } else { "SPS-$version" }
+$name = if ($Profile) { "SPS-PROFILE-$version-NOT-FOR-RELEASE" } elseif ($Vr) { "SPS-VR-OCCLUSION-TEST-$version" } else { "SPS-OCCLUSION-TEST-$version" }
 # Sperre: Release-DLL darf weder Netzwerk-Bibliotheken noch den Tracy-Profiler enthalten (1.0.3 oeffnete einen
 # Netzwerk-Port -> Firewall-Abfrage bei Nutzern). Entwickler-Builds mit -DSPS_TRACY=ON werden hier abgewiesen.
 $dllText = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes("$build\SPS.dll"))
