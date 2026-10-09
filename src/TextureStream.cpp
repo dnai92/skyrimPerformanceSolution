@@ -253,6 +253,19 @@ namespace TextureStream
 		// so viel ausgelagert = VRAM laeuft ueber. 0.22.10: eigenes Neuladen erzeugt kurz ~150-200 MB (Upload-Puffer)
 		// -> bei 128 MB loeste das Auffuellen selbst Knappheit aus und verkleinerte gleich wieder (Hin und Her)
 		constexpr std::uint64_t    kSharedPressure = 256ull << 20;
+		// Ausgelagerter Speicher bleibt oft minutenlang stehen, auch wenn laengst wieder Platz ist (1.0.47: Auffuellen nie,
+		// VRAM blieb bei 77 %) -> zaehlt nur, solange er waechst
+		std::atomic<Clock::rep>    g_sharedRiseTicks{ 0 };
+		// Gerade verkleinert, in der VRAM-Anzeige aber noch nicht frei (Freigabe verzoegert): als frei mitrechnen, sonst wird
+		// weiter verkleinert (1.0.47: 4,5 GB statt ~1 GB beim Betreten der Stadt)
+		std::atomic<std::uint64_t> g_recentFreedBytes{ 0 };
+		std::deque<std::pair<Clock::time_point, std::uint64_t>> g_recentFreed;  // Main-Thread
+
+		bool SharedRising(Clock::duration a_within) noexcept
+		{
+			const auto t = g_sharedRiseTicks.load(std::memory_order_relaxed);
+			return t != 0 && Clock::now().time_since_epoch().count() - t < a_within.count();
+		}
 		// Auffuellen erst nach ruhiger Phase: direkt nach dem Laden ist der VRAM kurz leer, waehrend die Szene noch
 		// hereinkommt -> 0.20.4 fuellte 4 GB auf und verkleinerte gleich wieder (Hin und Her)
 		Clock::time_point          g_lastPressure{};
@@ -323,7 +336,7 @@ namespace TextureStream
 			if (budget == 0) {
 				return -1.0;
 			}
-			return (static_cast<double>(budget) - static_cast<double>(usage)) / 1048576.0;
+			return (static_cast<double>(budget) - static_cast<double>(usage) + static_cast<double>(g_recentFreedBytes.load(std::memory_order_relaxed))) / 1048576.0;
 		}
 
 		// Darf verkleinert werden? Im Budget-Modus nur, wenn weniger als der Puffer frei ist (unbekannt = ja)
@@ -337,7 +350,7 @@ namespace TextureStream
 			// Ausgelagerter Speicher = der VRAM laeuft schon ueber (genau das verursachte die Ruckler beim Umdrehen)
 			// Nur solange der VRAM auch nahe der Schwelle ist - Windows holt Ausgelagertes nicht immer sofort zurueck,
 			// sonst wuerde endlos weiter verkleinert
-			const bool overflowing = g_procShared.load(std::memory_order_relaxed) >= kSharedPressure && free <= cfg.reserveMB + cfg.refillGapMB / 2.0;
+			const bool overflowing = g_procShared.load(std::memory_order_relaxed) >= kSharedPressure && SharedRising(10s) && free <= cfg.reserveMB + cfg.refillGapMB / 2.0;
 			return free < 0.0 || free <= cfg.reserveMB || overflowing;
 		}
 
@@ -790,6 +803,9 @@ namespace TextureStream
 					unsigned long long dedicated = 0, shared = 0;
 					if (GpuMemory::Query(dedicated, shared)) {
 						g_procDedicated.store(dedicated, std::memory_order_relaxed);
+						if (shared > g_procShared.load(std::memory_order_relaxed) + (32ull << 20)) {
+							g_sharedRiseTicks.store(Clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+						}
 						g_procShared.store(shared, std::memory_order_relaxed);
 					}
 				}
@@ -1723,7 +1739,7 @@ namespace TextureStream
 			const bool pressure = Pressure();
 			// VRAM laeuft schon ueber oder deutlich ueber der Schwelle: nicht erst drei Durchlaeufe abwarten
 			const double freeMB = FreeMB();
-			const bool   heavy = pressure && (g_procShared.load(std::memory_order_relaxed) >= kSharedPressure ||
+			const bool   heavy = pressure && ((g_procShared.load(std::memory_order_relaxed) >= kSharedPressure && SharedRising(10s)) ||
 			                                  (freeMB >= 0.0 && freeMB <= Config::textureStream.reserveMB / 2.0));
 			// Kandidaten erst sammeln: im Budget-Modus die mit der groessten Ersparnis zuerst verkleinern
 			struct Candidate
@@ -1750,7 +1766,7 @@ namespace TextureStream
 			}
 			const bool calm = now - g_lastPressure >= kRefillCalm && now - g_lastLoad >= kRefillCalm;
 			const bool wantRefill = active && cfg.budgetMode && cfg.refill && calm && pct >= 0.0f && freeMB >= cfg.reserveMB + cfg.refillGapMB &&
-			                        g_procShared.load(std::memory_order_relaxed) < kSharedPressure / 2;
+			                        !SharedRising(30s);
 			g_reducedCount = 0;
 			for (auto it = g_tex.begin(); it != g_tex.end(); ++it) {
 				auto&      st = it->second;
@@ -2311,6 +2327,11 @@ namespace TextureStream
 			return;
 		}
 
+		// Gerade Verkleinertes gilt 3 s lang als frei (bis die Freigabe in der VRAM-Anzeige angekommen ist)
+		while (!g_recentFreed.empty() && now - g_recentFreed.front().first > 3s) {
+			g_recentFreedBytes.fetch_sub(std::min(g_recentFreedBytes.load(std::memory_order_relaxed), g_recentFreed.front().second), std::memory_order_relaxed);
+			g_recentFreed.pop_front();
+		}
 		// Verkleinern nach Datenmenge: hoechstens ~64 MB frei werdender Speicher pro Frame (mind. eine Textur),
 		// und nicht, solange noch viel alter Speicher auf Freigabe wartet
 		if (!Pressure() && !g_down.empty()) {
@@ -2331,6 +2352,10 @@ namespace TextureStream
 			std::uint64_t freed = 0;
 			Downscale(job, freed);
 			freedThisFrame += freed;
+			if (freed > 0) {
+				g_recentFreed.emplace_back(now, freed);
+				g_recentFreedBytes.fetch_add(freed, std::memory_order_relaxed);
+			}
 			if (freedThisFrame >= kReleaseBytesPerCall) {
 				break;
 			}
