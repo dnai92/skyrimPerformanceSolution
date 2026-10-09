@@ -41,6 +41,9 @@ namespace Occlusion
 			bool          gpu = false;
 			CamSnap       gm{};
 			float         sx = 1.0f, sy = 1.0f;  // Projektions-Skalierung x/y der GPU-Matrix
+			// Viewport-Tiefenbereich: die Hauptszene liegt nur in [depthMin, depthMax] des Puffers, darueber der Himmel.
+			// Ohne Umrechnung endeten alle Entfernungen bei ~450 Einheiten -> ferne sichtbare Objekte galten als verdeckt.
+			float         depthMin = 0.0f, depthMax = 1.0f;
 		};
 
 		float         g_rightSign = 1.0f, g_upSign = 1.0f;
@@ -151,6 +154,7 @@ namespace Occlusion
 		// GPU-Matrix vom Beginn des Tiefenvorpasses (Main-Thread)
 		CamSnap       g_beginCam{};
 		float         g_beginSx = 1.0f, g_beginSy = 1.0f;
+		float         g_beginDepthMin = 0.0f, g_beginDepthMax = 1.0f;
 		bool          g_beginValid = false;
 		std::uint64_t g_beginOk = 0, g_beginFail = 0;
 
@@ -217,7 +221,12 @@ namespace Occlusion
 				for (int u = u0; u <= u1; ++u) {
 					// fernste Tiefe der Kachel als Entfernung; verdeckt nur, wenn die naechste Stelle der Kugel klar dahinter
 					// liegt (2 % + 16 Einheiten Sicherheitsabstand). Himmel ergibt eine riesige Entfernung -> sichtbar.
-					const float dFar = c.reversed ? lo[row + u] : hi[row + u];
+					const float dBuf = c.reversed ? lo[row + u] : hi[row + u];
+					// Pufferwert ausserhalb des Szenenbereichs = Himmel/geloescht -> sichtbar
+					if (c.reversed ? dBuf <= c.depthMin : dBuf >= c.depthMax) {
+						return 1;
+					}
+					const float dFar = (dBuf - c.depthMin) / (c.depthMax - c.depthMin);
 					const float den = dFar - c.depthA;
 					const float zFar = den != 0.0f ? c.depthB / den : 0.0f;
 					if (a_info) {
@@ -272,8 +281,8 @@ namespace Occlusion
 					sky += cur->cam.reversed ? cur->rb.minDepth[i] <= 1e-6f : cur->rb.maxDepth[i] >= 0.99999f;
 				}
 			}
-			logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera matrix {} usable {} frames, not {} (avg w error {:.0f}) | GPU matrix at prepass start {} ok / {} not | own projection: right {:+.0f} up {:+.0f} (compared {} frames), depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
-				secs, frames, g_prepassCalls, g_camLayout, g_learnFrames, g_camFail, g_camFail ? g_camFailErrSum / g_camFail : 0.0f, g_beginOk, g_beginFail, g_rightSign, g_upSign, g_gpuSignFrames,
+			logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera matrix {} usable {} frames, not {} (avg w error {:.0f}) | GPU matrix at prepass start {} ok / {} not, depth range {:.4f}-{:.4f} | own projection: right {:+.0f} up {:+.0f} (compared {} frames), depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
+				secs, frames, g_prepassCalls, g_camLayout, g_learnFrames, g_camFail, g_camFail ? g_camFailErrSum / g_camFail : 0.0f, g_beginOk, g_beginFail, g_beginDepthMin, g_beginDepthMax, g_rightSign, g_upSign, g_gpuSignFrames,
 				g_learned ? "learned" : "formula", g_learnA, g_learnB, g_learnRev ? " reversed" : "", g_learnMaxErr, g_lastSource == 0 ? "post-prepass copy" : "main",
 				g_lastSrcW, g_lastSrcH, g_captures, g_ringFull, g_noSrv, g_reads, g_reads ? static_cast<double>(g_latencySum) / g_reads : 0.0,
 				cur ? 100.0 * sky / cur->rb.maxDepth.size() : 0.0, g_testNs.exchange(0) / 1e6 / frames, g_noSnapshot.exchange(0));
@@ -351,6 +360,12 @@ namespace Occlusion
 		g_beginCam = g;
 		g_beginSx = std::abs(view.projMatrixUnjittered.m[0][0]);
 		g_beginSy = std::abs(view.projMatrixUnjittered.m[1][1]);
+		g_beginDepthMin = view.viewDepthRange.x;
+		g_beginDepthMax = view.viewDepthRange.y;
+		if (!(g_beginDepthMax > g_beginDepthMin) || g_beginDepthMin < 0.0f || g_beginDepthMax > 1.0f) {
+			++g_beginFail;  // unbrauchbarer Bereich - lieber nicht weglassen
+			return;
+		}
 		g_beginValid = true;
 		++g_beginOk;
 	}
@@ -400,6 +415,8 @@ namespace Occlusion
 			own.gm = g_beginCam;
 			own.sx = g_beginSx;
 			own.sy = g_beginSy;
+			own.depthMin = g_beginDepthMin;
+			own.depthMax = g_beginDepthMax;
 			const RE::NiPoint3 a{ camPos.x + own.dir.x * 100.0f, camPos.y + own.dir.y * 100.0f, camPos.z + own.dir.z * 100.0f };
 			const RE::NiPoint3 b{ camPos.x + own.dir.x * 10000.0f, camPos.y + own.dir.y * 10000.0f, camPos.z + own.dir.z * 10000.0f };
 			float c1[4], c2[4];
@@ -613,7 +630,7 @@ namespace Occlusion
 					const auto& b = a_geom.worldBound;
 					g_samples.push_back(std::format("'{}' center ({:.0f}, {:.0f}, {:.0f}) radius {:.0f} | screen ({:.2f}, {:.2f}) depth {:.0f}, nearest {:.0f} | tiles x {}-{} y {}-{} | farthest depth in tiles {:.0f}-{:.0f} | image {} frames old",
 						a_geom.name.c_str() ? a_geom.name.c_str() : "", b.center.x, b.center.y, b.center.z, b.radius, info.x, info.y, info.z, info.wn,
-						info.u0, info.u1, info.v0, info.v1, info.zFarMin, info.zFarMax, g_frame - snap->cam.frame));
+						info.u0, info.u1, info.v0, info.v1, info.zFarMin, info.zFarMax, static_cast<long long>(g_frame) - static_cast<long long>(snap->cam.frame)));
 				}
 			}
 			return true;
