@@ -83,6 +83,7 @@ namespace Config
 			f("TextureStream", "fRamCacheMB", textureStream.ramCacheMB);
 			f("TextureStream", "fSafetyFactor", textureStream.safetyFactor);
 			f("TextureStream", "fMinEdge", textureStream.minEdge);
+			f("TextureStream", "fMaxEdge", textureStream.maxEdge);
 			b("TextureStream", "bStreamClothing", textureStream.streamClothing);
 			b("LightShadowCache", "bEnabled", lightShadowCache.enabled);
 			b("TextureStream", "bStreamCharacters", textureStream.streamCharacters);
@@ -267,6 +268,7 @@ namespace Config
 		ts.budgetStartPct = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetStartPct", ts.budgetStartPct)), 0.0f, 100.0f);
 		ts.safetyFactor = static_cast<float>(ini.GetDoubleValue("TextureStream", "fSafetyFactor", ts.safetyFactor));
 		ts.minEdge = static_cast<float>(ini.GetDoubleValue("TextureStream", "fMinEdge", ts.minEdge));
+		ts.maxEdge = static_cast<float>(ini.GetDoubleValue("TextureStream", "fMaxEdge", ts.maxEdge));
 		ts.budgetMs = static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetMs", ts.budgetMs));
 		ts.exclude = ini.GetValue("TextureStream", "sExclude", ts.exclude.c_str());
 		ts.streamClothing = ini.GetBoolValue("TextureStream", "bStreamClothing", ts.streamClothing);

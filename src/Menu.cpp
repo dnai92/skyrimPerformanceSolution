@@ -374,8 +374,8 @@ namespace Menu
 
 			MenuApi::SeparatorText(T("Texture streaming", "Textur-Streaming"));
 			if (TextureStream::OtherDownscalerLoaded()) {
-				MenuApi::TextWrapped("%s", T("Texture Downscaler is installed. It caps every texture at load time and works against this streaming (textures cannot come back to full size, texture errors were reported). Use only one: remove Texture Downscaler, or switch off texture streaming here.",
-												"Texture Downscaler ist installiert. Er deckelt jede Textur beim Laden und arbeitet gegen dieses Streaming (Texturen kommen nicht mehr auf volle Größe, Texturfehler wurden gemeldet). Nur eines nutzen: Texture Downscaler entfernen oder hier das Textur-Streaming ausschalten."));
+				MenuApi::TextWrapped("%s", T("Texture Downscaler is installed. SPS keeps the sizes it loads and only shrinks further when VRAM gets tight. If textures look wrong, switch off texture streaming here.",
+												"Texture Downscaler ist installiert. SPS behält die Größen, die er lädt, und verkleinert nur weiter, wenn der VRAM knapp wird. Sehen Texturen falsch aus, hier das Textur-Streaming ausschalten."));
 			}
 			Toggle(T("Downscale distant textures##ts", "Ferne Texturen verkleinern##ts"), Config::textureStream.enabled,
 				T("Textures of far objects (also behind you) are shrunk in VRAM and reloaded at full size from disk when you come closer. Files are never changed. Off = everything goes back to full size.",
@@ -414,6 +414,24 @@ namespace Menu
 					p *= 2.0f;
 				}
 				Config::textureStream.minEdge = p;
+			}
+			{
+				// Obergrenze: 1K / 2K / 4K / 8K / keine (Regler ueber den Index, Anzeige als Text)
+				static constexpr float kCaps[] = { 1024.0f, 2048.0f, 4096.0f, 8192.0f, 0.0f };
+				const char*            names[] = { "1K", "2K", "4K", "8K", T("unlimited", "unbegrenzt") };
+				int                    idx = 4;
+				for (int i = 0; i < 4; ++i) {
+					if (Config::textureStream.maxEdge == kCaps[i]) {
+						idx = i;
+					}
+				}
+				float v = static_cast<float>(idx);
+				if (MenuApi::SliderFloat(T("Max. texture size##ts", "Max. Texturgröße##ts"), &v, 0.0f, 4.0f, names[idx])) {
+					Config::textureStream.maxEdge = kCaps[std::clamp(static_cast<int>(std::lround(v)), 0, 4)];
+					Config::MarkDirty();
+				}
+				Tip(T("Upper limit for all streamed textures, near ones too, independent of VRAM usage. Applied right away and when textures load. Excluded paths and the character switches below still apply.",
+					"Obergrenze für alle gestreamten Texturen, auch nahe, unabhängig von der VRAM-Belegung. Wirkt sofort und beim Laden. Ausgenommene Pfade und die Figuren-Schalter unten gelten weiter."));
 			}
 			Toggle(T("Also clothing and armor of characters##ts", "Auch Kleidung und Rüstung von Figuren##ts"), Config::textureStream.streamClothing,
 				T("Clothing and armor worn by NPCs far away are shrunk as well. Distance is taken from the character itself, so sitting or animated NPCs are measured correctly.",
@@ -475,8 +493,8 @@ namespace Menu
 			HelpEntry(T("Faces or hair look black, purple or blurry", "Gesichter oder Haare sehen schwarz, lila oder unscharf aus"),
 				T("Lights and scene > Also bodies, faces and hair", "Licht und Szene > Auch Körper, Gesichter und Haare"));
 			if (TextureStream::OtherDownscalerLoaded()) {
-				HelpEntry(T("Texture Downscaler is installed - it works against SPS texture streaming", "Texture Downscaler ist installiert - er arbeitet gegen das SPS-Textur-Streaming"),
-					T("Use only one: remove Texture Downscaler, or Lights and scene > Texture streaming off", "Nur eines nutzen: Texture Downscaler entfernen oder Licht und Szene > Textur-Streaming aus"));
+				HelpEntry(T("Texture errors with Texture Downscaler installed", "Texturfehler mit installiertem Texture Downscaler"),
+					T("Lights and scene > Texture streaming off (Texture Downscaler then handles VRAM alone)", "Licht und Szene > Textur-Streaming aus (Texture Downscaler regelt dann den VRAM allein)"));
 			}
 			HelpEntry(T("Clothing or armor of NPCs looks blurry", "Kleidung oder Rüstung von NPCs ist unscharf"),
 				T("Lights and scene > Also clothing and armor of characters", "Licht und Szene > Auch Kleidung und Rüstung von Figuren"));

@@ -148,6 +148,7 @@ namespace Config
 		float       ramCacheMB = 1024.0f; // RAM-Puffer fuer neu geladene Texturdaten (0 = aus)
 		float       safetyFactor = 2.0f;  // benoetigte Aufloesung = Bildschirmgroesse x Faktor
 		float       minEdge = 1024.0f;    // nie unter diese Kantenlaenge verkleinern (Zweierpotenz)
+		float       maxEdge = 0.0f;       // Obergrenze fuer alle gestreamten Texturen (1024/2048/4096/8192, 0 = keine)
 		float       budgetMs = 0.4f;      // Zeit pro Frame fuer den Szenen-Durchlauf
 		bool        streamClothing = true;     // Kleidung/Ruestung an Figuren verkleinern (Abstand ueber die Figur, nicht ihre Huelle)
 		bool        streamCharacters = false;  // Koerper, Gesichter, Haare (textures/actors/character/) verkleinern
