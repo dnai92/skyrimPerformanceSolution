@@ -138,7 +138,9 @@ namespace Occlusion
 			std::atomic<std::uint64_t> culledDraws{ 0 };  // tatsaechlich weggelassen (Stufe 2)
 			std::atomic<std::uint64_t> window{ 0 };       // Objekte im laufenden 1-s-Fenster (Hauptbild erkennen)
 		};
-		std::uint64_t g_cullBlockedFrames = 0;  // Main-Thread: Frames ohne Weglassen wegen Kamerabewegung
+		std::uint64_t g_cullBlockedFrames = 0;
+		std::mutex                g_sampleLock;
+		std::vector<std::string>  g_samples;  // bis 12 weggelassene Objekte je Bericht  // Main-Thread: Frames ohne Weglassen wegen Kamerabewegung
 		Clock::time_point g_windowStart = Clock::now();
 		AccStats                   g_acc[4];
 		std::atomic<std::uint64_t> g_accOther{ 0 }, g_noSnapshot{ 0 }, g_testNs{ 0 };
@@ -162,8 +164,16 @@ namespace Occlusion
 			}
 		}
 
+		// Stichprobe einer Pruefung (Diagnose weggelassener Objekte)
+		struct TestInfo
+		{
+			float x = 0, y = 0, z = 0, wn = 0;
+			int   u0 = 0, u1 = 0, v0 = 0, v1 = 0;
+			float zFarMin = 0, zFarMax = 0;  // fernste Tiefe der Kacheln als Entfernung, kleinster/groesster Wert
+		};
+
 		// 1 = sichtbar, 2 = verdeckt, 3 = zu gross (nicht geprueft)
-		int Test(const Snapshot& a_s, const RE::NiBound& a_b) noexcept
+		int Test(const Snapshot& a_s, const RE::NiBound& a_b, TestInfo* a_info = nullptr) noexcept
 		{
 			const auto& c = a_s.cam;
 			float       x, y, z;
@@ -199,6 +209,9 @@ namespace Occlusion
 			}
 			const auto& lo = a_s.rb.minDepth;
 			const auto& hi = a_s.rb.maxDepth;
+			if (a_info) {
+				*a_info = { x, y, z, wn, u0, u1, v0, v1, 1e30f, 0.0f };
+			}
 			for (int v = v0; v <= v1; ++v) {
 				const auto row = static_cast<std::size_t>(v) * OcclusionGpu::kWidth;
 				for (int u = u0; u <= u1; ++u) {
@@ -207,6 +220,10 @@ namespace Occlusion
 					const float dFar = c.reversed ? lo[row + u] : hi[row + u];
 					const float den = dFar - c.depthA;
 					const float zFar = den != 0.0f ? c.depthB / den : 0.0f;
+					if (a_info) {
+						a_info->zFarMin = std::min(a_info->zFarMin, zFar);
+						a_info->zFarMax = std::max(a_info->zFarMax, zFar);
+					}
 					if (!(zFar > 0.0f) || !(wn > zFar * 1.02f + 16.0f)) {
 						return 1;
 					}
@@ -277,6 +294,13 @@ namespace Occlusion
 			g_prepassCalls = g_camFail = g_captures = g_ringFull = g_noSrv = g_reads = g_latencySum = 0;
 			logger::info("[Occlusion]   hiding occluded objects: {} | frames without hiding because the camera moved: {}", Config::occlusionCull.load() && Config::masterEnabled.load() ? "ON" : "off", g_cullBlockedFrames);
 			g_cullBlockedFrames = 0;
+			{
+				std::scoped_lock l(g_sampleLock);
+				for (const auto& smp : g_samples) {
+					logger::info("[Occlusion]     hidden: {}", smp);
+				}
+				g_samples.clear();
+			}
 			ClearStreaks();  // Verlauf nicht unbegrenzt wachsen lassen (wiederverwendete Objekt-Adressen)
 			g_camFailErrSum = 0.0f;
 			g_learnFrames = 0;
@@ -581,6 +605,17 @@ namespace Occlusion
 		}
 		if (cullOn && twice && snap->cam.gpu && g_cullAllowed.load(std::memory_order_relaxed)) {
 			s.culledDraws.fetch_add(a_draws, std::memory_order_relaxed);
+			{
+				std::scoped_lock l(g_sampleLock);
+				if (g_samples.size() < 12) {
+					TestInfo info;
+					Test(*snap, a_geom.worldBound, &info);
+					const auto& b = a_geom.worldBound;
+					g_samples.push_back(std::format("'{}' center ({:.0f}, {:.0f}, {:.0f}) radius {:.0f} | screen ({:.2f}, {:.2f}) depth {:.0f}, nearest {:.0f} | tiles x {}-{} y {}-{} | farthest depth in tiles {:.0f}-{:.0f} | image {} frames old",
+						a_geom.name.c_str() ? a_geom.name.c_str() : "", b.center.x, b.center.y, b.center.z, b.radius, info.x, info.y, info.z, info.wn,
+						info.u0, info.u1, info.v0, info.v1, info.zFarMin, info.zFarMax, g_frame - snap->cam.frame));
+				}
+			}
 			return true;
 		}
 		return false;
