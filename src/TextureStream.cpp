@@ -283,6 +283,7 @@ namespace TextureStream
 		// Auffuellen: noch nicht eingetroffene Neuladungen mitzaehlen, sonst stapeln mehrere Durchlaeufe (je 0,5 s)
 		// Auftraege fuer denselben freien Platz (langer Test: bis 3,6 GB in 10 s, VRAM 89 %, danach Verkleinern)
 		std::uint64_t              g_inflightUp = 0;  // Main-Thread
+		std::deque<std::pair<Clock::time_point, std::uint64_t>> g_upSettle;  // fertig, aber noch nicht in der VRAM-Anzeige (Main-Thread)
 		Clock::time_point          g_lastRefill{};    // zuletzt aufgefuellt (eigener Anstieg - zaehlt nicht als Sprung)
 		constexpr std::uint64_t    kRefillPerPass = 512ull << 20;
 
@@ -1227,6 +1228,15 @@ namespace TextureStream
 			const std::uint64_t now = ChainBytes(a_st.fi, a_st.curW, a_st.curH, a_st.curMips);
 			const std::uint64_t then = ChainBytes(a_st.fi, std::max(1u, a_st.fullW >> skip), std::max(1u, a_st.fullH >> skip), a_st.fullMips - skip);
 			job.extraBytes = then > now ? then - now : 0;
+			// Budget-Modus: nur so viel gleichzeitig neu laden, wie bis zum Puffer passt (laufende und gerade fertige
+			// Auftraege mitgezaehlt). 1.0.50: Obergrenze 1K -> unbegrenzt lud 817 Texturen (8,4 GB) in einer Minute,
+			// VRAM 104 %, 1,8 GB ausgelagert. Bis 128 MB laufen immer, damit nahe Texturen auch bei Knappheit nachkommen.
+			if (Active() && Config::textureStream.budgetMode && g_inflightUp >= 128ull * 1048576) {
+				if (const double freeMB = FreeMB(); freeMB >= 0.0 &&
+					(freeMB - Config::textureStream.reserveMB) * 1048576.0 - static_cast<double>(g_inflightUp) < static_cast<double>(job.extraBytes)) {
+					return;
+				}
+			}
 			g_inflightUp += job.extraBytes;
 			a_st.busy = true;
 			Enqueue(std::move(job));
@@ -1463,7 +1473,8 @@ namespace TextureStream
 					later.push_back(std::move(res));
 					continue;
 				}
-				g_inflightUp -= std::min(g_inflightUp, job.extraBytes);
+				// erst nach 3 s abziehen: so lange braucht die VRAM-Anzeige, bis der neue Speicher darin auftaucht
+				g_upSettle.emplace_back(Clock::now(), job.extraBytes);
 				const auto  it = g_tex.find(job.r);
 				const bool  valid = it != g_tex.end() && it->second.res == job.expectRes && job.r->texture == job.expectRes;
 				if (it != g_tex.end()) {
@@ -2168,7 +2179,8 @@ namespace TextureStream
 		g_lastLoad = Clock::now();
 		g_lastLoadTicks.store(g_lastLoad.time_since_epoch().count(), std::memory_order_relaxed);
 		g_inflightUp = 0;
-		logger::info("[TextureStream] Reset ({}): {} held textures and pass released, {} jobs discarded", a_reason, held, jobs);
+		g_upSettle.clear();
+		logger::info("[TextureStream] Reset ({}):{} held textures and pass released, {} jobs discarded", a_reason, held, jobs);
 	}
 
 	namespace
@@ -2388,6 +2400,10 @@ namespace TextureStream
 		}
 
 		// Gerade Verkleinertes gilt 3 s lang als frei (bis die Freigabe in der VRAM-Anzeige angekommen ist)
+		while (!g_upSettle.empty() && now - g_upSettle.front().first > 3s) {
+			g_inflightUp -= std::min(g_inflightUp, g_upSettle.front().second);
+			g_upSettle.pop_front();
+		}
 		while (!g_recentFreed.empty() && now - g_recentFreed.front().first > 3s) {
 			g_recentFreedBytes.fetch_sub(std::min(g_recentFreedBytes.load(std::memory_order_relaxed), g_recentFreed.front().second), std::memory_order_relaxed);
 			g_recentFreed.pop_front();
