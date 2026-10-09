@@ -173,6 +173,43 @@ namespace Occlusion
 			logger::info("[Occlusion] depth image saved: {} (bright = near, farthest value per tile, sky tiles {}, camera ({:.0f}, {:.0f}, {:.0f}), GPU matrix {}, depth A {:.5f} B {:.3f})",
 				path.string(), skyTiles, c.pos.x, c.pos.y, c.pos.z, c.gpu ? "yes" : "no", c.depthA, c.depthB);
 		}
+		// Zum gespeicherten Tiefenbild: alle als verdeckt erkannten Objekte, die mit genau diesem Bild geprueft wurden
+		std::atomic<std::uint32_t> g_listSnapId{ 0 };  // 0 = keine Liste offen
+		std::uint32_t              g_listNumber = 0;
+		std::mutex                 g_listLock;
+		std::unordered_map<const void*, std::string> g_list;
+
+		std::string RefInfo(const RE::BSGeometry& a_geom)
+		{
+			for (const RE::NiAVObject* n = &a_geom; n; n = n->parent) {
+				if (const auto ref = n->GetUserData()) {
+					const auto base = ref->GetBaseObject();
+					return std::format("{:08X};{:08X};{}", ref->GetFormID(), base ? base->GetFormID() : 0u, n->name.c_str() ? n->name.c_str() : "");
+				}
+			}
+			return ";;";
+		}
+
+		void WriteList()
+		{
+			std::unordered_map<const void*, std::string> list;
+			{
+				std::scoped_lock l(g_listLock);
+				list.swap(g_list);
+			}
+			const auto dir = SKSE::log::log_directory();
+			if (!dir) {
+				return;
+			}
+			const auto    path = *dir / std::format("SPS_OcclusionHidden_{}.csv", g_listNumber);
+			std::ofstream f(path);
+			f << "culled;main;skinned;name;ref;base;node;cx;cy;cz;radius;sx;sy;depth;nearest;u0;u1;v0;v1;farMin;farMax\n";
+			for (const auto& [k, line] : list) {
+				f << line << "\n";
+			}
+			logger::info("[Occlusion] list of occluded objects for depth image {} saved: {} ({} objects)", g_listNumber, path.string(), list.size());
+		}
+
 		std::mutex                g_sampleLock;
 		std::vector<std::string>  g_samples;  // bis 12 weggelassene Objekte je Bericht  // Main-Thread: Frames ohne Weglassen wegen Kamerabewegung
 		Clock::time_point g_windowStart = Clock::now();
@@ -581,9 +618,22 @@ namespace Occlusion
 			newest->id = g_nextSnapshotId++;
 			g_current.store(std::move(newest));
 		}
+		if (const auto listId = g_listSnapId.load(); listId != 0) {
+			const auto cur = g_current.load();
+			if (!cur || cur->id != listId) {
+				g_listSnapId.store(0);
+				WriteList();
+			}
+		}
 		if (g_dumpRequest.exchange(false)) {
 			if (const auto cur = g_current.load()) {
 				DumpDepth(*cur);
+				g_listNumber = g_dumpCount;
+				{
+					std::scoped_lock l(g_listLock);
+					g_list.clear();
+				}
+				g_listSnapId.store(cur->id);
 			}
 		}
 		// Hauptbild = Accumulator mit den meisten Objekten in der letzten Sekunde
@@ -656,7 +706,20 @@ namespace Occlusion
 		if (skinned) {
 			s.occSkinned.fetch_add(a_draws, std::memory_order_relaxed);
 		}
-		if (cullOn && twice && snap->cam.gpu && g_cullAllowed.load(std::memory_order_relaxed)) {
+		const bool willCull = cullOn && twice && snap->cam.gpu && g_cullAllowed.load(std::memory_order_relaxed);
+		if (snap->id == g_listSnapId.load(std::memory_order_relaxed)) {
+			TestInfo    info;
+			Test(*snap, a_geom.worldBound, &info);
+			const auto& b = a_geom.worldBound;
+			auto        line = std::format("{};{};{};{};{};{:.0f};{:.0f};{:.0f};{:.0f};{:.3f};{:.3f};{:.0f};{:.0f};{};{};{};{};{:.0f};{:.0f}",
+					   willCull ? 1 : 0, isMain ? 1 : 0, skinned ? 1 : 0, a_geom.name.c_str() ? a_geom.name.c_str() : "", RefInfo(a_geom), b.center.x, b.center.y, b.center.z, b.radius,
+					   info.x, info.y, info.z, info.wn, info.u0, info.u1, info.v0, info.v1, info.zFarMin, info.zFarMax);
+			std::scoped_lock l(g_listLock);
+			if (g_list.size() < 20000) {
+				g_list.try_emplace(&a_geom, std::move(line));
+			}
+		}
+		if (willCull) {
 			s.culledDraws.fetch_add(a_draws, std::memory_order_relaxed);
 			{
 				std::scoped_lock l(g_sampleLock);
