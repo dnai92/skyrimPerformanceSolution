@@ -13,8 +13,9 @@ namespace Occlusion
 	// IDXGISwapChain::Present (Main-Thread): fertiges Ergebnis abholen, neuen Tiefenpuffer einreichen, Bericht
 	void OnPresent() noexcept;
 
-	// GetRenderPasses der Hauptszene: Objekt zaehlen (a_draws = Anzahl Render-Passes)
-	void CountMain(const RE::BSGeometry& a_geom, const void* a_accumulator, std::uint32_t a_draws) noexcept;
+	// GetRenderPasses der Hauptszene: Objekt zaehlen (a_draws = Anzahl Render-Passes).
+	// true = Objekt weglassen (Stufe 2: im Hauptbild zweimal hintereinander verdeckt, Kamera ruhig)
+	bool CountMain(const RE::BSGeometry& a_geom, const void* a_accumulator, std::uint32_t a_draws) noexcept;
 
 	// Ladebildschirm / Hauptmenue
 	void Reset() noexcept;

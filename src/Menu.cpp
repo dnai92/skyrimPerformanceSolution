@@ -341,6 +341,10 @@ namespace Menu
 				T("Counts how many objects in the main view are hidden behind the depth of the previous frame and writes it to SPS.log every minute. Nothing is left out.",
 					"Zählt, wie viele Objekte im Hauptbild hinter der Tiefe des vorigen Bildes verdeckt sind, und schreibt das jede Minute in SPS.log. Es wird nichts weggelassen."),
 				false);
+			AtomicToggle(T("Hide occluded objects (test)##occ", "Verdeckte Objekte weglassen (Test)##occ"), Config::occlusionCull,
+				T("Objects in the main view that were hidden in the last two frames are not drawn. Characters, shadows, reflections and water are never affected. Pauses while the camera moves fast. Watch for objects popping in. Follows the master switch (hotkey).",
+					"Objekte im Hauptbild, die in den letzten zwei Bildern verdeckt waren, werden nicht gezeichnet. Figuren, Schatten, Spiegelungen und Wasser sind nie betroffen. Pausiert bei schneller Kamerabewegung. Auf aufploppende Objekte achten. Folgt dem Hauptschalter (Taste)."),
+				false);
 
 			MenuApi::SeparatorText(T("Texture streaming: also include excluded types", "Textur-Streaming: ausgenommene Arten mit einbeziehen"));
 			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size.",

@@ -12,6 +12,8 @@ namespace Config
 	// Tiefenvorpass, 1 = Haupt-Tiefenpuffer). Nicht im Menue gespeichert.
 	inline std::atomic<bool>          occlusionProbe{ true };
 	inline std::atomic<std::uint32_t> occlusionDepthSource{ 0 };
+	// Stufe 2: verdeckte feste Objekte im Hauptbild weglassen. [Occlusion] bCull, Standard AUS, nicht im Menue gespeichert
+	inline std::atomic<bool>          occlusionCull{ false };
 
 	// Regel fuer das Kleinobjekt-Culling in einer Schattenkarte. Ein Mesh wird verworfen, wenn ALLE Bedingungen zutreffen.
 	struct CullRule

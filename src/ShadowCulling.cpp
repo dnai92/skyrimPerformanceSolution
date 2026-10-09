@@ -995,7 +995,9 @@ namespace ShadowCulling
 					for (auto p = passes->head; p && draws < 64; p = p->next) {
 						++draws;
 					}
-					Occlusion::CountMain(*a_geometry, a_accumulator, draws);
+					if (Occlusion::CountMain(*a_geometry, a_accumulator, draws)) {
+						passes->Clear();
+					}
 				}
 				return passes;
 			}
