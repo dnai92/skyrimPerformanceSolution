@@ -49,6 +49,19 @@ namespace TextureStream
 	// false = noch zu wenig gespielt; a_jumpMB = groesster Anstieg innerhalb von 3 s
 	bool ReserveRecommendation(float& a_recommendMB, float& a_jumpMB);
 
+	// Debug (Menue, nicht gespeichert): sonst ausgenommene Texturarten testweise mit verkleinern. Wirkt beim naechsten
+	// Durchlauf; wieder ausgeschlossene, verkleinerte Texturen werden voll geladen
+	enum DebugInclude : std::uint32_t
+	{
+		kIncludeLod = 1 << 0,       // \lod\, terrain\ (Ferndarstellung, Gelaende-LOD)
+		kIncludeEffects = 1 << 1,   // effects\ (Feuer, Magie, Leuchten)
+		kIncludeBooks = 1 << 2,     // book (Buecher, auch Buecherregale)
+		kIncludeSky = 1 << 3,       // \sky\ (Himmel, Wolken)
+		kIncludeCubemaps = 1 << 4,  // cubemaps\ (Reflexionen)
+	};
+	void          SetDebugInclude(std::uint32_t a_mask) noexcept;
+	std::uint32_t GetDebugInclude() noexcept;
+
 	// Ruckler-Protokoll: was das Streaming seit dem letzten Abruf getan hat (Main-Thread, einmal pro Frame)
 	struct FrameActivity
 	{

@@ -202,6 +202,7 @@ namespace TextureStream
 			FormatInfo                         fi;
 			Probe                              probe = Probe::kNone;
 			bool                               eligible = false;
+			bool                               eligibleBase = false;  // ohne Ausschlussliste (Debug-Schalter koennen sie aendern)
 			bool                               busy = false;  // Auftrag laeuft
 			std::uint32_t                      passId = 0;    // zuletzt gesehen in Durchlauf
 			std::uint32_t                      skinPass = 0;  // zuletzt an einer Figur (geskinnt) gesehen - bleibt immer voll
@@ -230,6 +231,8 @@ namespace TextureStream
 				return m;
 			}
 			bool Reduced() const noexcept { return CurEdge() < LimitEdge(); }
+			// durch die Obergrenze aus dem Menue kleiner als Datei / fremde Obergrenze (im Bericht getrennt gezaehlt)
+			bool CapReduced() const noexcept { return g_userCap && !Reduced() && CurEdge() < (extCap ? std::min(FullEdge(), extCap) : FullEdge()); }
 		};
 
 		std::unordered_map<RE::BSGraphics::Texture*, TexState> g_tex;
@@ -842,9 +845,22 @@ namespace TextureStream
 
 		// ---------------- Main-Thread-Logik ----------------
 
-		std::vector<std::string> g_excludeTokens;
-		std::string              g_excludeSource;
+		std::vector<std::pair<std::string, std::uint32_t>> g_excludeTokens;  // Pfadteil, Debug-Kategorie (0 = immer)
+		std::string                                        g_excludeSource;
+		std::atomic<std::uint32_t>                         g_debugInclude{ 0 };
+		std::uint32_t                                      g_appliedInclude = 0;  // im Durchlauf zuletzt angewendet (Main-Thread)
 
+		std::uint32_t CategoryOf(std::string_view a_tok) noexcept
+		{
+			if (a_tok.find("lod") != std::string_view::npos || a_tok.find("terrain") != std::string_view::npos) return kIncludeLod;
+			if (a_tok.find("effects") != std::string_view::npos) return kIncludeEffects;
+			if (a_tok.find("book") != std::string_view::npos) return kIncludeBooks;
+			if (a_tok.find("sky") != std::string_view::npos) return kIncludeSky;
+			if (a_tok.find("cubemaps") != std::string_view::npos) return kIncludeCubemaps;
+			return 0;
+		}
+
+		// Main-Thread (und Plugin-Start). Die Debug-Schalter heben einzelne Kategorien auf
 		bool Excluded(const std::string& a_path)
 		{
 			const auto& cfg = Config::textureStream.exclude;
@@ -859,7 +875,8 @@ namespace TextureStream
 					std::erase(tok, ' ');
 					// Figuren-Pfad steuert der eigene Schalter (bStreamCharacters), nicht die Ausschlussliste
 					if (!tok.empty() && tok != "actors\\character\\") {
-						g_excludeTokens.push_back(std::move(tok));
+						const auto cat = CategoryOf(tok);
+						g_excludeTokens.emplace_back(std::move(tok), cat);
 					}
 					if (end == std::string::npos) {
 						break;
@@ -867,7 +884,8 @@ namespace TextureStream
 					pos = end + 1;
 				}
 			}
-			return std::ranges::any_of(g_excludeTokens, [&](const std::string& t) { return a_path.find(t) != std::string::npos; });
+			const auto include = g_debugInclude.load(std::memory_order_relaxed);
+			return std::ranges::any_of(g_excludeTokens, [&](const auto& t) { return !(t.second & include) && a_path.find(t.first) != std::string::npos; });
 		}
 
 		// Koerper, Gesichter, Haare (textures\actors\character\...)
@@ -1281,8 +1299,9 @@ namespace TextureStream
 					st.format = static_cast<std::uint32_t>(d.format);
 					st.fi = InfoOf(st.format);
 					st.path = NormalizePath(a_src->name.c_str());
-					st.eligible = d.arraySize == 1 && d.sampleDesc.count == 1 && !(d.miscFlags & 0x4) && d.mipLevels > 1 && st.fi.bytes > 0 &&
-					              st.path.starts_with("textures\\") && st.path.ends_with(".dds") && !Excluded(st.path) && IsFileTexture(r);
+					st.eligibleBase = d.arraySize == 1 && d.sampleDesc.count == 1 && !(d.miscFlags & 0x4) && d.mipLevels > 1 && st.fi.bytes > 0 &&
+					                  st.path.starts_with("textures\\") && st.path.ends_with(".dds") && IsFileTexture(r);
+					st.eligible = st.eligibleBase && !Excluded(st.path);
 					st.ours = ReducedByUsAtLoad(st.res);
 					// Datei in dieser Sitzung schon geprueft -> sofort einordnen, sonst bei evtl. verkleinertem Laden (Stufe 3)
 					// die Originalgroesse aus der Datei holen, damit ein naheliegendes Objekt gleich wieder voll wird
@@ -1414,7 +1433,9 @@ namespace TextureStream
 
 		void LogFail(const std::string& a_path, const std::string& a_err)
 		{
-			if (g_failLogged < 30) {
+			// je Datei einmal pro Sitzung (dieselben Gesichtstexturen standen nach jedem Laden erneut im Log)
+			static std::unordered_set<std::string> logged;
+			if (g_failLogged < 30 && logged.insert(a_path).second) {
 				++g_failLogged;
 				logger::info("[TextureStream] cannot be downscaled: {} ({})", a_path, a_err);
 			}
@@ -1767,11 +1788,34 @@ namespace TextureStream
 			const bool calm = now - g_lastPressure >= kRefillCalm && now - g_lastLoad >= kRefillCalm;
 			const bool wantRefill = active && cfg.budgetMode && cfg.refill && calm && pct >= 0.0f && freeMB >= cfg.reserveMB + cfg.refillGapMB &&
 			                        !SharedRising(30s);
+			// Debug-Schalter fuer ausgenommene Texturarten geaendert: Eignung neu bestimmen. Wieder ausgenommene Pfade nicht
+			// mehr gemerkt verkleinert laden (die Lade-Threads pruefen die Ausschlussliste nicht)
+			if (const auto include = g_debugInclude.load(std::memory_order_relaxed); include != g_appliedInclude) {
+				const bool narrowed = (g_appliedInclude & ~include) != 0;
+				g_appliedInclude = include;
+				std::uint32_t changed = 0;
+				for (auto& [r, st] : g_tex) {
+					const bool e = st.eligibleBase && !Excluded(st.path);
+					changed += e != st.eligible;
+					st.eligible = e;
+				}
+				if (narrowed) {
+					std::scoped_lock lock(g_sizeLock);
+					g_sizesDirty |= std::erase_if(g_loadEdge, [](const auto& a_e) { return Excluded(a_e.first); }) > 0;
+					std::erase_if(g_capLoadEdge, [](const auto& a_e) { return Excluded(a_e.first); });
+				}
+				logger::info("[TextureStream] debug: included texture types 0x{:X} - {} textures changed eligibility", include, changed);
+			}
 			g_reducedCount = 0;
 			for (auto it = g_tex.begin(); it != g_tex.end(); ++it) {
 				auto&      st = it->second;
 				const auto r = it->first;
 				const bool seen = st.passId == g_passId;
+				// per Debug-Schalter wieder ausgenommen, aber noch verkleinert: voll laden
+				if (!st.eligible && st.eligibleBase && !st.busy && st.hold && st.probe == Probe::kOk && st.CurEdge() < st.LimitEdge()) {
+					QueueReload(st, r, st.LimitEdge());
+					continue;
+				}
 				if (st.Reduced()) {
 					++g_reducedCount;
 				}
@@ -1789,7 +1833,13 @@ namespace TextureStream
 				if (st.eligible && !st.busy) {
 					if (st.Reduced() && st.hold && st.probe == Probe::kOk && (!active || (seen && WantedEdge(st, st.passNeed / UpMargin()) > st.CurEdge()))) {
 						QueueReload(st, r, active ? UpTarget(WantedEdge(st, st.passNeed), st.LimitEdge()) : st.LimitEdge());
-					} else if (active && seen && g_userCap && st.CurEdge() > g_userCap && st.hold && st.probe != Probe::kPending && st.probe != Probe::kBad &&
+					} else if (st.Reduced() && st.hold && st.probe == Probe::kNone) {
+						// verkleinert, aber Datei nie geprueft: ohne Pruefung wird nie wieder voll geladen (1.0.48: Obergrenze
+						// verkleinerte ungeprueft, nach "unbegrenzt" blieben nahe Boeden in Weisslauf auf 1K)
+						QueueProbe(st, r);
+					} else if (active && seen && g_userCap && st.CurEdge() > g_userCap && st.hold && st.probe == Probe::kNone) {
+						QueueProbe(st, r);  // Obergrenze erst nach der Datei-Pruefung (sonst kein Weg zurueck)
+					} else if (active && seen && g_userCap && st.CurEdge() > g_userCap && st.hold && st.probe == Probe::kOk &&
 					           !(IsCharacterPath(st.path) ? !cfg.streamCharacters : (st.skinPass == g_passId && !cfg.streamClothing))) {
 						// Obergrenze aus dem Menue: sofort, unabhaengig vom VRAM
 						st.busy = true;
@@ -1980,19 +2030,26 @@ namespace TextureStream
 
 		void ReportCompact()
 		{
-			std::uint32_t reduced = 0;
-			double        savedMB = 0;
+			std::uint32_t reduced = 0, capped = 0;
+			double        savedMB = 0, cappedMB = 0;
 			for (const auto& [r, st] : g_tex) {
-				if (st.Reduced()) {
+				const bool red = st.Reduced(), cap = st.CapReduced();
+				if (red || cap) {
+					const double mb = (ChainBytes(st.fi, st.fullW, st.fullH, st.fullMips) - ChainBytes(st.fi, st.curW, st.curH, st.curMips)) / 1048576.0;
 					++reduced;
-					savedMB += (ChainBytes(st.fi, st.fullW, st.fullH, st.fullMips) - ChainBytes(st.fi, st.curW, st.curH, st.curMips)) / 1048576.0;
+					savedMB += mb;
+					if (cap) {
+						++capped;
+						cappedMB += mb;
+					}
 				}
 			}
 			const auto& s = g_stats;
-			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, paged out {:.0f} MB) | downscaled {} textures, {:.0f} MB saved | last minute: "
+			const auto  capText = g_userCap ? std::format(" (by max. size {}: {}, {:.0f} MB)", g_userCap, capped, cappedMB) : std::string{};
+			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, paged out {:.0f} MB) | downscaled {} textures, {:.0f} MB saved{} | last minute: "
 						 "downscaled {}, reloaded {} ({:.0f} MB), ping-pong {}, refilled {}, loaded reduced {}, from RAM {}, load errors {}",
 				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_procShared.load() / 1048576.0, reduced,
-				savedMB, s.downs, s.ups, s.upMB, s.pingPong, s.refills, g_loadedReduced.exchange(0), g_cacheHits.exchange(0), s.upFails);
+				savedMB, capText, s.downs, s.ups, s.upMB, s.pingPong, s.refills, g_loadedReduced.exchange(0), g_cacheHits.exchange(0), s.upFails);
 			g_cacheMisses.exchange(0);
 			g_diagCreate.exchange(0);
 			g_diagDDS.exchange(0);
@@ -2226,6 +2283,9 @@ namespace TextureStream
 		a_recommendMB = std::clamp(static_cast<float>(std::ceil(g_maxJumpMB * 1.25 / 256.0) * 256.0), 512.0f, 6144.0f);
 		return g_measuredPlay >= 3min;
 	}
+
+	void SetDebugInclude(std::uint32_t a_mask) noexcept { g_debugInclude.store(a_mask, std::memory_order_relaxed); }
+	std::uint32_t GetDebugInclude() noexcept { return g_debugInclude.load(std::memory_order_relaxed); }
 
 	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget)
 	{

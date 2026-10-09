@@ -1,4 +1,4 @@
-﻿#include "Menu.h"
+#include "Menu.h"
 
 #include "Config.h"
 #include "Features.h"
@@ -297,6 +297,28 @@ namespace Menu
 			}
 			Tip(T("Deletes SPS_User.ini and reloads the defaults from SPS.ini (takes up to 2 s).",
 				"Löscht SPS_User.ini und lädt die Standardwerte aus SPS.ini (dauert bis zu 2 s)."));
+			if (Config::analysis.load()) {
+				MenuApi::TextWrapped("%s", T("Analysis logging is active (page Debug) and costs 2-4 ms per frame. Switch it off for normal play and FPS comparisons.",
+												"Das Analyse-Protokoll ist aktiv (Seite Debug) und kostet 2-4 ms pro Bild. Für normales Spielen und FPS-Vergleiche ausschalten."));
+			}
+		}
+
+		// Debug: nichts davon wird gespeichert, nach jedem Spielstart ist alles aus
+		void DebugInclude(const char* a_label, std::uint32_t a_bit, const char* a_tip)
+		{
+			const auto mask = TextureStream::GetDebugInclude();
+			bool       v = (mask & a_bit) != 0;
+			if (MenuApi::Checkbox(a_label, &v)) {
+				TextureStream::SetDebugInclude(v ? (mask | a_bit) : (mask & ~a_bit));
+			}
+			Tip(a_tip);
+		}
+
+		void __stdcall RenderDebug()
+		{
+			MenuApi::TextWrapped("%s", T("For troubleshooting and tests. Nothing on this page is saved, everything is off again after a restart.",
+											"Für Fehlersuche und Tests. Nichts auf dieser Seite wird gespeichert, nach einem Neustart ist alles wieder aus."));
+			MenuApi::SeparatorText(T("Logging", "Protokoll"));
 			if (AtomicToggle(T("Analysis logging (costs performance)", "Analyse-Protokoll (kostet Leistung)"), Config::analysis,
 					T("Extra diagnostics in SPS.log (incl. detailed texture streaming report every 10 s). Costs 2-4 ms per frame - only for troubleshooting. Not saved - always starts OFF.",
 						"Zusätzliche Diagnose in SPS.log (inkl. ausführlichem Textur-Streaming-Bericht alle 10 s). Kostet 2-4 ms pro Frame - nur zur Fehlersuche. Wird nicht gespeichert - startet immer AUS."),
@@ -308,6 +330,32 @@ namespace Menu
 				MenuApi::TextWrapped("%s", T("Analysis logging is active and costs 2-4 ms per frame. Switch it off for normal play and FPS comparisons.",
 												"Das Analyse-Protokoll ist aktiv und kostet 2-4 ms pro Bild. Für normales Spielen und FPS-Vergleiche ausschalten."));
 			}
+			if (MenuApi::Button(T("Log textures under crosshair##dbg", "Texturen unter dem Fadenkreuz protokollieren##dbg"))) {
+				TextureStream::RequestCenterProbe();
+			}
+			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
+				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
+
+			MenuApi::SeparatorText(T("Texture streaming: also include excluded types", "Textur-Streaming: ausgenommene Arten mit einbeziehen"));
+			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size.",
+											"Diese Texturarten werden normalerweise nie verkleinert. Häkchen setzen, um live zu sehen, wie sie sich verhalten, am besten zusammen mit einer kleinen max. Texturgröße (1K). Häkchen weg, dann kommen sie wieder in voller Größe."));
+			DebugInclude(T("Distant terrain and LOD##dbg", "Ferne Landschaft und LOD##dbg"), TextureStream::kIncludeLod,
+				T("Paths with \\lod\\ or terrain\\. Distant ground, mountains and simplified objects far away.",
+					"Pfade mit \\lod\\ oder terrain\\. Ferner Boden, Berge und vereinfachte Objekte in der Ferne."));
+			DebugInclude(T("Effects##dbg", "Effekte##dbg"), TextureStream::kIncludeEffects,
+				T("textures\\effects\\. Fire, magic, glow, smoke. Effects drawn with the effect shader are not covered at all.",
+					"textures\\effects\\. Feuer, Magie, Leuchten, Rauch. Effekte mit eigenem Effekt-Shader werden gar nicht erfasst."));
+			DebugInclude(T("Books##dbg", "Bücher##dbg"), TextureStream::kIncludeBooks,
+				T("Every path containing 'book', also bookshelves. Excluded so text stays readable.",
+					"Alle Pfade mit 'book', auch Bücherregale. Ausgenommen, damit Schrift lesbar bleibt."));
+			DebugInclude(T("Sky##dbg", "Himmel##dbg"), TextureStream::kIncludeSky,
+				T("Paths with \\sky\\. Clouds, moons, stars - most use their own shader and are not covered.",
+					"Pfade mit \\sky\\. Wolken, Monde, Sterne - die meisten haben einen eigenen Shader und werden nicht erfasst."));
+			DebugInclude(T("Reflections (cubemaps)##dbg", "Reflexionen (Cubemaps)##dbg"), TextureStream::kIncludeCubemaps,
+				T("cubemaps\\. Real cube maps can never be downscaled, only flat textures in this folder.",
+					"cubemaps\\. Echte Würfelkarten lassen sich nie verkleinern, nur flache Texturen in diesem Ordner."));
+			MenuApi::TextWrapped("%s", T("Not possible at all: grass, water and effect shader textures (other shaders), textures without mipmaps.",
+											"Gar nicht möglich: Gras, Wasser und Effekt-Shader-Texturen (andere Shader), Texturen ohne Mipmaps."));
 		}
 
 		void __stdcall RenderShadows()
@@ -528,8 +576,8 @@ namespace Menu
 				T("Overview > Experimental switches (both off by default)", "Übersicht > Experimentelle Schalter (beide standardmäßig aus)"));
 
 			MenuApi::SeparatorText(T("Reporting a bug", "Fehler melden"));
-			MenuApi::TextWrapped("%s", T("Please attach SPS.log (Documents\My Games\Skyrim Special Edition\SKSE) and say where it happened and which switch makes it go away.",
-											"Bitte SPS.log anhängen (Dokumente\My Games\Skyrim Special Edition\SKSE) und sagen, wo es passiert ist und welcher Schalter es behebt."));
+			MenuApi::TextWrapped("%s", T("Please attach SPS.log (Documents\\My Games\\Skyrim Special Edition\\SKSE) and say where it happened and which switch makes it go away.",
+											"Bitte SPS.log anhängen (Dokumente\\My Games\\Skyrim Special Edition\\SKSE) und sagen, wo es passiert ist und welcher Schalter es behebt."));
 		}
 	}
 
@@ -550,6 +598,7 @@ namespace Menu
 		MenuApi::AddSectionItem(kSection + T("Shadows", "Schatten"), RenderShadows);
 		MenuApi::AddSectionItem(kSection + T("Lights and scene", "Licht und Szene"), RenderScene);
 		MenuApi::AddSectionItem(kSection + T("Help with visual issues", "Hilfe bei Bildfehlern"), RenderHelp);
+		MenuApi::AddSectionItem(kSection + "Debug", RenderDebug);
 		logger::info("Menu registered in SKSE Menu Framework (version {:.1f})", MenuApi::Version());
 	}
 }
