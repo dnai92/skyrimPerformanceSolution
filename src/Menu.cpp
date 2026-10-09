@@ -467,10 +467,17 @@ namespace Menu
 			Toggle(T("Refill VRAM when there is room##ts", "VRAM wieder auffüllen, wenn Platz ist##ts"), Config::textureStream.refill,
 				T("When clearly more than the reserve is free, downscaled textures are reloaded at full size again (most needed first).",
 					"Ist deutlich mehr als der Puffer frei, werden verkleinerte Texturen wieder voll geladen (die meistgebrauchten zuerst)."));
-			if (Slider(T("Refill when this much more is free (MB)##ts", "Auffüllen, wenn so viel mehr frei ist (MB)##ts"), Config::textureStream.refillGapMB, 256.0f, 4096.0f, "%.0f",
-					T("Downscaled textures are reloaded at full size when this much more than the reserve is free. Gap between downscaling and refilling, so textures do not go back and forth.",
-						"Verkleinerte Texturen werden wieder voll geladen, wenn so viel mehr als der Puffer frei ist. Abstand zwischen Verkleinern und Auffüllen, damit Texturen nicht hin und her wechseln."))) {
-				Config::textureStream.refillGapMB = std::round(Config::textureStream.refillGapMB / 64.0f) * 64.0f;
+			{
+				int  step = std::clamp(static_cast<int>(std::lround(Config::textureStream.refillGapMB / 256.0f)), 1, 16);
+				const auto text = std::format("{} MB", step * 256);
+				float      v = static_cast<float>(step);
+				if (MenuApi::SliderFloat(T("Refill when this much more is free##ts", "Auffüllen, wenn so viel mehr frei ist##ts"), &v, 1.0f, 16.0f, text.c_str())) {
+					step = std::clamp(static_cast<int>(std::lround(v)), 1, 16);
+					Config::textureStream.refillGapMB = step * 256.0f;
+					Config::MarkDirty();
+				}
+				Tip(T("Downscaled textures are reloaded at full size when this much more than the reserve is free. Gap between downscaling and refilling, so textures do not go back and forth.",
+					"Verkleinerte Texturen werden wieder voll geladen, wenn so viel mehr als der Puffer frei ist. Abstand zwischen Verkleinern und Auffüllen, damit Texturen nicht hin und her wechseln."));
 			}
 			Slider(T("RAM buffer (MB)##ts", "RAM-Puffer (MB)##ts"), Config::textureStream.ramCacheMB, 0.0f, 8192.0f, "%.0f",
 				T("Texture data that was reloaded stays in RAM up to this size, so the next reload needs no disk access. Least recently used is dropped first. 0 = off.",
