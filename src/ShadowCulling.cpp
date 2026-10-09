@@ -985,9 +985,14 @@ namespace ShadowCulling
 		{
 			static RE::BSShaderProperty::RenderPassArray* thunk(RE::BSLightingShaderProperty* a_this, RE::BSGeometry* a_geometry, std::uint32_t a_renderFlags, RE::BSShaderAccumulator* a_accumulator)
 			{
+				// Die Liste gehoert der Property und wird ueber lastRenderPassState zwischengespeichert: das Original baut sie
+				// nur neu, wenn sich der Zustand (z. B. Lichter) aendert. Geleert bliebe das Objekt auch spaeter ohne
+				// Beleuchtungs-Draws (graue Silhouette, bis es nah herankommt) -> leere Liste nur fuer diesen Aufruf zurueckgeben.
+				thread_local RE::BSShaderProperty::RenderPassArray empty{ nullptr, 0 };
 				const auto passes = func(a_this, a_geometry, a_renderFlags, a_accumulator);
 				if (passes && passes->head && a_geometry && ShouldCullMain(*a_geometry)) {
-					passes->Clear();
+					empty.head = nullptr;
+					return &empty;
 				}
 				return passes;
 			}
