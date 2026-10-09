@@ -1,38 +1,34 @@
 [center][size=6][b]Skyrim Performance Solution (SPS)[/b][/size]
-[i]Flüssigeres Skyrim bei stark gemoddeten Spielen – ohne eine einzige Spieldatei zu verändern.[/i][/center]
+[i]Flüssigeres Skyrim bei stark gemoddeten Spielen[/i][/center]
+
+Hallo zusammen, mein gemoddetes Skyrim mit vielen Textur-Mods hatte Leistungsprobleme. Deshalb dachte ich mir, dass bei so einem alten Spiel noch mehr aus der Engine herauszuholen sein muss. Leider kann ich selbst kein C++, also habe ich mit meinem Claude-AI-Konto über ein paar Abende, viele Tests und unzählige Stunden eine Mod genau so bauen lassen, wie ich sie haben wollte. Ich bin selbst kein Fan von „Vibe Coding“, aber das funktioniert überraschend gut.
+
+Mit meiner Modliste läuft das Spiel deutlich flüssiger. Vor allem die Nachlade-Ruckler beim Umdrehen sind verschwunden, besonders spürbar war das am Markt in Weißlauf. Dank des neuen Textur-Streamings konnte ich sogar 8K-Texturen nutzen oder testen, wie es auf meinem Steam Deck läuft.
+
+Ursprünglich habe ich die Mod für mich gebaut, weil ich Skyrim einfach nicht weglegen kann. Da ich selbst gern die Mods anderer spiele und ihre Arbeit schätze, möchte ich diese Mod als Dankeschön zurückgeben.
+
+Schreib gern in die Kommentare, wie es bei dir läuft und ob dir Fehler auffallen.
+
+Bitte lade die Mod nicht auf anderen Seiten hoch, sondern verlinke auf diese Seite. Wer SPS verändert oder weiterverwendet, für den gilt die GPL-3.0: mich nennen und den eigenen Quellcode unter derselben Lizenz veröffentlichen.
 
 [size=5][b]Beschreibung[/b][/size]
-SPS ist ein SKSE-Plugin für [b]Skyrim SE 1.5.97 und AE 1.6.x / 1.7.x[/b], das dem Spiel unnötige Arbeit abnimmt.
+SPS ist ein SKSE-Plugin für [b]Skyrim SE 1.5.97 und AE 1.6.x / 1.7.x[/b], das dem Spiel unnötige Arbeit abnimmt. Für [b]Skyrim VR 1.4.15[/b] gibt es eine eigene Datei (Beta, Textur-Streaming und Schatten kleiner Objekte).
 
-Stark gemoddete Spiele mit 4K-/8K-Texturen haben in Städten und Innenräumen oft zu wenig Grafikspeicher. Läuft der VRAM über, lagert Windows Daten in den Arbeitsspeicher aus, und das Spiel ruckelt. SPS [b]passt die Texturgröße an die Entfernung an[/b]: Ferne und verdeckte Objekte bekommen kleinere Texturen, nahe Objekte immer volle Qualität. Dazu [b]spart es Draw-Calls in den Schattendurchläufen[/b] und [b]streicht überflüssige Arbeit der Engine[/b].
+Stark gemoddete Spiele mit 4K-/8K-Texturen haben in Städten und Innenräumen oft zu wenig Grafikspeicher. Läuft der VRAM über, lagert Windows Daten in den Arbeitsspeicher aus, und das Spiel ruckelt. SPS [b]passt die Texturgröße an die Entfernung an[/b]: Ferne und verdeckte Objekte bekommen kleinere Texturen, nahe Objekte volle Qualität (außer du stellst eine maximale Texturgröße ein). Dazu [b]spart es Draw-Calls in den Schattendurchläufen[/b] und [b]streicht überflüssige Arbeit der Engine[/b].
 
-Auf der Platte wird nichts verändert, im Spielstand wird nichts gespeichert. Alles lässt sich im Spiel über ein Menü (Deutsch / Englisch, folgt der Spielsprache) und mit einer Taste umschalten – so kannst du jederzeit mit und ohne SPS vergleichen.
+Auf der Platte wird nichts verändert, im Spielstand wird nichts gespeichert. Alles lässt sich im Spiel über ein Menü (Deutsch / Englisch, folgt der Spielsprache) und mit einer Taste umschalten, so kannst du jederzeit mit und ohne SPS vergleichen.
 
-[b]Messwerte[/b] (Ryzen 7 5700X, RTX 4070 12 GB, 1920x1200, ~380 Plugins, Community Shaders mit DLSS + Frame Generation, 4K-Texturen)
-
-[i]Drachenfeste, VRAM voll (Taste AUS gegen AN):[/i]
-[list]
-[*]VRAM-Belegung: 95–98 % → [b]72 %[/b]
-[*]In den Arbeitsspeicher ausgelagert: bis 1,2 GB → [b]~50 MB[/b]
-[*]FPS: 27–33 → [b]41–42[/b]
-[*]Längster Frame: Ruckler mit 190–280 ms → [b]~35 ms[/b]
-[/list]
-[i]Weißlauf-Markt:[/i]
-[list]
-[*]VRAM von Skyrim: ~10,5 GB (+600 MB ausgelagert) → [b]5,4 GB[/b]
-[*]~1.300 ferne Texturen: [b]0,33 GB statt 7–8 GB[/b], im A/B-Vergleich kein sichtbarer Unterschied
-[*]Licht-Zuordnung: 2,45 ms → [b]0,15 ms[/b] pro Frame
-[*]Alle Draw-Call-Optimierungen zusammen: [b]−26 % Draw-Calls[/b]
-[/list]
-[i]40-Minuten-Sitzung:[/i] 0 Ladefehler bei Texturen, VRAM 70–82 % im normalen Spiel.
+[size=5][b]Was du erwarten kannst[/b][/size]
+SPS hilft am meisten, wenn der VRAM voll läuft: 4K-/8K-Texturpakete, Karten mit 8 GB, Städte wie Weißlauf. Dort verschwinden die Ruckler durch Auslagern in den Arbeitsspeicher, und die FPS steigen oft. Ist dein Spiel durch die CPU begrenzt (viele NPCs, Physik-Mods wie FSMP oder CBPC), ist der FPS-Gewinn klein. SPS selbst braucht etwa 0,4 ms pro Frame.
 
 [size=5][b]Hauptfunktionen[/b][/size]
 [b]Textur-Streaming[/b]
 [list]
-[*][b]Texturgröße nach Entfernung[/b] – Texturen ferner Objekte (auch hinter dir) werden im VRAM verkleinert und bei Annäherung im Hintergrund in voller Größe neu geladen. Menüs, Karten, LOD, Schriften und Bücher sind ausgenommen.
-[*][b]VRAM-Budget[/b] – Greift nur, wenn das Spiel mehr als 85 % des Grafikspeichers belegt, den Windows ihm zuteilt. Mit genug VRAM passiert nichts und es kostet nichts.
-[*][b]VRAM auffüllen[/b] – Ist wieder Platz, werden verkleinerte Texturen wieder voll geladen, die meistgebrauchten zuerst.
-[*][b]Gleich in gemerkter Größe laden[/b] – Texturen werden direkt in der zuletzt benötigten Größe geladen (auch über Spielsitzungen und Ladebildschirme hinweg), dadurch keine VRAM-Spitze mehr nach Türen.
+[*][b]Texturgröße nach Entfernung[/b] – Texturen ferner Objekte (auch hinter dir) werden im VRAM verkleinert und bei Annäherung im Hintergrund in voller Größe neu geladen. Menüs, Karten, LOD, Schriften, Bücher, Effekte und Himmel sind ausgenommen.
+[*][b]VRAM-Budget[/b] – Greift nur, wenn vom Grafikspeicher, den Windows dem Spiel zuteilt, weniger als 1024 MB frei sind (in 256-MB-Stufen einstellbar). Nach ein paar Minuten Spielzeit schlägt das Menü einen Wert für dein System vor. Mit genug VRAM passiert nichts und es kostet nichts.
+[*][b]VRAM auffüllen[/b] – Ist wieder Platz, werden verkleinerte Texturen wieder voll geladen, die meistgebrauchten zuerst, ohne den Puffer zu überschreiten.
+[*][b]Maximale Texturgröße[/b] – Obergrenze 1K / 2K / 4K / 8K / unbegrenzt für alle gestreamten Texturen, unabhängig von der VRAM-Belegung. Nützlich für schwächere Grafikkarten oder das Steam Deck.
+[*][b]Gleich in gemerkter Größe laden[/b] – Texturen werden direkt in der zuletzt benötigten Größe geladen (auch über Spielsitzungen und Ladebildschirme hinweg), dadurch weniger VRAM-Spitzen beim Betreten bekannter Gebiete.
 [*][b]Kleidung und Rüstung von Figuren[/b] – Auch bei fernen NPCs gestreamt, der Abstand wird an der Figur selbst gemessen (am vollen Markt rund 1 GB weniger VRAM). Körper, Gesichter und Haare lassen sich im Menü dazuschalten (Test-Option, aus).
 [*][b]RAM-Puffer[/b] – Texturen, die mehrfach neu geladen werden, bleiben im Arbeitsspeicher (Standard 1 GB, einstellbar, 0 = aus). Vor allem mit 8K-Texturen nützlich.
 [/list]
@@ -40,7 +36,7 @@ Auf der Platte wird nichts verändert, im Spielstand wird nichts gespeichert. Al
 [list]
 [*][b]Sonnenschatten kleiner Objekte weglassen[/b] – kleine, ferne Objekte werfen keinen Sonnenschatten (abhängig vom Sonnenstand).
 [*][b]Fackelschatten kleiner Objekte weglassen[/b] – kleine, ferne Objekte werfen keinen Fackel-/Feuerschatten. Objekte nahe am Licht behalten ihn; in Innenräumen standardmäßig aus.
-[*][b]Schatten fester Lichter zwischenspeichern[/b] – Schatten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt; jedes Bild werden nur Figuren und Bewegliches neu gezeichnet. Flackernde Lichter werden immer neu gezeichnet. Vor allem für Innenräume mit vielen Lichtern. Nur AE.
+[*][b]Schatten fester Lichter zwischenspeichern[/b] – Schatten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt, jedes Bild werden nur Figuren und Bewegliches neu gezeichnet. Flackernde Lichter werden immer neu gezeichnet. Vor allem für Innenräume mit vielen Lichtern. Nur AE.
 [*][b]Figurenschatten in der Ferne weglassen[/b] – Figuren werfen ab 50 m (einstellbar) keinen Schatten.
 [*][b]Himmelslicht[/b] – kleine Objekte werden in der Himmelslicht-Karte von Community Shaders weggelassen.
 [*][b]Ferne Bodendetails weglassen[/b] – Decals in Fußabdruck-Größe werden ab ~21 m nicht gezeichnet.
@@ -53,10 +49,11 @@ Auf der Platte wird nichts verändert, im Spielstand wird nichts gespeichert. Al
 [/list]
 [b]Komfort[/b]
 [list]
-[*]Menü im Spiel mit allen Schaltern und Reglern, wird automatisch gespeichert.
+[*]Menü im Spiel mit einer Seite je Funktionsgruppe, wird automatisch gespeichert.
+[*]Hilfeseite im Menü: welcher Schalter bei welchem Bildfehler hilft.
 [*]Taste [b]Bild auf[/b] (im Menü frei belegbar) schaltet alle Optimierungen für den Vergleich an und aus.
 [*]Jeder Eingriff prüft beim Start den Spielcode – bei unbekannter Spielversion oder einer Mod an derselben Stelle wird nur diese Funktion abgeschaltet und im Menü und Log angezeigt.
-[*]Knopf [i]Texturen unter dem Fadenkreuz protokollieren[/i] für Fehlerberichte.
+[*]Debug-Seite (wird nie gespeichert, nach jedem Start ist alles aus): Analyse-Protokoll, [i]Texturen unter dem Fadenkreuz protokollieren[/i] für Fehlerberichte, Test-Schalter für sonst ausgenommene Texturarten.
 [/list]
 
 [size=5][b]Voraussetzungen[/b][/size]
@@ -67,9 +64,15 @@ Auf der Platte wird nichts verändert, im Spielstand wird nichts gespeichert. Al
 [*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/120352]SKSE Menu Framework[/url] – Menü im Spiel (ohne es über [i]SPS.ini[/i])
 [*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/86492]Community Shaders[/url] – die Himmelslicht-Funktion wirkt nur mit CS
 [/list]
-VR und SE-Versionen vor 1.5.97 werden nicht unterstützt.
+[b]Skyrim VR 1.4.15:[/b] die eigene VR-Datei verwenden. Sie braucht SKSEVR und die [url=https://www.nexusmods.com/skyrimspecialedition/mods/58101]VR Address Library[/url], Einstellungen über [i]SPS.ini[/i]. SE-Versionen vor 1.5.97 werden nicht unterstützt.
 
 [b]SE-1.5.97-Tester gesucht![/b] Die SE-Version ist am Spielcode geprüft, aber noch nicht im Spiel getestet. Rückmeldungen sind sehr willkommen – bitte [i]Dokumente\My Games\Skyrim Special Edition\SKSE\SPS.log[/i] anhängen.
+
+[size=5][b]Kompatibilität[/b][/size]
+Mit den meisten Mods kompatibel, weil keine Spieldateien verändert werden.
+[list]
+[*][b]Texture Downscaler[/b] funktioniert zusammen mit SPS. Texturen, die er kleiner lädt, behalten diese Größe, SPS verkleinert nur weiter, wenn der VRAM knapp wird. Soll Texture Downscaler die Texturen allein regeln, im Menü das Textur-Streaming ausschalten.
+[/list]
 
 [size=5][b]Installation[/b][/size]
 [list=1]
@@ -77,7 +80,6 @@ VR und SE-Versionen vor 1.5.97 werden nicht unterstützt.
 [*][b]SPS-x.y.z.zip[/b] mit Vortex oder Mod Organizer 2 wie jede andere Mod installieren. Die Ladereihenfolge ist egal (keine Plugin-Datei).
 [*]Spiel starten und im SKSE-Menu-Framework-Menü → [i]Skyrim Performance Solution[/i] die Einstellungen anpassen. Die Standardwerte sind ein guter Start.
 [/list]
-[b]Umstieg von „SkyrimPerf“:[/b] Die Mod wurde umbenannt. Zuerst die alte SkyrimPerf-Mod entfernen – deine Einstellungen und gemerkten Texturgrößen werden automatisch übernommen.
 [b]Deinstallation:[/b] Mod einfach entfernen. Im Spielstand wird nichts gespeichert.
 [b]Einstellungsdateien:[/b] [i]Data\SKSE\Plugins\SPS.ini[/i] enthält die Vorgaben, Änderungen aus dem Menü landen in [i]SPS_User.ini[/i].
 
@@ -85,7 +87,7 @@ VR und SE-Versionen vor 1.5.97 werden nicht unterstützt.
 [list]
 [*][b]Kurzes Hängen beim Durchschreiten von Türen?[/b] Das ist meist das automatische Speichern beim Gebietswechsel zusammen mit RaceMenu, dessen Co-Save bis zu ~1 s zum Schreiben braucht. Abhilfe: in den Spieleinstellungen [i]Beim Reisen speichern[/i] ausschalten.
 [*]Beim Ausschalten mit der Taste werden alle Texturen wieder voll geladen – das dauert ein paar Sekunden und hebt den VRAM kurz an.
-[*]Sieht etwas anders aus? Menü öffnen, Fadenkreuz darauf, [i]Texturen unter dem Fadenkreuz protokollieren[/i] drücken und dann einzelne Funktionen ausschalten, um den Auslöser zu finden. Bitte im Bugs-Tab mit deiner SPS.log melden.
+[*]Sieht etwas anders aus? Zuerst die Hilfeseite im Menü ansehen. Bei Texturfehlern das Fadenkreuz darauf richten und auf der Debug-Seite [i]Texturen unter dem Fadenkreuz protokollieren[/i] drücken. Bitte im Bugs-Tab mit deiner SPS.log melden.
 [/list]
 
 [size=5][b]Danksagungen[/b][/size]
@@ -103,4 +105,5 @@ VR und SE-Versionen vor 1.5.97 werden nicht unterstützt.
 [url=https://github.com/dnai92/skyrimPerformanceSolution/blob/main/LICENSE]GPL-3.0[/url] mit der [url=https://github.com/dnai92/skyrimPerformanceSolution/blob/main/EXCEPTIONS.md]Modding-Ausnahme[/url], Quellcode auf [url=https://github.com/dnai92/skyrimPerformanceSolution]GitHub[/url]. Bitte verlinke auf diese Seite statt die Mod neu hochzuladen.
 
 [center][url=https://ko-fi.com/dani9281660][img]https://storage.ko-fi.com/cdn/kofi2.png?v=3[/img][/url]
-Dir gefällt SPS? Über einen Kaffee freue ich mich sehr![/center]
+Dir gefällt SPS? Über einen Kaffee freue ich mich sehr!
+SPS ist komplett kostenlos. Wenn dir die Mod gefällt und du die Entwicklung unterstützen möchtest, freue ich mich über freiwillige Spenden. Sie helfen, Entwicklungskosten wie KI-/API-Dienste zu decken.[/center]

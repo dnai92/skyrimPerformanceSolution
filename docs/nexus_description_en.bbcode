@@ -1,38 +1,34 @@
 [center][size=6][b]Skyrim Performance Solution (SPS)[/b][/size]
-[i]Smoother Skyrim on heavily modded setups – without changing a single game file.[/i][/center]
+[i]Smoother Skyrim on heavily modded setups[/i][/center]
+
+Hi friends, I’m having performance issues with my modded Skyrim, which has a lot of texture mods. That’s why I figured that with such an old game, there must be a way to get more out of the engine. Unfortunately, I don’t know C++ myself, so I used my Claude AI account and, over the course of a few evenings, many tests, and countless hours, had a mod created exactly the way I wanted it. I’m not a fan of "vibe coding" myself, but this works surprisingly well.
+
+With my mod list, the game runs much smoother for me. In particular, the reloading stutters when turning around have disappeared. This was especially noticeable in Whiterun at the marketplace. Thanks to the new texture streaming, I could even use 8K textures or test how it runs on my Steam Deck.
+
+I originally created the mod for myself, since I just can’t put Skyrim down. But since I enjoy playing other people’s mods myself and appreciate their work and effort, I’d like to give this mod back as a thank-you.
+
+Feel free to leave feedback in the comments about how it’s running for you and whether there are any bugs.
+
+Please don't re-upload this mod to other sites – link to this page instead. If you modify or reuse SPS, the GPL-3.0 applies: credit me and publish your source code under the same license.
 
 [size=5][b]Description[/b][/size]
-SPS is an SKSE plugin for [b]Skyrim SE 1.5.97 and AE 1.6.x / 1.7.x[/b] that removes work the game does not need to do.
+SPS is an SKSE plugin for [b]Skyrim SE 1.5.97 and AE 1.6.x / 1.7.x[/b] that removes work the game does not need to do. [b]Skyrim VR 1.4.15[/b] has its own file (beta, texture streaming and shadow culling of small objects).
 
-Heavily modded games with 4K/8K textures often run out of video memory in cities and interiors. Once VRAM overflows, Windows moves data to system RAM and the game starts to stutter. SPS [b]streams textures by distance[/b]: far away and hidden objects get smaller versions of their textures, close objects always get full quality. On top of that it [b]cuts draw calls in the shadow passes[/b] and [b]removes redundant per-frame engine work[/b].
+Heavily modded games with 4K/8K textures often run out of video memory in cities and interiors. Once VRAM overflows, Windows moves data to system RAM and the game starts to stutter. SPS [b]streams textures by distance[/b]: far away and hidden objects get smaller versions of their textures, close objects get full quality (unless you set a max. texture size). On top of that it [b]cuts draw calls in the shadow passes[/b] and [b]removes redundant per-frame engine work[/b].
 
 Nothing on disk is changed, nothing is stored in your save. Everything can be switched live in an in-game menu (English / German, follows the game language) and with a single hotkey, so you can compare with and without SPS at any time.
 
-[b]Measured results[/b] (Ryzen 7 5700X, RTX 4070 12 GB, 1920x1200, ~380 plugins, Community Shaders with DLSS + frame generation, 4K textures)
-
-[i]Dragonsreach, VRAM full (hotkey OFF vs ON):[/i]
-[list]
-[*]VRAM usage: 95–98 % → [b]72 %[/b]
-[*]Swapped to system RAM: up to 1.2 GB → [b]~50 MB[/b]
-[*]FPS: 27–33 → [b]41–42[/b]
-[*]Longest frame: 190–280 ms stutters → [b]~35 ms[/b]
-[/list]
-[i]Whiterun market:[/i]
-[list]
-[*]Skyrim VRAM: ~10.5 GB (+600 MB swapped) → [b]5.4 GB[/b]
-[*]~1,300 distant textures: [b]0.33 GB instead of 7–8 GB[/b], no visible difference in A/B screenshots
-[*]Light assignment: 2.45 ms → [b]0.15 ms[/b] per frame
-[*]All draw-call optimizations together: [b]−26 % draw calls[/b]
-[/list]
-[i]40-minute session:[/i] 0 texture load errors, VRAM 70–82 % during normal play.
+[size=5][b]What to expect[/b][/size]
+SPS helps most when the VRAM runs full: 4K/8K texture packs, 8 GB cards, cities like Whiterun. There it removes the stutters caused by swapping to system RAM and often raises FPS. If your game is limited by the CPU (many NPCs, physics mods like FSMP or CBPC), the FPS gain is small. SPS itself costs about 0.4 ms per frame.
 
 [size=5][b]Main features[/b][/size]
 [b]Texture streaming[/b]
 [list]
-[*][b]Distance-based texture size[/b] – Textures of far objects (also behind you) are shrunk in VRAM and reloaded at full size in the background when you come closer. UI, maps, LOD, fonts and books are excluded.
-[*][b]VRAM budget mode[/b] – Only kicks in when the game uses more than 85 % of the VRAM Windows grants it. With enough VRAM it does nothing and costs nothing.
-[*][b]VRAM refill[/b] – When there is room again, downscaled textures are reloaded at full size, most needed first.
-[*][b]Load at remembered size[/b] – Textures are loaded directly at the size they needed last time (also across sessions and during loading screens), so VRAM no longer peaks after doors.
+[*][b]Distance-based texture size[/b] – Textures of far objects (also behind you) are shrunk in VRAM and reloaded at full size in the background when you come closer. UI, maps, LOD, fonts, books, effects and sky are excluded.
+[*][b]VRAM budget mode[/b] – Only kicks in when less than 1024 MB of the VRAM Windows grants the game is free (adjustable in 256 MB steps). After a few minutes of play the menu suggests a value for your setup. With enough VRAM it does nothing and costs nothing.
+[*][b]VRAM refill[/b] – When there is room again, downscaled textures are reloaded at full size, most needed first, without going past the reserve.
+[*][b]Max. texture size[/b] – Upper limit 1K / 2K / 4K / 8K / unlimited for all streamed textures, independent of VRAM usage. Useful for weaker GPUs or the Steam Deck.
+[*][b]Load at remembered size[/b] – Textures are loaded directly at the size they needed last time (also across sessions and during loading screens), so VRAM peaks less when entering areas you visited before.
 [*][b]Clothing and armor of characters[/b] – Also streamed for far NPCs, distance measured at the character itself (about 1 GB less VRAM at a busy market). Bodies, faces and hair can be added in the menu (test option, off).
 [*][b]RAM buffer[/b] – Textures that are reloaded repeatedly stay in RAM (default 1 GB, adjustable, 0 = off). Mostly useful with 8K texture packs.
 [/list]
@@ -40,7 +36,7 @@ Nothing on disk is changed, nothing is stored in your save. Everything can be sw
 [list]
 [*][b]Sun shadow culling[/b] – Small, far objects do not cast sun shadows (depends on sun elevation).
 [*][b]Torch shadow culling[/b] – Small, far objects do not cast torch/fire shadows. Objects close to the light keep theirs; off in interiors by default.
-[*][b]Shadow cache for static lights[/b] – Shadows of lights that do not move (wall lamps, fireplaces) are kept; only characters and moving things are redrawn each frame. Flickering lights are always redrawn. Mainly for interiors with many lights. AE only.
+[*][b]Shadow cache for static lights[/b] – Shadows of lights that do not move (wall lamps, fireplaces) are kept, only characters and moving things are redrawn each frame. Flickering lights are always redrawn. Mainly for interiors with many lights. AE only.
 [*][b]Character shadow culling[/b] – Characters far away (default 50 m) do not cast shadows.
 [*][b]Skylighting culling[/b] – Small objects are left out of the Community Shaders skylighting map.
 [*][b]Decal culling[/b] – Footprint-sized decals farther than ~21 m are not drawn.
@@ -53,10 +49,11 @@ Nothing on disk is changed, nothing is stored in your save. Everything can be sw
 [/list]
 [b]Comfort[/b]
 [list]
-[*]In-game menu with every switch and slider, saved automatically.
+[*]In-game menu with one page per feature group, saved automatically.
+[*]Help page in the menu: which switch to try for which visual issue.
 [*]Hotkey [b]Page Up[/b] (assignable in the menu) toggles all optimizations for A/B comparison.
 [*]Each engine patch checks the game code at startup – on an unknown game version or a conflicting mod only that feature is switched off and listed in the menu and the log.
-[*][i]Log textures under crosshair[/i] button for bug reports.
+[*]Debug page (never saved, everything off after a restart): analysis logging, [i]Log textures under crosshair[/i] for bug reports, test switch for normally excluded texture types.
 [/list]
 
 [size=5][b]Requirements[/b][/size]
@@ -67,9 +64,15 @@ Nothing on disk is changed, nothing is stored in your save. Everything can be sw
 [*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/120352]SKSE Menu Framework[/url] – in-game menu (without it, everything is set in [i]SPS.ini[/i])
 [*]Optional: [url=https://www.nexusmods.com/skyrimspecialedition/mods/86492]Community Shaders[/url] – skylighting culling only has an effect with CS
 [/list]
-VR and SE versions older than 1.5.97 are not supported.
+[b]Skyrim VR 1.4.15:[/b] use the separate VR file. It needs SKSEVR and the [url=https://www.nexusmods.com/skyrimspecialedition/mods/58101]VR Address Library[/url], settings via [i]SPS.ini[/i]. SE versions older than 1.5.97 are not supported.
 
 [b]SE 1.5.97 users wanted![/b] The SE version is verified against the game code but not yet tested in game. Feedback is very welcome – please attach [i]Documents\My Games\Skyrim Special Edition\SKSE\SPS.log[/i].
+
+[size=5][b]Compatibility[/b][/size]
+Compatible with most mods, because no game files are edited.
+[list]
+[*][b]Texture Downscaler[/b] works together with SPS. Textures it loads smaller keep that size, SPS only shrinks further when VRAM gets tight. If you want Texture Downscaler to handle textures alone, turn off texture streaming in the menu.
+[/list]
 
 [size=5][b]Installation instructions[/b][/size]
 [list=1]
@@ -77,7 +80,6 @@ VR and SE versions older than 1.5.97 are not supported.
 [*]Install [b]SPS-x.y.z.zip[/b] with Vortex or Mod Organizer 2 like any other mod. Load order does not matter (no plugin file).
 [*]Start the game and open the SKSE Menu Framework menu → [i]Skyrim Performance Solution[/i] to adjust settings. The defaults are a good start.
 [/list]
-[b]Updating from "SkyrimPerf":[/b] the mod was renamed. Remove the old SkyrimPerf mod first – your settings and remembered texture sizes are taken over automatically.
 [b]Uninstall:[/b] simply remove the mod. Nothing is stored in your save.
 [b]Settings files:[/b] [i]Data\SKSE\Plugins\SPS.ini[/i] holds the defaults, changes from the menu go to [i]SPS_User.ini[/i].
 
@@ -85,7 +87,7 @@ VR and SE versions older than 1.5.97 are not supported.
 [list]
 [*][b]Short hitch when walking through doors?[/b] That is usually the autosave on travel together with RaceMenu, whose co-save can take ~1 s to write. Turn off [i]Save on Travel[/i] in the gameplay settings.
 [*]Switching SPS off with the hotkey reloads all textures at full size, which takes a few seconds and briefly raises VRAM.
-[*]Something looks different? Open the menu, point the crosshair at it and click [i]Log textures under crosshair[/i], then switch single features off to find the culprit. Please report it in the bugs tab with your SPS.log.
+[*]Something looks different? Check the help page in the menu first. For texture issues point the crosshair at it and click [i]Log textures under crosshair[/i] on the debug page. Please report it in the bugs tab with your SPS.log.
 [/list]
 
 [size=5][b]Shout outs[/b][/size]
@@ -103,4 +105,5 @@ VR and SE versions older than 1.5.97 are not supported.
 [url=https://github.com/dnai92/skyrimPerformanceSolution/blob/main/LICENSE]GPL-3.0[/url] with the [url=https://github.com/dnai92/skyrimPerformanceSolution/blob/main/EXCEPTIONS.md]modding exception[/url], source code on [url=https://github.com/dnai92/skyrimPerformanceSolution]GitHub[/url]. Please link to this page instead of re-uploading the mod.
 
 [center][url=https://ko-fi.com/dani9281660][img]https://storage.ko-fi.com/cdn/kofi2.png?v=3[/img][/url]
-Enjoying SPS? A coffee is always appreciated![/center]
+Enjoying SPS? A coffee is always appreciated!
+SPS is completely free. If you enjoy the mod and want to support its development, voluntary donations are appreciated and help cover development costs such as AI/API services.[/center]
