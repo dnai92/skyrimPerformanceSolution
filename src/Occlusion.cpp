@@ -101,8 +101,9 @@ namespace Occlusion
 			auto&            sh = g_shards[(reinterpret_cast<std::uintptr_t>(a_geom) >> 4) % kShards];
 			std::scoped_lock l(sh.lock);
 			auto&            e = sh.map[a_geom];
+			const auto       need = Config::occlStreak.load(std::memory_order_relaxed);
 			if (e.lastId == a_snapId) {
-				return a_occluded && e.count >= 2;  // mehrere Passes desselben Objekts im selben Frame
+				return a_occluded && e.count >= need;  // mehrere Passes desselben Objekts im selben Frame
 			}
 			if (!a_occluded) {
 				e.count = 0;
@@ -110,7 +111,7 @@ namespace Occlusion
 				e.count = (e.lastId + 1 == a_snapId) ? static_cast<std::uint8_t>(std::min(e.count + 1, 8)) : 1;
 			}
 			e.lastId = a_snapId;
-			return e.count >= 2;
+			return e.count >= need;
 		}
 
 		void ClearStreaks() noexcept
@@ -276,11 +277,13 @@ namespace Occlusion
 			if (u0 > u1 || v0 > v1) {
 				return 1;  // ausserhalb des alten Bildausschnitts - nichts bekannt
 			}
-			if ((u1 - u0 + 1) * (v1 - v0 + 1) > 4096) {
+			if (static_cast<std::uint32_t>((u1 - u0 + 1) * (v1 - v0 + 1)) > Config::occlMaxTiles.load(std::memory_order_relaxed)) {
 				return 3;
 			}
 			const auto& lo = a_s.rb.minDepth;
 			const auto& hi = a_s.rb.maxDepth;
+			const float marginK = 1.0f + Config::occlMarginPct.load(std::memory_order_relaxed) * 0.01f;
+			const float marginU = Config::occlMarginUnits.load(std::memory_order_relaxed);
 			if (a_info) {
 				*a_info = { x, y, z, wn, u0, u1, v0, v1, 1e30f, 0.0f };
 			}
@@ -301,7 +304,7 @@ namespace Occlusion
 						a_info->zFarMin = std::min(a_info->zFarMin, zFar);
 						a_info->zFarMax = std::max(a_info->zFarMax, zFar);
 					}
-					if (!(zFar > 0.0f) || !(wn > zFar * 1.02f + 16.0f)) {
+					if (!(zFar > 0.0f) || !(wn > zFar * marginK + marginU)) {
 						return 1;
 					}
 				}
@@ -369,7 +372,7 @@ namespace Occlusion
 			}
 			g_accOther = 0;
 			g_prepassCalls = g_camFail = g_captures = g_ringFull = g_noSrv = g_reads = g_latencySum = 0;
-			logger::info("[Occlusion]   hiding occluded objects: {} | frames without hiding because the camera moved: {}", Config::occlusionCull.load() && Config::masterEnabled.load() ? "ON" : "off", g_cullBlockedFrames);
+			logger::info("[Occlusion]   hiding occluded objects: {} | frames without hiding because the camera moved: {} | settings: pause from {:.1f} deg / {:.0f} units, margin {:.1f} % + {:.0f}, hidden in {} images in a row, max {} tiles, characters {}", Config::occlusionCull.load() && Config::masterEnabled.load() ? "ON" : "off", g_cullBlockedFrames, Config::occlTurnDeg.load(), Config::occlMoveUnits.load(), Config::occlMarginPct.load(), Config::occlMarginUnits.load(), Config::occlStreak.load(), Config::occlMaxTiles.load(), Config::occlSkipSkinned.load() ? "never" : "allowed");
 			g_cullBlockedFrames = 0;
 			{
 				std::scoped_lock l(g_sampleLock);
@@ -505,7 +508,8 @@ namespace Occlusion
 			if (cur) {
 				const auto& oc = cur->cam;
 				const float dx = own.pos.x - oc.pos.x, dy = own.pos.y - oc.pos.y, dz = own.pos.z - oc.pos.z;
-				allowed = Dot(own.dir, oc.dir) > 0.99939f && dx * dx + dy * dy + dz * dz < 64.0f * 64.0f;
+				const float move = Config::occlMoveUnits.load(std::memory_order_relaxed);
+				allowed = Dot(own.dir, oc.dir) > std::cos(Config::occlTurnDeg.load(std::memory_order_relaxed) * 0.0174533f) && dx * dx + dy * dy + dz * dz < move * move;
 			}
 			if (!allowed) {
 				++g_cullBlockedFrames;
@@ -695,7 +699,7 @@ namespace Occlusion
 		const bool skinned = const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData().skinInstance != nullptr;
 		const bool isMain = a_accumulator && a_accumulator == g_mainAcc.load(std::memory_order_relaxed);
 		// Verlauf nur fuer feste Objekte im Hauptbild (Figuren: Huelle hinkt der Animation hinterher)
-		const bool twice = isMain && !skinned && UpdateStreak(&a_geom, snap->id, r == 2);
+		const bool twice = isMain && !(skinned && Config::occlSkipSkinned.load(std::memory_order_relaxed)) && UpdateStreak(&a_geom, snap->id, r == 2);
 		if (r != 2) {
 			return false;
 		}

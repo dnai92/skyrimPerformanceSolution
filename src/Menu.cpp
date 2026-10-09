@@ -353,6 +353,50 @@ namespace Menu
 				}
 				Tip(T("Cross-check for the occlusion test: which depth image the test uses.", "Gegentest für den Verdeckungs-Test: welches Tiefenbild verwendet wird."));
 			}
+			{
+				const auto tune = [](const char* a_label, std::atomic<float>& a_v, float a_min, float a_max, const char* a_fmt, const char* a_tip) {
+					float v = a_v.load();
+					if (MenuApi::SliderFloat(a_label, &v, a_min, a_max, a_fmt)) {
+						a_v.store(v);
+					}
+					Tip(a_tip);
+				};
+				const auto tuneInt = [](const char* a_label, std::atomic<std::uint32_t>& a_v, float a_min, float a_max, const char* a_fmt, const char* a_tip) {
+					float v = static_cast<float>(a_v.load());
+					if (MenuApi::SliderFloat(a_label, &v, a_min, a_max, a_fmt)) {
+						a_v.store(static_cast<std::uint32_t>(v + 0.5f));
+					}
+					Tip(a_tip);
+				};
+				tune(T("Pause from camera turn##occ", "Pause ab Kameradrehung##occ"), Config::occlTurnDeg, 0.5f, 20.0f, "%.1f°",
+					T("Hiding pauses while the camera has turned more than this since the depth image. Higher = hides more often, but objects may pop in when turning fast. Default 2.",
+						"Weglassen pausiert, solange sich die Kamera seit dem Tiefenbild weiter gedreht hat. Höher = öfter weglassen, beim schnellen Drehen können aber Objekte aufploppen. Standard 2."));
+				tune(T("Pause from movement##occ", "Pause ab Bewegung##occ"), Config::occlMoveUnits, 0.0f, 512.0f, "%.0f",
+					T("Same for moving (game units, 64 = about 1 m). Default 64.", "Dasselbe für Bewegung (Spieleinheiten, 64 = etwa 1 m). Standard 64."));
+				tune(T("Safety margin %##occ", "Sicherheitsabstand %##occ"), Config::occlMarginPct, 0.0f, 20.0f, "%.1f %%",
+					T("An object only counts as hidden if it is this much farther away than what covers it. Default 2.", "Ein Objekt gilt nur als verdeckt, wenn es um so viel weiter weg ist als das, was davor liegt. Standard 2."));
+				tune(T("Safety margin units##occ", "Sicherheitsabstand Einheiten##occ"), Config::occlMarginUnits, 0.0f, 256.0f, "%.0f",
+					T("Plus this fixed distance. Default 16.", "Plus dieser feste Abstand. Standard 16."));
+				tuneInt(T("Hidden in images in a row##occ", "Verdeckt in Bildern hintereinander##occ"), Config::occlStreak, 1.0f, 4.0f, "%.0f",
+					T("How many depth images in a row an object must be hidden before it is left out. 1 = immediately. Default 2.",
+						"In so vielen Tiefenbildern hintereinander muss ein Objekt verdeckt sein, bevor es weggelassen wird. 1 = sofort. Standard 2."));
+				tuneInt(T("Max. size on screen (tiles)##occ", "Max. Größe im Bild (Kacheln)##occ"), Config::occlMaxTiles, 256.0f, 36864.0f, "%.0f",
+					T("Larger objects are not checked (the whole image has 36864 tiles). Higher = big objects like houses can be left out too, the check costs a bit more. Default 4096.",
+						"Größere Objekte werden nicht geprüft (das ganze Bild hat 36864 Kacheln). Höher = auch große Objekte wie Häuser können wegfallen, die Prüfung kostet etwas mehr. Standard 4096."));
+				AtomicToggle(T("Never hide characters##occ", "Figuren nie weglassen##occ"), Config::occlSkipSkinned,
+					T("Characters and other animated meshes are never left out (their bounds lag behind the animation). Default on.",
+						"Figuren und andere animierte Meshes werden nie weggelassen (ihre Hülle hinkt der Animation hinterher). Standard an."),
+					false);
+				if (MenuApi::Button(T("Defaults##occ", "Standardwerte##occ"))) {
+					Config::occlTurnDeg.store(2.0f);
+					Config::occlMoveUnits.store(64.0f);
+					Config::occlMarginPct.store(2.0f);
+					Config::occlMarginUnits.store(16.0f);
+					Config::occlStreak.store(2);
+					Config::occlMaxTiles.store(4096);
+					Config::occlSkipSkinned.store(true);
+				}
+			}
 			if (MenuApi::Button(T("Save depth image##occ", "Tiefenbild speichern##occ"))) {
 				Occlusion::RequestDepthDump();
 			}

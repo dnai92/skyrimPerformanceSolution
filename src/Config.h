@@ -14,6 +14,14 @@ namespace Config
 	inline std::atomic<std::uint32_t> occlusionDepthSource{ 0 };
 	// Stufe 2: verdeckte feste Objekte im Hauptbild weglassen. [Occlusion] bCull, Standard AUS, nicht im Menue gespeichert
 	inline std::atomic<bool>          occlusionCull{ false };
+	// Stellschrauben fuer Tests, nur im Debug-Menue, nicht gespeichert
+	inline std::atomic<float>         occlTurnDeg{ 2.0f };       // Weglassen pausiert ab dieser Drehung seit dem Tiefenbild
+	inline std::atomic<float>         occlMoveUnits{ 64.0f };    // ... oder ab dieser Bewegung
+	inline std::atomic<float>         occlMarginPct{ 2.0f };     // Sicherheitsabstand hinter der Verdeckung in %
+	inline std::atomic<float>         occlMarginUnits{ 16.0f };  // ... plus feste Einheiten
+	inline std::atomic<std::uint32_t> occlStreak{ 2 };           // so viele Tiefenbilder hintereinander verdeckt
+	inline std::atomic<std::uint32_t> occlMaxTiles{ 4096 };      // groessere Objekte werden nicht geprueft
+	inline std::atomic<bool>          occlSkipSkinned{ true };   // Figuren nie weglassen
 
 	// Regel fuer das Kleinobjekt-Culling in einer Schattenkarte. Ein Mesh wird verworfen, wenn ALLE Bedingungen zutreffen.
 	struct CullRule
