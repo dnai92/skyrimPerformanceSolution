@@ -267,6 +267,7 @@ namespace TextureStream
 		// Auffuellen: noch nicht eingetroffene Neuladungen mitzaehlen, sonst stapeln mehrere Durchlaeufe (je 0,5 s)
 		// Auftraege fuer denselben freien Platz (langer Test: bis 3,6 GB in 10 s, VRAM 89 %, danach Verkleinern)
 		std::uint64_t              g_inflightUp = 0;  // Main-Thread
+		Clock::time_point          g_lastRefill{};    // zuletzt aufgefuellt (eigener Anstieg - zaehlt nicht als Sprung)
 		constexpr std::uint64_t    kRefillPerPass = 512ull << 20;
 
 		void InitAdapter()
@@ -1817,6 +1818,7 @@ namespace TextureStream
 						QueueReload(*c.st, c.r, c.st->LimitEdge());
 						room -= static_cast<double>(c.bytes);
 						++g_stats.refills;
+						g_lastRefill = now;
 					}
 				}
 			}
@@ -2160,6 +2162,55 @@ namespace TextureStream
 		g_probeCenter = true;
 	}
 
+	namespace
+	{
+		// VRAM-Spruenge messen (Main-Thread, alle 250 ms): Anstieg gegenueber dem Tiefstwert der letzten 3 s. Der Puffer
+		// "Frei halten" sollte den groessten Sprung abfangen - daraus die Empfehlung im Menue.
+		std::deque<std::pair<Clock::time_point, std::uint64_t>> g_vramHistory;
+		double                                                  g_maxJumpMB = 0.0;
+		Clock::duration                                         g_measuredPlay{};
+		Clock::time_point                                       g_lastJumpSample{};
+
+		void TrackVramJump(Clock::time_point a_now, bool a_loading) noexcept
+		{
+			const auto usage = g_vramUsage.load(std::memory_order_relaxed);
+			if (a_loading || usage == 0) {
+				g_vramHistory.clear();  // Ladebildschirm: Szene wird umgebaut, kein Spiel-Sprung
+				g_lastJumpSample = {};
+				return;
+			}
+			if (g_lastJumpSample != Clock::time_point{}) {
+				g_measuredPlay += std::min<Clock::duration>(a_now - g_lastJumpSample, 1s);
+			}
+			g_lastJumpSample = a_now;
+			try {
+				g_vramHistory.emplace_back(a_now, usage);
+			} catch (...) {
+				return;
+			}
+			while (!g_vramHistory.empty() && a_now - g_vramHistory.front().first > 3s) {
+				g_vramHistory.pop_front();
+			}
+			if (a_now - g_lastRefill < 6s) {
+				return;  // eigenes Auffuellen, kein Bedarfssprung
+			}
+			std::uint64_t low = usage;
+			for (const auto& [t, u] : g_vramHistory) {
+				low = std::min(low, u);
+			}
+			g_maxJumpMB = std::max(g_maxJumpMB, static_cast<double>(usage - low) / 1048576.0);
+		}
+	}
+
+	bool ReserveRecommendation(float& a_recommendMB, float& a_jumpMB)
+	{
+		std::scoped_lock state(g_stateLock);
+		a_jumpMB = static_cast<float>(g_maxJumpMB);
+		// groesster Sprung + 25 % Reserve, auf 256 MB aufgerundet; mindestens 512 MB, hoechstens 6 GB
+		a_recommendMB = std::clamp(static_cast<float>(std::ceil(g_maxJumpMB * 1.25 / 256.0) * 256.0), 512.0f, 6144.0f);
+		return g_measuredPlay >= 3min;
+	}
+
 	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget)
 	{
 		a_usage = g_vramUsage.load(std::memory_order_relaxed);
@@ -2228,6 +2279,8 @@ namespace TextureStream
 			lastVram = now;
 			UpdateVram();
 			MigrateLegacyThresholds();
+			const auto ui0 = RE::UI::GetSingleton();
+			TrackVramJump(now, !ui0 || ui0->IsMenuOpen(RE::LoadingMenu::MENU_NAME));
 		}
 
 		ApplyResults();

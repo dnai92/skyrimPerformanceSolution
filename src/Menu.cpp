@@ -395,6 +395,16 @@ namespace Menu
 						"Verkleinert wird, sobald weniger VRAM frei ist. Der Puffer fängt plötzliche Sprünge ab (Türen, neue Zellen, Umdrehen). Kleiner = VRAM voller ausgenutzt, größer = seltener Überlauf. 1024 passt für die meisten."))) {
 				Config::textureStream.reserveMB = std::clamp(std::round(Config::textureStream.reserveMB / 256.0f) * 256.0f, 256.0f, 6144.0f);  // feste 256-MB-Schritte
 			}
+			{
+				float recommend = 0.0f, jump = 0.0f;
+				if (TextureStream::ReserveRecommendation(recommend, jump)) {
+					MenuApi::TextWrapped(T("Recommended for your setup: %.0f MB (largest VRAM jump so far: %.1f GB within 3 s)", "Empfehlung für dein Setup: %.0f MB (größter VRAM-Sprung bisher: %.1f GB in 3 s)"),
+						recommend, jump / 1024.0f);
+				} else {
+					MenuApi::TextWrapped("%s", T("Recommendation after a few minutes of play (SPS measures how much the VRAM jumps when you enter areas or turn around).",
+													"Empfehlung nach ein paar Minuten Spielzeit (SPS misst, wie stark der VRAM beim Betreten von Gebieten oder Umdrehen springt)."));
+				}
+			}
 			Toggle(T("Refill VRAM when there is room##ts", "VRAM wieder auffüllen, wenn Platz ist##ts"), Config::textureStream.refill,
 				T("When clearly more than the reserve is free, downscaled textures are reloaded at full size again (most needed first).",
 					"Ist deutlich mehr als der Puffer frei, werden verkleinerte Texturen wieder voll geladen (die meistgebrauchten zuerst)."));

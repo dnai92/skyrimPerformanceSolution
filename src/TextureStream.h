@@ -45,6 +45,10 @@ namespace TextureStream
 	// VRAM-Belegung des Spiels und Budget laut Windows (Bytes; 0 = unbekannt)
 	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget);
 
+	// Empfehlung fuer "Frei halten" aus den gemessenen VRAM-Spruengen dieser Sitzung (Menue).
+	// false = noch zu wenig gespielt; a_jumpMB = groesster Anstieg innerhalb von 3 s
+	bool ReserveRecommendation(float& a_recommendMB, float& a_jumpMB);
+
 	// Ruckler-Protokoll: was das Streaming seit dem letzten Abruf getan hat (Main-Thread, einmal pro Frame)
 	struct FrameActivity
 	{
