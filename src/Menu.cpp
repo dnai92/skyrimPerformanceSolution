@@ -473,14 +473,23 @@ namespace Menu
 			Slider(T("Safety factor##ts", "Sicherheitsfaktor##ts"), Config::textureStream.safetyFactor, 1.0f, 4.0f, "%.1f",
 				T("Needed texture size = size on screen x this factor. Higher = sharper, less saving.",
 					"Benötigte Texturgröße = Größe auf dem Bildschirm x Faktor. Höher = schärfer, weniger Ersparnis."));
-			if (Slider(T("Min. size (px)##ts", "Min. Größe (px)##ts"), Config::textureStream.minEdge, 256.0f, 4096.0f, "%.0f",
-					T("Textures are never shrunk below this edge length. Higher = safer, less saving.",
-						"Texturen werden nie unter diese Kantenlänge verkleinert. Höher = sicherer, weniger Ersparnis."))) {
-				float p = 256.0f;
-				while (p * 1.5f < Config::textureStream.minEdge) {
-					p *= 2.0f;
+			{
+				// Untergrenze in festen Stufen 256 / 512 / 1K / 2K / 4K (Regler ueber den Index, Anzeige als Text)
+				static constexpr float kMins[] = { 256.0f, 512.0f, 1024.0f, 2048.0f, 4096.0f };
+				const char*            names[] = { "256", "512", "1K", "2K", "4K" };
+				int                    idx = 0;
+				for (int i = 0; i < 5; ++i) {
+					if (Config::textureStream.minEdge >= kMins[i] * 0.75f) {
+						idx = i;
+					}
 				}
-				Config::textureStream.minEdge = p;
+				float v = static_cast<float>(idx);
+				if (MenuApi::SliderFloat(T("Min. size##ts", "Min. Größe##ts"), &v, 0.0f, 4.0f, names[idx])) {
+					Config::textureStream.minEdge = kMins[std::clamp(static_cast<int>(std::lround(v)), 0, 4)];
+					Config::MarkDirty();
+				}
+				Tip(T("Textures are never shrunk below this edge length. Higher = safer, less saving.",
+					"Texturen werden nie unter diese Kantenlänge verkleinert. Höher = sicherer, weniger Ersparnis."));
 			}
 			{
 				// Obergrenze: 1K / 2K / 4K / 8K / keine (Regler ueber den Index, Anzeige als Text)

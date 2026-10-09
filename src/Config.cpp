@@ -280,7 +280,7 @@ namespace Config
 			}
 		}
 		ts.safetyFactor = static_cast<float>(ini.GetDoubleValue("TextureStream", "fSafetyFactor", ts.safetyFactor));
-		ts.minEdge = static_cast<float>(ini.GetDoubleValue("TextureStream", "fMinEdge", ts.minEdge));
+		ts.minEdge = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fMinEdge", ts.minEdge)), 256.0f, 4096.0f);
 		ts.maxEdge = static_cast<float>(ini.GetDoubleValue("TextureStream", "fMaxEdge", ts.maxEdge));
 		ts.budgetMs = static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetMs", ts.budgetMs));
 		ts.exclude = ini.GetValue("TextureStream", "sExclude", ts.exclude.c_str());
