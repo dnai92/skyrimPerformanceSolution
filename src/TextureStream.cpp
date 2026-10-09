@@ -1951,8 +1951,25 @@ namespace TextureStream
 		logger::info("[TextureStream] Reset ({}): {} held textures and pass released, {} jobs discarded", a_reason, held, jobs);
 	}
 
+	namespace
+	{
+		bool g_otherDownscaler = false;
+	}
+
+	bool OtherDownscalerLoaded() noexcept
+	{
+		return g_otherDownscaler;
+	}
+
 	void InstallLate()
 	{
+		// Texture Downscaler (Nexus 187049) greift in denselben DDS-Lader ein und deckelt jede Textur fest: SPS kann
+		// gedeckelte Texturen beim Naeherkommen nicht mehr voll laden, Nutzer meldeten Texturfehler mit beiden
+		g_otherDownscaler = REX::W32::GetModuleHandleW(L"TextureDownscaler.dll") != nullptr;
+		if (g_otherDownscaler) {
+			logger::warn("TextureStream: Texture Downscaler (TextureDownscaler.dll) is loaded - both shrink textures at load and work against each other. "
+						 "Use only one: remove Texture Downscaler, or switch off texture streaming in the SPS menu.");
+		}
 		// BSShaderResourceManager-vtable Eintrag 0xD0 (Renderer-Textur aus NiSourceTexture anlegen; aufgerufen aus
 		// AE ID 70716 / SE dieselbe Klasse, ebenfalls 0xD0 - offline geprueft) umbiegen. Nach anderen Mods (kDataLoaded):
 		// eine dort schon eingetragene fremde Funktion bleibt drin und wird von uns aufgerufen.

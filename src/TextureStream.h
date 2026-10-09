@@ -28,6 +28,9 @@ namespace TextureStream
 	// Diagnose des echten Ladewegs (kDataLoaded, Device existiert dann)
 	void InstallLate();
 
+	// Texture Downscaler (TextureDownscaler.dll) geladen? Deckelt Texturen beim Laden fest - arbeitet gegen das Streaming
+	bool OtherDownscalerLoaded() noexcept;
+
 	// Einmal pro Frame (Main-Thread)
 	void OnFrame();
 

@@ -373,6 +373,10 @@ namespace Menu
 				T("Apply in the precipitation / skylighting occlusion pass.", "Im Durchlauf für Regen und Himmelslicht anwenden."));
 
 			MenuApi::SeparatorText(T("Texture streaming", "Textur-Streaming"));
+			if (TextureStream::OtherDownscalerLoaded()) {
+				MenuApi::TextWrapped("%s", T("Texture Downscaler is installed. It caps every texture at load time and works against this streaming (textures cannot come back to full size, texture errors were reported). Use only one: remove Texture Downscaler, or switch off texture streaming here.",
+												"Texture Downscaler ist installiert. Er deckelt jede Textur beim Laden und arbeitet gegen dieses Streaming (Texturen kommen nicht mehr auf volle Größe, Texturfehler wurden gemeldet). Nur eines nutzen: Texture Downscaler entfernen oder hier das Textur-Streaming ausschalten."));
+			}
 			Toggle(T("Downscale distant textures##ts", "Ferne Texturen verkleinern##ts"), Config::textureStream.enabled,
 				T("Textures of far objects (also behind you) are shrunk in VRAM and reloaded at full size from disk when you come closer. Files are never changed. Off = everything goes back to full size.",
 					"Texturen ferner Objekte (auch hinter dir) werden im VRAM verkleinert und bei Annäherung in voller Größe von der Platte neu geladen. Dateien werden nie verändert. Aus = alles wieder in voller Größe."));
@@ -470,6 +474,10 @@ namespace Menu
 				T("Lights and scene > Texture streaming (or raise 'Safety factor' / 'Min. size')", "Licht und Szene > Textur-Streaming (oder 'Sicherheitsfaktor' / 'Min. Größe' erhöhen)"));
 			HelpEntry(T("Faces or hair look black, purple or blurry", "Gesichter oder Haare sehen schwarz, lila oder unscharf aus"),
 				T("Lights and scene > Also bodies, faces and hair", "Licht und Szene > Auch Körper, Gesichter und Haare"));
+			if (TextureStream::OtherDownscalerLoaded()) {
+				HelpEntry(T("Texture Downscaler is installed - it works against SPS texture streaming", "Texture Downscaler ist installiert - er arbeitet gegen das SPS-Textur-Streaming"),
+					T("Use only one: remove Texture Downscaler, or Lights and scene > Texture streaming off", "Nur eines nutzen: Texture Downscaler entfernen oder Licht und Szene > Textur-Streaming aus"));
+			}
 			HelpEntry(T("Clothing or armor of NPCs looks blurry", "Kleidung oder Rüstung von NPCs ist unscharf"),
 				T("Lights and scene > Also clothing and armor of characters", "Licht und Szene > Auch Kleidung und Rüstung von Figuren"));
 			HelpEntry(T("Use 'Log textures under crosshair' to report a texture issue (writes path and size to SPS.log)", "Für Texturfehler 'Texturen unter dem Fadenkreuz protokollieren' nutzen (schreibt Pfad und Größe in SPS.log)"),
