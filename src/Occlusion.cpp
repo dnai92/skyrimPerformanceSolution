@@ -142,6 +142,37 @@ namespace Occlusion
 			std::atomic<std::uint64_t> window{ 0 };       // Objekte im laufenden 1-s-Fenster (Hauptbild erkennen)
 		};
 		std::uint64_t g_cullBlockedFrames = 0;
+		std::atomic<bool> g_dumpRequest{ false };
+		std::uint32_t     g_dumpCount = 0;
+
+		// Tiefenbild als Graustufen-PGM (hell = nah, logarithmisch bis 100000 Einheiten) neben SPS.log
+		void DumpDepth(const Snapshot& a_s)
+		{
+			const auto dir = SKSE::log::log_directory();
+			if (!dir) {
+				return;
+			}
+			const auto  path = *dir / std::format("SPS_OcclusionDepth_{}.pgm", ++g_dumpCount);
+			std::ofstream f(path, std::ios::binary);
+			f << "P5\n" << OcclusionGpu::kWidth << " " << OcclusionGpu::kHeight << "\n255\n";
+			const auto& c = a_s.cam;
+			std::uint32_t skyTiles = 0;
+			for (std::size_t i = 0; i < a_s.rb.maxDepth.size(); ++i) {
+				const float dBuf = c.reversed ? a_s.rb.minDepth[i] : a_s.rb.maxDepth[i];
+				float       z = 1e6f;
+				if (!(c.reversed ? dBuf <= c.depthMin : dBuf >= c.depthMax)) {
+					const float d = (dBuf - c.depthMin) / (c.depthMax - c.depthMin);
+					const float den = d - c.depthA;
+					z = den != 0.0f ? c.depthB / den : 1e6f;
+				} else {
+					++skyTiles;
+				}
+				const float v = z > 1.0f ? 255.0f - std::clamp(std::log(z) / std::log(100000.0f) * 255.0f, 0.0f, 255.0f) : 255.0f;
+				f.put(static_cast<char>(static_cast<std::uint8_t>(v)));
+			}
+			logger::info("[Occlusion] depth image saved: {} (bright = near, farthest value per tile, sky tiles {}, camera ({:.0f}, {:.0f}, {:.0f}), GPU matrix {}, depth A {:.5f} B {:.3f})",
+				path.string(), skyTiles, c.pos.x, c.pos.y, c.pos.z, c.gpu ? "yes" : "no", c.depthA, c.depthB);
+		}
 		std::mutex                g_sampleLock;
 		std::vector<std::string>  g_samples;  // bis 12 weggelassene Objekte je Bericht  // Main-Thread: Frames ohne Weglassen wegen Kamerabewegung
 		Clock::time_point g_windowStart = Clock::now();
@@ -550,6 +581,11 @@ namespace Occlusion
 			newest->id = g_nextSnapshotId++;
 			g_current.store(std::move(newest));
 		}
+		if (g_dumpRequest.exchange(false)) {
+			if (const auto cur = g_current.load()) {
+				DumpDepth(*cur);
+			}
+		}
 		// Hauptbild = Accumulator mit den meisten Objekten in der letzten Sekunde
 		if (const auto now = Clock::now(); now - g_windowStart >= std::chrono::seconds(1)) {
 			g_windowStart = now;
@@ -637,6 +673,8 @@ namespace Occlusion
 		}
 		return false;
 	}
+
+	void RequestDepthDump() noexcept { g_dumpRequest.store(true); }
 
 	void Reset() noexcept
 	{

@@ -22,4 +22,7 @@ namespace Occlusion
 
 	// Ladebildschirm / Hauptmenue
 	void Reset() noexcept;
+
+	// Debug: beim naechsten Frame das aktuelle Tiefenbild als Bild in den SKSE-Log-Ordner schreiben
+	void RequestDepthDump() noexcept;
 }

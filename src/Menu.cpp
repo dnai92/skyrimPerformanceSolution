@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include "Features.h"
+#include "Occlusion.h"
 #include "ShadowCulling.h"
 #include "TextureStream.h"
 
@@ -345,6 +346,18 @@ namespace Menu
 				T("Objects in the main view that were hidden in the last two frames are not drawn. Characters, shadows, reflections and water are never affected. Pauses while the camera moves fast. Watch for objects popping in. Follows the master switch (hotkey).",
 					"Objekte im Hauptbild, die in den letzten zwei Bildern verdeckt waren, werden nicht gezeichnet. Figuren, Schatten, Spiegelungen und Wasser sind nie betroffen. Pausiert bei schneller Kamerabewegung. Auf aufploppende Objekte achten. Folgt dem Hauptschalter (Taste)."),
 				false);
+			{
+				bool mainDepth = Config::occlusionDepthSource.load() == 1;
+				if (MenuApi::Checkbox(T("Use final depth buffer instead of pre-pass copy##occ", "Fertigen Tiefenpuffer statt Kopie nach dem Vorpass nutzen##occ"), &mainDepth)) {
+					Config::occlusionDepthSource.store(mainDepth ? 1 : 0);
+				}
+				Tip(T("Cross-check for the occlusion test: which depth image the test uses.", "Gegentest für den Verdeckungs-Test: welches Tiefenbild verwendet wird."));
+			}
+			if (MenuApi::Button(T("Save depth image##occ", "Tiefenbild speichern##occ"))) {
+				Occlusion::RequestDepthDump();
+			}
+			Tip(T("Writes the current depth image of the occlusion test next to SPS.log (SPS_OcclusionDepth_N.pgm). Take a screenshot at the same time.",
+				"Schreibt das aktuelle Tiefenbild des Verdeckungs-Tests neben SPS.log (SPS_OcclusionDepth_N.pgm). Gleichzeitig einen Screenshot machen."));
 
 			MenuApi::SeparatorText(T("Texture streaming: also include excluded types", "Textur-Streaming: ausgenommene Arten mit einbeziehen"));
 			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size.",
