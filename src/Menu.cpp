@@ -388,15 +388,21 @@ namespace Menu
 				}
 			}
 			Toggle(T("Only when VRAM gets full##ts", "Nur wenn der VRAM knapp wird##ts"), Config::textureStream.budgetMode,
-				T("Textures are only shrunk when the game uses more than the threshold below of the video memory Windows grants it. With enough VRAM nothing happens and nothing is spent.",
-					"Texturen werden nur verkleinert, wenn das Spiel mehr als die Schwelle unten vom Grafikspeicher belegt, den Windows ihm zuteilt. Mit genug VRAM passiert nichts und es kostet nichts."));
-			Slider(T("Start at (%)##ts", "Ab Belegung (%)##ts"), Config::textureStream.budgetStartPct, 50.0f, 100.0f, "%.0f",
-				T("VRAM usage (percent of the budget) at which downscaling starts.", "VRAM-Belegung (Prozent des Budgets), ab der verkleinert wird."));
+				T("Textures are only shrunk when less than the reserve below of the video memory Windows grants the game is free. With enough VRAM nothing happens and nothing is spent.",
+					"Texturen werden nur verkleinert, wenn vom Grafikspeicher, den Windows dem Spiel zuteilt, weniger als der Puffer unten frei ist. Mit genug VRAM passiert nichts und es kostet nichts."));
+			if (Slider(T("Keep free (MB)##ts", "Frei halten (MB)##ts"), Config::textureStream.reserveMB, 256.0f, 4096.0f, "%.0f",
+					T("Downscaling starts when less VRAM than this is free. It absorbs sudden jumps (doors, new cells, turning around). Smaller = VRAM used more fully, larger = fewer overflows. 1024 fits most setups.",
+						"Verkleinert wird, sobald weniger VRAM frei ist. Der Puffer fängt plötzliche Sprünge ab (Türen, neue Zellen, Umdrehen). Kleiner = VRAM voller ausgenutzt, größer = seltener Überlauf. 1024 passt für die meisten."))) {
+				Config::textureStream.reserveMB = std::round(Config::textureStream.reserveMB / 64.0f) * 64.0f;
+			}
 			Toggle(T("Refill VRAM when there is room##ts", "VRAM wieder auffüllen, wenn Platz ist##ts"), Config::textureStream.refill,
-				T("When usage drops clearly below the threshold, downscaled textures are reloaded at full size again (most needed first).",
-					"Fällt die Belegung deutlich unter die Schwelle, werden verkleinerte Texturen wieder voll geladen (die meistgebrauchten zuerst)."));
-			Slider(T("Refill below threshold minus (%)##ts", "Auffüllen ab Schwelle minus (%)##ts"), Config::textureStream.refillGapPct, 2.0f, 30.0f, "%.0f",
-				T("Gap between downscaling and refilling, so textures do not go back and forth.", "Abstand zwischen Verkleinern und Auffüllen, damit Texturen nicht hin und her wechseln."));
+				T("When clearly more than the reserve is free, downscaled textures are reloaded at full size again (most needed first).",
+					"Ist deutlich mehr als der Puffer frei, werden verkleinerte Texturen wieder voll geladen (die meistgebrauchten zuerst)."));
+			if (Slider(T("Refill when this much more is free (MB)##ts", "Auffüllen, wenn so viel mehr frei ist (MB)##ts"), Config::textureStream.refillGapMB, 256.0f, 4096.0f, "%.0f",
+					T("Downscaled textures are reloaded at full size when this much more than the reserve is free. Gap between downscaling and refilling, so textures do not go back and forth.",
+						"Verkleinerte Texturen werden wieder voll geladen, wenn so viel mehr als der Puffer frei ist. Abstand zwischen Verkleinern und Auffüllen, damit Texturen nicht hin und her wechseln."))) {
+				Config::textureStream.refillGapMB = std::round(Config::textureStream.refillGapMB / 64.0f) * 64.0f;
+			}
 			Slider(T("RAM buffer (MB)##ts", "RAM-Puffer (MB)##ts"), Config::textureStream.ramCacheMB, 0.0f, 8192.0f, "%.0f",
 				T("Texture data that was reloaded stays in RAM up to this size, so the next reload needs no disk access. Least recently used is dropped first. 0 = off.",
 					"Neu geladene Texturdaten bleiben bis zu dieser Größe im RAM, das nächste Neuladen braucht dann keinen Plattenzugriff. Am längsten nicht gebrauchte fliegen zuerst raus. 0 = aus."));

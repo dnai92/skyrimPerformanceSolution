@@ -77,9 +77,9 @@ namespace Config
 			b("TextureStream", "bAnalysis", textureStream.analysis);
 			b("TextureStream", "bLoadReduced", textureStream.loadReduced);
 			b("TextureStream", "bBudgetMode", textureStream.budgetMode);
-			f("TextureStream", "fBudgetStartPct", textureStream.budgetStartPct);
+			f("TextureStream", "fReserveMB", textureStream.reserveMB);
 			b("TextureStream", "bRefill", textureStream.refill);
-			f("TextureStream", "fRefillGapPct", textureStream.refillGapPct);
+			f("TextureStream", "fRefillGapMB", textureStream.refillGapMB);
 			f("TextureStream", "fRamCacheMB", textureStream.ramCacheMB);
 			f("TextureStream", "fSafetyFactor", textureStream.safetyFactor);
 			f("TextureStream", "fMinEdge", textureStream.minEdge);
@@ -263,9 +263,22 @@ namespace Config
 		ts.loadReduced = ini.GetBoolValue("TextureStream", "bLoadReduced", ts.loadReduced);
 		ts.budgetMode = ini.GetBoolValue("TextureStream", "bBudgetMode", ts.budgetMode);
 		ts.refill = ini.GetBoolValue("TextureStream", "bRefill", ts.refill);
-		ts.refillGapPct = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fRefillGapPct", ts.refillGapPct)), 2.0f, 50.0f);
+		ts.refillGapMB = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fRefillGapMB", ts.refillGapMB)), 256.0f, 4096.0f);
 		ts.ramCacheMB = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fRamCacheMB", ts.ramCacheMB)), 0.0f, 16384.0f);
-		ts.budgetStartPct = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetStartPct", ts.budgetStartPct)), 0.0f, 100.0f);
+		ts.reserveMB = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fReserveMB", ts.reserveMB)), 256.0f, 8192.0f);
+		{
+			// Im Menue gespeicherte Prozent-Schwelle (bis 1.0.46) einmalig uebernehmen - Umrechnung braucht das VRAM-Budget
+			CSimpleIniA user;
+			user.SetUnicode();
+			if (user.LoadFile(kUserPath) >= 0 && !user.GetValue("TextureStream", "fReserveMB")) {
+				if (user.GetValue("TextureStream", "fBudgetStartPct")) {
+					ts.legacyStartPct = std::clamp(static_cast<float>(user.GetDoubleValue("TextureStream", "fBudgetStartPct", 85.0)), 0.0f, 100.0f);
+				}
+				if (user.GetValue("TextureStream", "fRefillGapPct")) {
+					ts.legacyGapPct = std::clamp(static_cast<float>(user.GetDoubleValue("TextureStream", "fRefillGapPct", 10.0)), 2.0f, 50.0f);
+				}
+			}
+		}
 		ts.safetyFactor = static_cast<float>(ini.GetDoubleValue("TextureStream", "fSafetyFactor", ts.safetyFactor));
 		ts.minEdge = static_cast<float>(ini.GetDoubleValue("TextureStream", "fMinEdge", ts.minEdge));
 		ts.maxEdge = static_cast<float>(ini.GetDoubleValue("TextureStream", "fMaxEdge", ts.maxEdge));

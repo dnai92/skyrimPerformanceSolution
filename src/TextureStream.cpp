@@ -315,19 +315,51 @@ namespace TextureStream
 			}
 		}
 
-		// Darf verkleinert werden? Im Budget-Modus nur, wenn der VRAM knapp wird (unbekannt = ja)
+		// Freier VRAM im Windows-Budget (MB), -1 = unbekannt
+		double FreeMB() noexcept
+		{
+			const auto budget = g_vramBudget.load(std::memory_order_relaxed), usage = g_vramUsage.load(std::memory_order_relaxed);
+			if (budget == 0) {
+				return -1.0;
+			}
+			return (static_cast<double>(budget) - static_cast<double>(usage)) / 1048576.0;
+		}
+
+		// Darf verkleinert werden? Im Budget-Modus nur, wenn weniger als der Puffer frei ist (unbekannt = ja)
 		bool Pressure() noexcept
 		{
 			const auto& cfg = Config::textureStream;
 			if (!cfg.budgetMode) {
 				return true;
 			}
-			const float pct = g_vramPct.load(std::memory_order_relaxed);
+			const double free = FreeMB();
 			// Ausgelagerter Speicher = der VRAM laeuft schon ueber (genau das verursachte die Ruckler beim Umdrehen)
 			// Nur solange der VRAM auch nahe der Schwelle ist - Windows holt Ausgelagertes nicht immer sofort zurueck,
 			// sonst wuerde endlos weiter verkleinert
-			const bool overflowing = g_procShared.load(std::memory_order_relaxed) >= kSharedPressure && pct >= cfg.budgetStartPct - cfg.refillGapPct / 2.0f;
-			return pct < 0.0f || pct >= cfg.budgetStartPct || overflowing;
+			const bool overflowing = g_procShared.load(std::memory_order_relaxed) >= kSharedPressure && free <= cfg.reserveMB + cfg.refillGapMB / 2.0;
+			return free < 0.0 || free <= cfg.reserveMB || overflowing;
+		}
+
+		// Alte Prozent-Werte (bis 1.0.46) in MB umrechnen, sobald das Budget bekannt ist - gleiche Schwelle wie vorher
+		void MigrateLegacyThresholds() noexcept
+		{
+			auto&      cfg = Config::textureStream;
+			const auto budget = g_vramBudget.load(std::memory_order_relaxed);
+			if ((cfg.legacyStartPct < 0.0f && cfg.legacyGapPct < 0.0f) || budget == 0) {
+				return;
+			}
+			const double mb = static_cast<double>(budget) / 1048576.0;
+			const auto   round64 = [](double a_v) { return static_cast<float>(std::round(a_v / 64.0) * 64.0); };
+			if (cfg.legacyStartPct >= 0.0f) {
+				cfg.reserveMB = std::clamp(round64(mb * (100.0 - cfg.legacyStartPct) / 100.0), 256.0f, 8192.0f);
+			}
+			if (cfg.legacyGapPct >= 0.0f) {
+				cfg.refillGapMB = std::clamp(round64(mb * cfg.legacyGapPct / 100.0), 256.0f, 4096.0f);
+			}
+			logger::info("TextureStream: VRAM threshold from percent ({:.0f} %, gap {:.0f} %) converted to keep {:.0f} MB free, refill gap {:.0f} MB",
+				cfg.legacyStartPct, cfg.legacyGapPct, cfg.reserveMB, cfg.refillGapMB);
+			cfg.legacyStartPct = cfg.legacyGapPct = -1.0f;
+			Config::MarkDirty();
 		}
 
 		bool LoadPressure() noexcept
@@ -1689,8 +1721,9 @@ namespace TextureStream
 			const bool active = Active();
 			const bool pressure = Pressure();
 			// VRAM laeuft schon ueber oder deutlich ueber der Schwelle: nicht erst drei Durchlaeufe abwarten
-			const bool heavy = pressure && (g_procShared.load(std::memory_order_relaxed) >= kSharedPressure ||
-			                                g_vramPct.load(std::memory_order_relaxed) >= Config::textureStream.budgetStartPct + 7.0f);
+			const double freeMB = FreeMB();
+			const bool   heavy = pressure && (g_procShared.load(std::memory_order_relaxed) >= kSharedPressure ||
+			                                  (freeMB >= 0.0 && freeMB <= Config::textureStream.reserveMB / 2.0));
 			// Kandidaten erst sammeln: im Budget-Modus die mit der groessten Ersparnis zuerst verkleinern
 			struct Candidate
 			{
@@ -1715,7 +1748,7 @@ namespace TextureStream
 				g_lastPressureTicks.store(now.time_since_epoch().count(), std::memory_order_relaxed);
 			}
 			const bool calm = now - g_lastPressure >= kRefillCalm && now - g_lastLoad >= kRefillCalm;
-			const bool wantRefill = active && cfg.budgetMode && cfg.refill && calm && pct >= 0.0f && pct < cfg.budgetStartPct - cfg.refillGapPct &&
+			const bool wantRefill = active && cfg.budgetMode && cfg.refill && calm && pct >= 0.0f && freeMB >= cfg.reserveMB + cfg.refillGapMB &&
 			                        g_procShared.load(std::memory_order_relaxed) < kSharedPressure / 2;
 			g_reducedCount = 0;
 			for (auto it = g_tex.begin(); it != g_tex.end(); ++it) {
@@ -1773,7 +1806,7 @@ namespace TextureStream
 				const double budget = static_cast<double>(g_vramBudget.load(std::memory_order_relaxed));
 				const double usage = static_cast<double>(g_vramUsage.load(std::memory_order_relaxed));
 				// Ziel unterhalb der Ueberlauf-Grenze (Schwelle - Abstand/2), damit Auffuellen nicht selbst Knappheit ausloest
-				double room = budget * (cfg.budgetStartPct - cfg.refillGapPct * 0.75) / 100.0 - usage - static_cast<double>(g_inflightUp);
+				double room = budget - usage - (cfg.reserveMB + cfg.refillGapMB * 0.75) * 1048576.0 - static_cast<double>(g_inflightUp);
 				room = std::min(room, static_cast<double>(kRefillPerPass));
 				std::ranges::sort(refill, [](const RefillCandidate& a, const RefillCandidate& b) { return a.priority > b.priority; });
 				for (const auto& c : refill) {
@@ -2016,9 +2049,9 @@ namespace TextureStream
 				std::scoped_lock lock(g_sizeLock);
 				remembered = g_loadEdge.size();
 			}
-			logger::info("[TextureStream]   VRAM {:.1f} / {:.1f} GB ({:.0f} %, DXGI {:.1f} GB, paged out {:.0f} MB) | budget mode {} from {:.0f} % -> {}",
+			logger::info("[TextureStream]   VRAM {:.1f} / {:.1f} GB ({:.0f} %, DXGI {:.1f} GB, paged out {:.0f} MB) | budget mode {} keep {:.0f} MB free -> {}",
 				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_dxgiUsage.load() / 1073741824.0,
-				g_procShared.load() / 1048576.0, Config::textureStream.budgetMode ? "ON" : "OFF", Config::textureStream.budgetStartPct,
+				g_procShared.load() / 1048576.0, Config::textureStream.budgetMode ? "ON" : "OFF", Config::textureStream.reserveMB,
 				Pressure() ? "downscaling" : "enough room");
 			{
 				std::scoped_lock lock(g_cacheLock);
@@ -2194,6 +2227,7 @@ namespace TextureStream
 		if (now - lastVram >= 250ms) {
 			lastVram = now;
 			UpdateVram();
+			MigrateLegacyThresholds();
 		}
 
 		ApplyResults();
