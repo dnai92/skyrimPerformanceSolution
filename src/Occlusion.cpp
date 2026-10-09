@@ -3,6 +3,8 @@
 #include "Config.h"
 #include "OcclusionGpu.h"
 
+#include <memory>
+
 namespace Occlusion
 {
 	namespace
@@ -13,45 +15,50 @@ namespace Occlusion
 		// Matrix-Konvention (Zeilen-/Spaltenvektor) und ob Positionen relativ zu posAdjust erwartet werden.
 		struct CamSnap
 		{
-			float        m[4][4]{};
-			bool         colVec = true;     // clip = M * v (sonst v * M)
-			bool         relative = true;   // v = Welt - posAdjust
-			RE::NiPoint3 posAdjust{};
-			float        depthA = 0.0f, depthB = 0.0f;  // Tiefe(NDC) = A + B / w
-			bool         reversed = false;              // fern = kleiner Wert
-			float        sx = 1.0f, sy = 1.0f;          // Projektions-Skalierung x/y
+			float         m[4][4]{};
+			bool          colVec = true;     // clip = M * v (sonst v * M)
+			bool          relative = true;   // v = Welt - posAdjust
+			RE::NiPoint3  posAdjust{};
+			float         depthA = 0.0f, depthB = 0.0f;  // Tiefe(NDC) = A + B / w
+			bool          reversed = false;              // fern = kleiner Wert
+			float         sx = 1.0f, sy = 1.0f;          // Projektions-Skalierung x/y
 			std::uint64_t frame = 0;
-			bool         valid = false;
+			bool          valid = false;
 		};
 
+		// Tiefenbild + zugehoerige Kamera, unveraenderlich nach dem Veroeffentlichen. GetRenderPasses laeuft auf
+		// Worker-Threads (1.1.0-Test: ~1800 Objekte/Frame, keines im Main-Thread) -> Austausch nur ueber shared_ptr.
+		struct Snapshot
+		{
+			OcclusionGpu::Readback rb;
+			CamSnap                cam;
+		};
+		std::atomic<std::shared_ptr<const Snapshot>> g_current;
+
+		// Main-Thread
 		constexpr std::uint32_t kSnaps = 8;
 		CamSnap       g_snaps[kSnaps];
 		std::uint32_t g_nextTag = 0;
 		bool          g_snapPending = false;  // Kamera dieses Frames gemerkt, Tiefe noch nicht eingereicht
 		std::uint64_t g_frame = 0;
-
-		OcclusionGpu::Readback g_cur;
-		CamSnap                g_curCam;
-		bool                   g_curValid = false;
-		std::uint64_t          g_curFrame = 0;  // Frame, aus dem das aktuelle Bild stammt
-
-		// Minutenbericht
-		struct AccStats
-		{
-			const void*   acc = nullptr;
-			std::uint64_t geoms = 0, draws = 0, tested = 0, occGeoms = 0, occDraws = 0, tooBig = 0;
-			std::uint64_t occSkinned = 0, occSmall = 0, occMid = 0, occLarge = 0;  // verdeckte Draws nach Radius <50 / <200 / groesser
-		};
-		AccStats      g_acc[4];
-		std::uint64_t g_accOther = 0;
-		std::uint64_t g_captures = 0, g_ringFull = 0, g_noSrv = 0, g_reads = 0, g_latencySum = 0;
-		std::uint64_t g_testNs = 0;
-		std::uint32_t g_lastSource = 0;
 		Clock::time_point g_reportStart = Clock::now();
 		bool          g_initTried = false;
-		bool          g_snapFailLogged = false;
-		std::uint32_t g_mainThread = 0;      // Thread des Present (= Render-/Main-Thread)
-		std::uint64_t g_otherThread = 0;     // Aufrufe von anderen Threads (nicht gezaehlt)
+		std::uint32_t g_lastSource = 0;
+		std::uint32_t g_lastSrcW = 0, g_lastSrcH = 0;
+
+		// Minutenbericht (Zaehler von allen Threads)
+		struct AccStats
+		{
+			std::atomic<const void*>   acc{ nullptr };
+			std::atomic<std::uint64_t> geoms{ 0 }, draws{ 0 }, tested{ 0 }, occGeoms{ 0 }, occDraws{ 0 }, tooBig{ 0 };
+			std::atomic<std::uint64_t> occSkinned{ 0 }, occSmall{ 0 }, occMid{ 0 }, occLarge{ 0 };  // verdeckte Draws nach Radius <50 / <200 / groesser
+		};
+		AccStats                   g_acc[4];
+		std::atomic<std::uint64_t> g_accOther{ 0 }, g_noSnapshot{ 0 }, g_testNs{ 0 };
+		// Main-Thread-Zaehler
+		std::uint64_t g_prepassCalls = 0, g_camFail = 0, g_captures = 0, g_ringFull = 0, g_noSrv = 0, g_reads = 0, g_latencySum = 0;
+		float         g_camFailErrSum = 0.0f;
+		const char*   g_camLayout = "unknown";
 
 		void Mul(const CamSnap& a_c, const RE::NiPoint3& a_world, float a_out[4]) noexcept
 		{
@@ -63,10 +70,10 @@ namespace Occlusion
 			}
 		}
 
-		// 0 = nicht pruefbar, 1 = sichtbar, 2 = verdeckt, 3 = zu gross (nicht geprueft)
-		int Test(const RE::NiBound& a_b) noexcept
+		// 1 = sichtbar, 2 = verdeckt, 3 = zu gross (nicht geprueft)
+		int Test(const Snapshot& a_s, const RE::NiBound& a_b) noexcept
 		{
-			const auto& c = g_curCam;
+			const auto& c = a_s.cam;
 			float       clip[4];
 			Mul(c, a_b.center, clip);
 			const float w = clip[3], r = std::max(a_b.radius, 0.0f);
@@ -89,10 +96,12 @@ namespace Occlusion
 			if ((u1 - u0 + 1) * (v1 - v0 + 1) > 4096) {
 				return 3;
 			}
+			const auto& lo = a_s.rb.minDepth;
+			const auto& hi = a_s.rb.maxDepth;
 			for (int v = v0; v <= v1; ++v) {
 				const auto row = static_cast<std::size_t>(v) * OcclusionGpu::kWidth;
 				for (int u = u0; u <= u1; ++u) {
-					if (c.reversed ? dn >= g_cur.minDepth[row + u] : dn <= g_cur.maxDepth[row + u]) {
+					if (c.reversed ? dn >= lo[row + u] : dn <= hi[row + u]) {
 						return 1;
 					}
 				}
@@ -103,17 +112,17 @@ namespace Occlusion
 		AccStats& Slot(const void* a_acc) noexcept
 		{
 			for (auto& s : g_acc) {
-				if (s.acc == a_acc) {
+				if (s.acc.load(std::memory_order_relaxed) == a_acc) {
 					return s;
 				}
 			}
 			for (auto& s : g_acc) {
-				if (!s.acc) {
-					s.acc = a_acc;
+				const void* expected = nullptr;
+				if (s.acc.compare_exchange_strong(expected, a_acc) || expected == a_acc) {
 					return s;
 				}
 			}
-			++g_accOther;
+			g_accOther.fetch_add(1, std::memory_order_relaxed);
 			return g_acc[3];
 		}
 
@@ -126,30 +135,32 @@ namespace Occlusion
 			const double secs = std::chrono::duration<double>(now - g_reportStart).count();
 			g_reportStart = now;
 			const double frames = std::max<double>(1.0, static_cast<double>(g_frame));
+			const auto   cur = g_current.load();
 			std::uint32_t sky = 0;
-			if (g_curValid) {
-				for (std::size_t i = 0; i < g_cur.maxDepth.size(); ++i) {
-					sky += g_curCam.reversed ? g_cur.minDepth[i] <= 1e-6f : g_cur.maxDepth[i] >= 0.99999f;
+			if (cur) {
+				for (std::size_t i = 0; i < cur->rb.maxDepth.size(); ++i) {
+					sky += cur->cam.reversed ? cur->rb.minDepth[i] <= 1e-6f : cur->rb.maxDepth[i] >= 0.99999f;
 				}
 			}
-			logger::info("[Occlusion] {:.0f} s | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | camera {}{}{} | sky tiles {:.0f} % | test time {:.2f} ms/frame | calls from other threads {}",
-				secs, g_lastSource == 0 ? "post-prepass copy" : "main", g_cur.srcW, g_cur.srcH, g_captures, g_ringFull, g_noSrv, g_reads,
-				g_reads ? static_cast<double>(g_latencySum) / g_reads : 0.0, g_curCam.valid ? (g_curCam.colVec ? "col" : "row") : "invalid",
-				g_curCam.relative ? "/rel" : "/abs", g_curCam.reversed ? "/reversed-z" : "/standard-z",
-				g_curValid ? 100.0 * sky / g_cur.maxDepth.size() : 0.0, g_testNs / 1e6 / frames, g_otherThread);
-			for (const auto& s : g_acc) {
-				if (!s.acc || !s.geoms) {
+			logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera {} (not understood {}, avg w error {:.0f}) | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
+				secs, frames, g_prepassCalls, g_camLayout, g_camFail, g_camFail ? g_camFailErrSum / g_camFail : 0.0f, g_lastSource == 0 ? "post-prepass copy" : "main",
+				g_lastSrcW, g_lastSrcH, g_captures, g_ringFull, g_noSrv, g_reads, g_reads ? static_cast<double>(g_latencySum) / g_reads : 0.0,
+				cur ? 100.0 * sky / cur->rb.maxDepth.size() : 0.0, g_testNs.exchange(0) / 1e6 / frames, g_noSnapshot.exchange(0));
+			for (auto& s : g_acc) {
+				const auto geoms = s.geoms.exchange(0);
+				const auto acc = s.acc.exchange(nullptr);
+				const auto draws = s.draws.exchange(0), tested = s.tested.exchange(0), occGeoms = s.occGeoms.exchange(0), occDraws = s.occDraws.exchange(0);
+				const auto tooBig = s.tooBig.exchange(0), occSkinned = s.occSkinned.exchange(0), occSmall = s.occSmall.exchange(0), occMid = s.occMid.exchange(0), occLarge = s.occLarge.exchange(0);
+				if (!acc || !geoms) {
 					continue;
 				}
-				logger::info("[Occlusion]   accumulator {} | per frame: objects {:.0f}, draws {:.0f}, tested {:.0f} | occluded: objects {:.0f} ({:.0f} %), draws {:.0f} ({:.0f} %) | occluded draws by radius <50 {:.0f}, <200 {:.0f}, larger {:.0f}, skinned {:.0f} | too big {:.0f}",
-					s.acc, s.geoms / frames, s.draws / frames, s.tested / frames, s.occGeoms / frames, s.tested ? 100.0 * s.occGeoms / s.tested : 0.0,
-					s.occDraws / frames, s.draws ? 100.0 * s.occDraws / s.draws : 0.0, s.occSmall / frames, s.occMid / frames, s.occLarge / frames,
-					s.occSkinned / frames, s.tooBig / frames);
+				logger::info("[Occlusion]   accumulator {} | per frame: objects {:.0f}, draws {:.0f}, tested {:.0f} | occluded: objects {:.0f} ({:.0f} % of tested), draws {:.0f} ({:.0f} % of all) | occluded draws by radius <50 {:.0f}, <200 {:.0f}, larger {:.0f}, skinned {:.0f} | too big {:.0f}",
+					acc, geoms / frames, draws / frames, tested / frames, occGeoms / frames, tested ? 100.0 * occGeoms / tested : 0.0, occDraws / frames,
+					draws ? 100.0 * occDraws / draws : 0.0, occSmall / frames, occMid / frames, occLarge / frames, occSkinned / frames, tooBig / frames);
 			}
-			for (auto& s : g_acc) {
-				s = {};
-			}
-			g_otherThread = g_accOther = g_captures = g_ringFull = g_noSrv = g_reads = g_latencySum = g_testNs = 0;
+			g_accOther = 0;
+			g_prepassCalls = g_camFail = g_captures = g_ringFull = g_noSrv = g_reads = g_latencySum = 0;
+			g_camFailErrSum = 0.0f;
 			g_frame = 0;
 		}
 	}
@@ -159,20 +170,21 @@ namespace Occlusion
 		if (!Config::occlusionProbe.load(std::memory_order_relaxed)) {
 			return;
 		}
+		++g_prepassCalls;
 		const auto state = RE::BSGraphics::RendererShadowState::GetSingleton();
 		const auto cam = RE::Main::WorldRootCamera();
 		if (!state || !cam) {
 			return;
 		}
-		auto&       rd = state->GetRuntimeData();
-		const auto  view = rd.cameraData.getEye();
-		auto&       s = g_snaps[g_nextTag % kSnaps];
+		auto&      rd = state->GetRuntimeData();
+		const auto view = rd.cameraData.getEye();
+		auto&      s = g_snaps[g_nextTag % kSnaps];
 		s = {};
 		std::memcpy(s.m, &view.viewProjMatrixUnjittered, sizeof(s.m));
 		s.posAdjust = rd.posAdjust.getEye();
 		s.sx = std::abs(view.projMatrixUnjittered.m[0][0]);
 		s.sy = std::abs(view.projMatrixUnjittered.m[1][1]);
-		// Konvention bestimmen: ein Punkt 1000 Einheiten vor der Kamera muss w ~ 1000 ergeben
+		// Konvention bestimmen: ein Punkt 1000 Einheiten vor der Kamera muss w ~ 1000 ergeben.
 		// Blickrichtung: Spalte 0 der Kamera (Gamebryo) oder viewForward der Renderer-Kamera - die passende gewinnt
 		const auto&        camPos = cam->world.translate;
 		const auto&        rot = cam->world.rotate;
@@ -200,10 +212,8 @@ namespace Occlusion
 		}
 		fwd = bestFwd;
 		if (best > 50.0f) {
-			if (!g_snapFailLogged) {
-				g_snapFailLogged = true;
-				logger::warn("[Occlusion] camera matrix not understood (w error {:.1f} at 1000 units) - probe inactive", best);
-			}
+			++g_camFail;
+			g_camFailErrSum += std::min(best, 1e6f);
 			return;
 		}
 		float c1[4], c2[4];
@@ -215,6 +225,7 @@ namespace Occlusion
 		s.depthA = d1 - s.depthB / c1[3];
 		s.frame = g_frame;
 		s.valid = true;
+		g_camLayout = s.colVec ? (s.relative ? "col/rel" : "col/abs") : (s.relative ? "row/rel" : "row/abs");
 		g_snapPending = true;
 	}
 
@@ -222,7 +233,7 @@ namespace Occlusion
 	{
 		++g_frame;
 		if (!Config::occlusionProbe.load(std::memory_order_relaxed)) {
-			g_curValid = false;
+			g_current.store(nullptr);
 			return;
 		}
 		const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
@@ -242,19 +253,24 @@ namespace Occlusion
 			}
 			logger::info("[Occlusion] probe ready ({}x{} tiles, measuring only)", OcclusionGpu::kWidth, OcclusionGpu::kHeight);
 		}
-		// fertige Ergebnisse abholen (das neueste gilt)
+		// fertige Ergebnisse abholen (das neueste gilt) und fuer alle Threads veroeffentlichen
 		OcclusionGpu::Readback rb;
+		std::shared_ptr<Snapshot> newest;
 		while (OcclusionGpu::Poll(ctx, rb)) {
 			const auto& snap = g_snaps[rb.tag % kSnaps];
 			if (!snap.valid) {
 				continue;
 			}
-			g_cur = std::move(rb);
-			g_curCam = snap;
-			g_curFrame = snap.frame;
-			g_curValid = true;
+			newest = std::make_shared<Snapshot>();
+			newest->rb = std::move(rb);
+			newest->cam = snap;
+			g_lastSrcW = newest->rb.srcW;
+			g_lastSrcH = newest->rb.srcH;
 			++g_reads;
 			g_latencySum += g_frame - snap.frame;
+		}
+		if (newest) {
+			g_current.store(std::move(newest));
 		}
 		// Tiefe dieses Frames einreichen
 		if (g_snapPending) {
@@ -280,40 +296,37 @@ namespace Occlusion
 		if (!Config::occlusionProbe.load(std::memory_order_relaxed)) {
 			return;
 		}
-		// nur im Main-Thread: dort wird auch das Tiefenbild ausgetauscht
-		if (REX::W32::GetCurrentThreadId() != g_mainThread) {
-			++g_otherThread;
-			return;
-		}
 		auto& s = Slot(a_accumulator);
-		++s.geoms;
-		s.draws += a_draws;
-		if (!g_curValid) {
+		s.geoms.fetch_add(1, std::memory_order_relaxed);
+		s.draws.fetch_add(a_draws, std::memory_order_relaxed);
+		const auto snap = g_current.load();
+		if (!snap) {
+			g_noSnapshot.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
 		const auto t0 = Clock::now();
-		const int  r = Test(a_geom.worldBound);
-		g_testNs += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count());
+		const int  r = Test(*snap, a_geom.worldBound);
+		g_testNs.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count()), std::memory_order_relaxed);
 		if (r == 3) {
-			++s.tooBig;
+			s.tooBig.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
-		++s.tested;
+		s.tested.fetch_add(1, std::memory_order_relaxed);
 		if (r != 2) {
 			return;
 		}
-		++s.occGeoms;
-		s.occDraws += a_draws;
+		s.occGeoms.fetch_add(1, std::memory_order_relaxed);
+		s.occDraws.fetch_add(a_draws, std::memory_order_relaxed);
 		const float rad = a_geom.worldBound.radius;
-		(rad < 50.0f ? s.occSmall : rad < 200.0f ? s.occMid : s.occLarge) += a_draws;
+		(rad < 50.0f ? s.occSmall : rad < 200.0f ? s.occMid : s.occLarge).fetch_add(a_draws, std::memory_order_relaxed);
 		if (const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData().skinInstance) {
-			s.occSkinned += a_draws;
+			s.occSkinned.fetch_add(a_draws, std::memory_order_relaxed);
 		}
 	}
 
 	void Reset() noexcept
 	{
-		g_curValid = false;
+		g_current.store(nullptr);
 		g_snapPending = false;
 		OcclusionGpu::Reset();
 	}
