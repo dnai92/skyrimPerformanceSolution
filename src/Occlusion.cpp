@@ -581,6 +581,24 @@ namespace Occlusion
 	void OnPresent() noexcept
 	{
 		++g_frame;
+		// Tracy-Marke bei jeder Aenderung von Schalter/Stellschrauben (Abschnitte einer Aufnahme zuordnen)
+		{
+			static std::string       last, pending;
+			static Clock::time_point pendingSince{};
+			auto cur = std::format("Occlusion: hiding {} | measure {} | pause {:.1f} deg / {:.0f} | margin {:.1f} % + {:.0f} | streak {} | max tiles {} | characters {}",
+				Config::occlusionCull.load() && Config::masterEnabled.load() ? "ON" : "off", Config::occlusionProbe.load() ? "on" : "off", Config::occlTurnDeg.load(),
+				Config::occlMoveUnits.load(), Config::occlMarginPct.load(), Config::occlMarginUnits.load(), Config::occlStreak.load(), Config::occlMaxTiles.load(),
+				Config::occlSkipSkinned.load() ? "never" : "allowed");
+			// erst melden, wenn der Wert 0,5 s steht (Regler ziehen erzeugt sonst eine Flut)
+			if (cur != pending) {
+				pending = std::move(cur);
+				pendingSince = Clock::now();
+			} else if (pending != last && Clock::now() - pendingSince >= std::chrono::milliseconds(500)) {
+				TracyMessageC(pending.data(), pending.size(), 0x40FF40);
+				logger::info("[Occlusion] {}", pending);
+				last = pending;
+			}
+		}
 		if (!Active()) {
 			g_current.store(nullptr);
 			return;
