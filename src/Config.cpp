@@ -1,5 +1,7 @@
 #include "Config.h"
 
+#include "TextureStream.h"
+
 #include <SimpleIni.h>
 
 namespace Config
@@ -95,6 +97,12 @@ namespace Config
 			f("Occlusion", "iMaxTiles", static_cast<float>(occlMaxTiles.load()));
 			b("Occlusion", "bNeverCharacters", occlSkipSkinned.load());
 			b("TextureStream", "bStreamCharacters", textureStream.streamCharacters);
+			{
+				const long mask = static_cast<long>(::TextureStream::GetDebugInclude());
+				if (!haveBase || !base.GetValue("TextureStream", "iIncludeExcluded") || base.GetLongValue("TextureStream", "iIncludeExcluded", mask) != mask) {
+					ini.SetLongValue("TextureStream", "iIncludeExcluded", mask);
+				}
+			}
 			b("SubtreePruning", "bSun", subtreePruning.sun);
 			b("SubtreePruning", "bPrecipitation", subtreePruning.precip);
 			f("LightGatherThrottle", "fMinMove", lightGather.minMove);
@@ -303,6 +311,7 @@ namespace Config
 		ts.exclude = ini.GetValue("TextureStream", "sExclude", ts.exclude.c_str());
 		ts.streamClothing = ini.GetBoolValue("TextureStream", "bStreamClothing", ts.streamClothing);
 		ts.streamCharacters = ini.GetBoolValue("TextureStream", "bStreamCharacters", ts.streamCharacters);
+		::TextureStream::SetDebugInclude(static_cast<std::uint32_t>(ini.GetLongValue("TextureStream", "iIncludeExcluded", 0)) & 0x1F);
 		logger::info("TextureStream: {} | report {} | safety factor {:.1f} | min. {:.0f} px | budget {:.2f} ms | clothing/armor {} | bodies/faces/hair {} | excluded: {}",
 			ts.enabled ? "ON" : "OFF", ts.analysis, ts.safetyFactor, ts.minEdge, ts.budgetMs, ts.streamClothing, ts.streamCharacters, ts.exclude);
 

@@ -308,13 +308,14 @@ namespace Menu
 			}
 		}
 
-		// Debug: nichts davon wird gespeichert, nach jedem Spielstart ist alles aus
+		// Ausgenommene Texturarten trotzdem streamen (wird gespeichert: [TextureStream] iIncludeExcluded)
 		void DebugInclude(const char* a_label, std::uint32_t a_bit, const char* a_tip)
 		{
 			const auto mask = TextureStream::GetDebugInclude();
 			bool       v = (mask & a_bit) != 0;
 			if (MenuApi::Checkbox(a_label, &v)) {
 				TextureStream::SetDebugInclude(v ? (mask | a_bit) : (mask & ~a_bit));
+				Config::MarkDirty();
 			}
 			Tip(a_tip);
 		}
@@ -605,7 +606,7 @@ namespace Menu
 				T("Body, face and hair textures (textures/actors/character) of far characters are shrunk as well. Whether it works depends on your installed body, face and hair mods. If faces or hair look wrong (black, purple, blurry), turn this off.",
 					"Körper-, Gesichts- und Haartexturen (textures/actors/character) ferner Figuren werden ebenfalls verkleinert. Ob es funktioniert, hängt von den installierten Körper-, Gesichts- und Haarmods ab. Sehen Gesichter oder Haare falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
 
-			MenuApi::SeparatorText(T("Test: also include excluded types (not saved)", "Test: ausgenommene Arten mit einbeziehen (nicht gespeichert)"));
+			MenuApi::SeparatorText(T("Also include excluded types", "Ausgenommene Arten mit einbeziehen"));
 			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size.",
 											"Diese Texturarten werden normalerweise nie verkleinert. Häkchen setzen, um live zu sehen, wie sie sich verhalten, am besten zusammen mit einer kleinen max. Texturgröße (1K). Häkchen weg, dann kommen sie wieder in voller Größe."));
 			DebugInclude(T("Distant terrain and LOD##dbg", "Ferne Landschaft und LOD##dbg"), TextureStream::kIncludeLod,
