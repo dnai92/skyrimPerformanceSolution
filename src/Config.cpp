@@ -86,6 +86,14 @@ namespace Config
 			f("TextureStream", "fMaxEdge", textureStream.maxEdge);
 			b("TextureStream", "bStreamClothing", textureStream.streamClothing);
 			b("LightShadowCache", "bEnabled", lightShadowCache.enabled);
+			b("Occlusion", "bCull", occlusionCull.load());
+			f("Occlusion", "fPauseTurnDeg", occlTurnDeg.load());
+			f("Occlusion", "fPauseMove", occlMoveUnits.load());
+			f("Occlusion", "fMarginPercent", occlMarginPct.load());
+			f("Occlusion", "fMarginUnits", occlMarginUnits.load());
+			f("Occlusion", "iHiddenInARow", static_cast<float>(occlStreak.load()));
+			f("Occlusion", "iMaxTiles", static_cast<float>(occlMaxTiles.load()));
+			b("Occlusion", "bNeverCharacters", occlSkipSkinned.load());
 			b("TextureStream", "bStreamCharacters", textureStream.streamCharacters);
 			b("SubtreePruning", "bSun", subtreePruning.sun);
 			b("SubtreePruning", "bPrecipitation", subtreePruning.precip);
@@ -156,6 +164,17 @@ namespace Config
 		analysis.store(ini.GetBoolValue("General", "bAnalysis", analysis.load()), std::memory_order_relaxed);
 #endif
 		engineProbes = ini.GetBoolValue("General", "bEngineProbes", engineProbes);
+		occlusionProbe.store(ini.GetBoolValue("Occlusion", "bProbe", occlusionProbe.load()), std::memory_order_relaxed);
+		occlusionCull.store(ini.GetBoolValue("Occlusion", "bCull", occlusionCull.load()), std::memory_order_relaxed);
+		occlTurnDeg.store(std::clamp(static_cast<float>(ini.GetDoubleValue("Occlusion", "fPauseTurnDeg", occlTurnDeg.load())), 0.5f, 20.0f), std::memory_order_relaxed);
+		occlMoveUnits.store(std::clamp(static_cast<float>(ini.GetDoubleValue("Occlusion", "fPauseMove", occlMoveUnits.load())), 0.0f, 512.0f), std::memory_order_relaxed);
+		occlMarginPct.store(std::clamp(static_cast<float>(ini.GetDoubleValue("Occlusion", "fMarginPercent", occlMarginPct.load())), 0.0f, 20.0f), std::memory_order_relaxed);
+		occlMarginUnits.store(std::clamp(static_cast<float>(ini.GetDoubleValue("Occlusion", "fMarginUnits", occlMarginUnits.load())), 0.0f, 256.0f), std::memory_order_relaxed);
+		occlStreak.store(static_cast<std::uint32_t>(std::clamp(ini.GetDoubleValue("Occlusion", "iHiddenInARow", occlStreak.load()), 1.0, 4.0) + 0.5), std::memory_order_relaxed);
+		occlMaxTiles.store(static_cast<std::uint32_t>(std::clamp(ini.GetDoubleValue("Occlusion", "iMaxTiles", occlMaxTiles.load()), 256.0, 36864.0) + 0.5), std::memory_order_relaxed);
+		occlSkipSkinned.store(ini.GetBoolValue("Occlusion", "bNeverCharacters", occlSkipSkinned.load()), std::memory_order_relaxed);
+		logger::info("Occlusion (beta): hiding {} | pause from {:.1f} deg / {:.0f} units | margin {:.1f} % + {:.0f} | hidden in {} images in a row | max {} tiles | characters {}", occlusionCull.load() ? "ON" : "OFF", occlTurnDeg.load(), occlMoveUnits.load(), occlMarginPct.load(), occlMarginUnits.load(), occlStreak.load(), occlMaxTiles.load(), occlSkipSkinned.load() ? "never" : "allowed");
+		occlusionDepthSource.store(static_cast<std::uint32_t>(std::clamp(ini.GetLongValue("Occlusion", "iDepthSource", 0), 0L, 1L)), std::memory_order_relaxed);
 		toggleKey.store(static_cast<std::uint32_t>(ini.GetLongValue("General", "iToggleKey", toggleKey.load())), std::memory_order_relaxed);
 
 		const auto readRule = [&](const char* a_section, CullRule& a_rule) {

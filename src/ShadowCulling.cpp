@@ -6,6 +6,7 @@
 #include "DetourHelper.h"
 #include "GpuTimer.h"
 #include "LightShadowCache.h"
+#include "Occlusion.h"
 #include "SceneUtil.h"
 #include "Stats.h"
 
@@ -951,10 +952,12 @@ namespace ShadowCulling
 			static void thunk(bool a_arg1, bool a_arg2)
 			{
 				g_inDepthPrepass.store(true, std::memory_order_relaxed);
+				Occlusion::OnDepthPrepassBegin();
 				GpuTimer::Begin(GpuTimer::kDepthPrepass);
 				func(a_arg1, a_arg2);
 				GpuTimer::End(GpuTimer::kDepthPrepass);
 				g_inDepthPrepass.store(false, std::memory_order_relaxed);
+				Occlusion::OnDepthPrepassEnd();
 			}
 			static inline void (*func)(bool, bool) = nullptr;
 		};
@@ -986,13 +989,23 @@ namespace ShadowCulling
 			static RE::BSShaderProperty::RenderPassArray* thunk(RE::BSLightingShaderProperty* a_this, RE::BSGeometry* a_geometry, std::uint32_t a_renderFlags, RE::BSShaderAccumulator* a_accumulator)
 			{
 				// Die Liste gehoert der Property und wird ueber lastRenderPassState zwischengespeichert: das Original baut sie
-				// nur neu, wenn sich der Zustand (z. B. Lichter) aendert. Geleert bliebe das Objekt auch spaeter ohne
-				// Beleuchtungs-Draws (graue Silhouette, bis es nah herankommt) -> leere Liste nur fuer diesen Aufruf zurueckgeben.
+				// nur neu, wenn sich der Zustand (z. B. Lichter) aendert. Leeren wir sie, bleibt das Objekt in den Folgeframes
+				// ohne Beleuchtungs-Draws (nur Tiefe -> graue Silhouette), bis es nah herankommt oder neu geladen wird.
+				// Deshalb eine leere Liste zurueckgeben und den Zwischenspeicher unangetastet lassen.
 				thread_local RE::BSShaderProperty::RenderPassArray empty{ nullptr, 0 };
 				const auto passes = func(a_this, a_geometry, a_renderFlags, a_accumulator);
 				if (passes && passes->head && a_geometry && ShouldCullMain(*a_geometry)) {
 					empty.head = nullptr;
 					return &empty;
+				} else if (passes && passes->head && a_geometry) {
+					std::uint32_t draws = 0;
+					for (auto p = passes->head; p && draws < 64; p = p->next) {
+						++draws;
+					}
+					if (Occlusion::CountMain(*a_geometry, a_accumulator, draws)) {
+						empty.head = nullptr;
+						return &empty;
+					}
 				}
 				return passes;
 			}

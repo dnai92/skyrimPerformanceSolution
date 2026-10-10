@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include "Features.h"
+#include "Occlusion.h"
 #include "ShadowCulling.h"
 #include "TextureStream.h"
 
@@ -136,13 +137,24 @@ namespace Menu
 		void HotkeyPicker()
 		{
 			const auto current = Config::toggleKey.load();
-			const auto label = g_capturingKey ? std::string(T("Press a key... (Esc = cancel)", "Taste drücken ... (Esc = abbrechen)")) : KeyName(current);
+			const auto label = g_capturingKey ? std::string(T("Press a key... (Esc = cancel)", "Taste drücken ... (Esc = abbrechen)")) :
+			                   current == 0   ? std::string(T("No key", "Keine Taste")) :
+			                                    KeyName(current);
 			if (MenuApi::Button((label + "###hotkey").c_str())) {
 				g_capturingKey = true;
 			}
 			MenuApi::SameLine();
 			MenuApi::TextUnformatted(T("Hotkey for the master switch", "Taste für den Hauptschalter"));
 			Tip(T("Click, then press the new key. Works immediately and is saved.", "Anklicken, dann die neue Taste drücken. Wirkt sofort und wird gespeichert."));
+			if (current != 0 && !g_capturingKey) {
+				MenuApi::SameLine();
+				if (MenuApi::Button(T("No key###hotkeynone", "Keine Taste###hotkeynone"))) {
+					Config::toggleKey.store(0);
+					Config::MarkDirty();
+					logger::info("Menu: hotkey removed");
+				}
+				Tip(T("The master switch then only works here in the menu.", "Der Hauptschalter geht dann nur noch hier im Menü."));
+			}
 			if (!g_capturingKey) {
 				return;
 			}
@@ -253,9 +265,9 @@ namespace Menu
 				T("Small, far objects do not cast sun shadows.", "Kleine, ferne Objekte werfen keinen Sonnenschatten."));
 			Toggle(T("Torch / point light shadow culling", "Fackelschatten kleiner Objekte weglassen"), Config::pointLightCulling.enabled,
 				T("Small, far objects do not cast shadows from torches and fires.", "Kleine, ferne Objekte werfen keinen Schatten von Fackeln und Feuern."));
-			Toggle(T("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern"), Config::lightShadowCache.enabled,
-				T("Shadows of lights that do not move are kept, only characters and moving things are redrawn. Mainly for interiors.",
-					"Schatten von Lichtern, die sich nicht bewegen, werden aufbewahrt, nur Figuren und Bewegliches werden neu gezeichnet. Vor allem für Innenräume."));
+			Toggle(T("Shadow cache for static lights (test)", "Schatten fester Lichter zwischenspeichern (Test)"), Config::lightShadowCache.enabled,
+				T("Shadows of lights that do not move are kept, only characters and moving things are redrawn. Mainly for interiors. Default OFF: with some lighting mods (e.g. Lux) shadows near fires can pulse.",
+					"Schatten von Lichtern, die sich nicht bewegen, werden aufbewahrt, nur Figuren und Bewegliches werden neu gezeichnet. Vor allem für Innenräume. Standard AUS: mit manchen Lichtmods (z. B. Lux) können Schatten an Feuern pulsieren."));
 			Toggle(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"), Config::actorShadowCulling.enabled,
 				T("Characters far away do not cast shadows.", "Weit entfernte Figuren werfen keinen Schatten."));
 			Toggle(T("Skylighting culling (Community Shaders)", "Himmelslicht: kleine Objekte weglassen (Community Shaders)"), Config::skylightingCulling.enabled,
@@ -336,6 +348,24 @@ namespace Menu
 			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
 				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
 
+			MenuApi::SeparatorText(T("Hiding occluded objects (diagnostics)", "Verdeckte Objekte weglassen (Diagnose)"));
+			AtomicToggle(T("Measure hidden objects##occ", "Verdeckte Objekte messen##occ"), Config::occlusionProbe,
+				T("Counts how many objects in the main view are hidden behind the depth of the previous frame and writes it to SPS.log every minute. Nothing is left out.",
+					"Zählt, wie viele Objekte im Hauptbild hinter der Tiefe des vorigen Bildes verdeckt sind, und schreibt das jede Minute in SPS.log. Es wird nichts weggelassen."),
+				false);
+			{
+				bool mainDepth = Config::occlusionDepthSource.load() == 1;
+				if (MenuApi::Checkbox(T("Use final depth buffer instead of pre-pass copy##occ", "Fertigen Tiefenpuffer statt Kopie nach dem Vorpass nutzen##occ"), &mainDepth)) {
+					Config::occlusionDepthSource.store(mainDepth ? 1 : 0);
+				}
+				Tip(T("Cross-check for the occlusion test: which depth image the test uses.", "Gegentest für den Verdeckungs-Test: welches Tiefenbild verwendet wird."));
+			}
+			if (MenuApi::Button(T("Save depth image##occ", "Tiefenbild speichern##occ"))) {
+				Occlusion::RequestDepthDump();
+			}
+			Tip(T("Writes the current depth image of the occlusion test next to SPS.log (SPS_OcclusionDepth_N.pgm). Take a screenshot at the same time.",
+				"Schreibt das aktuelle Tiefenbild des Verdeckungs-Tests neben SPS.log (SPS_OcclusionDepth_N.pgm). Gleichzeitig einen Screenshot machen."));
+
 			MenuApi::SeparatorText(T("Texture streaming: also include excluded types", "Textur-Streaming: ausgenommene Arten mit einbeziehen"));
 			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size.",
 											"Diese Texturarten werden normalerweise nie verkleinert. Häkchen setzen, um live zu sehen, wie sie sich verhalten, am besten zusammen mit einer kleinen max. Texturgröße (1K). Häkchen weg, dann kommen sie wieder in voller Größe."));
@@ -356,6 +386,64 @@ namespace Menu
 					"cubemaps\\. Echte Würfelkarten lassen sich nie verkleinern, nur flache Texturen in diesem Ordner."));
 			MenuApi::TextWrapped("%s", T("Not possible at all: grass, water and effect shader textures (other shaders), textures without mipmaps.",
 											"Gar nicht möglich: Gras, Wasser und Effekt-Shader-Texturen (andere Shader), Texturen ohne Mipmaps."));
+		}
+
+		// Beta: fertige, aber noch wenig erprobte Funktionen, Standard AUS
+		void __stdcall RenderBeta()
+		{
+			MenuApi::TextWrapped("%s", T("Beta features work, but have not been tested on many setups yet. All are off by default. Please report what you notice on Nexus, ideally with SPS.log.",
+											"Beta-Funktionen funktionieren, sind aber noch auf wenigen Systemen erprobt. Alle sind standardmäßig aus. Auffälligkeiten bitte auf Nexus melden, am besten mit SPS.log."));
+			MenuApi::SeparatorText(T("Hide occluded objects (beta)", "Verdeckte Objekte weglassen (Beta)"));
+			AtomicToggle(T("Enabled##occ", "Aktiv##occ"), Config::occlusionCull,
+				T("Objects in the main view that are completely hidden behind walls, houses or terrain are not drawn. A small depth image of the previous frame decides what is hidden. Shadows, reflections and water are never affected. Pauses while the camera turns or moves fast. Saves draw calls in cities, the effect on FPS depends on your setup. Watch for objects popping in. Default OFF.",
+					"Objekte im Hauptbild, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Ein kleines Tiefenbild des vorigen Bildes entscheidet, was verdeckt ist. Schatten, Spiegelungen und Wasser sind nie betroffen. Pausiert, wenn sich die Kamera schnell dreht oder bewegt. Spart Draw Calls in Städten, wie viel FPS das bringt, hängt vom System ab. Auf aufploppende Objekte achten. Standard AUS."));
+			MenuApi::TextWrapped("%s", T("Fine-tuning (only change if you know why):", "Feineinstellung (nur ändern, wenn du weißt warum):"));
+			{
+				const auto tune = [](const char* a_label, std::atomic<float>& a_v, float a_min, float a_max, const char* a_fmt, const char* a_tip) {
+					float v = a_v.load();
+					if (MenuApi::SliderFloat(a_label, &v, a_min, a_max, a_fmt)) {
+						a_v.store(v);
+						Config::MarkDirty();
+					}
+					Tip(a_tip);
+				};
+				const auto tuneInt = [](const char* a_label, std::atomic<std::uint32_t>& a_v, float a_min, float a_max, const char* a_fmt, const char* a_tip) {
+					float v = static_cast<float>(a_v.load());
+					if (MenuApi::SliderFloat(a_label, &v, a_min, a_max, a_fmt)) {
+						a_v.store(static_cast<std::uint32_t>(v + 0.5f));
+						Config::MarkDirty();
+					}
+					Tip(a_tip);
+				};
+				tune(T("Pause from camera turn##occ", "Pause ab Kameradrehung##occ"), Config::occlTurnDeg, 0.5f, 20.0f, "%.1f°",
+					T("Hiding pauses while the camera has turned more than this since the depth image. Higher = hides more often, but objects may pop in when turning fast. Default 2.",
+						"Weglassen pausiert, solange sich die Kamera seit dem Tiefenbild weiter gedreht hat. Höher = öfter weglassen, beim schnellen Drehen können aber Objekte aufploppen. Standard 2."));
+				tune(T("Pause from movement##occ", "Pause ab Bewegung##occ"), Config::occlMoveUnits, 0.0f, 512.0f, "%.0f",
+					T("Same for moving (game units, 64 = about 1 m). Default 64.", "Dasselbe für Bewegung (Spieleinheiten, 64 = etwa 1 m). Standard 64."));
+				tune(T("Safety margin %##occ", "Sicherheitsabstand %##occ"), Config::occlMarginPct, 0.0f, 20.0f, "%.1f %%",
+					T("An object only counts as hidden if it is this much farther away than what covers it. Default 2.", "Ein Objekt gilt nur als verdeckt, wenn es um so viel weiter weg ist als das, was davor liegt. Standard 2."));
+				tune(T("Safety margin units##occ", "Sicherheitsabstand Einheiten##occ"), Config::occlMarginUnits, 0.0f, 256.0f, "%.0f",
+					T("Plus this fixed distance. Default 16.", "Plus dieser feste Abstand. Standard 16."));
+				tuneInt(T("Hidden in images in a row##occ", "Verdeckt in Bildern hintereinander##occ"), Config::occlStreak, 1.0f, 4.0f, "%.0f",
+					T("How many depth images in a row an object must be hidden before it is left out. 1 = immediately. Default 2.",
+						"In so vielen Tiefenbildern hintereinander muss ein Objekt verdeckt sein, bevor es weggelassen wird. 1 = sofort. Standard 2."));
+				tuneInt(T("Max. size on screen (tiles)##occ", "Max. Größe im Bild (Kacheln)##occ"), Config::occlMaxTiles, 256.0f, 36864.0f, "%.0f",
+					T("Larger objects are not checked (the whole image has 36864 tiles). Higher = big objects like houses can be left out too, the check costs a bit more. Default 4096.",
+						"Größere Objekte werden nicht geprüft (das ganze Bild hat 36864 Kacheln). Höher = auch große Objekte wie Häuser können wegfallen, die Prüfung kostet etwas mehr. Standard 4096."));
+				AtomicToggle(T("Never hide characters##occ", "Figuren nie weglassen##occ"), Config::occlSkipSkinned,
+					T("Characters and other animated meshes are never left out (their bounds lag behind the animation). Default on.",
+						"Figuren und andere animierte Meshes werden nie weggelassen (ihre Hülle hinkt der Animation hinterher). Standard an."));
+				if (MenuApi::Button(T("Defaults##occ", "Standardwerte##occ"))) {
+					Config::occlTurnDeg.store(2.0f);
+					Config::occlMoveUnits.store(64.0f);
+					Config::occlMarginPct.store(2.0f);
+					Config::occlMarginUnits.store(16.0f);
+					Config::occlStreak.store(2);
+					Config::occlMaxTiles.store(4096);
+					Config::occlSkipSkinned.store(true);
+					Config::MarkDirty();
+				}
+			}
 		}
 
 		void __stdcall RenderShadows()
@@ -380,8 +468,8 @@ namespace Menu
 
 			MenuApi::SeparatorText(T("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern"));
 			Toggle(T("Enabled##lcache", "Aktiv##lcache"), Config::lightShadowCache.enabled,
-				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters and moving objects are drawn again each frame. Flickering lights are always redrawn. Mainly for interiors with many lights.",
-					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren und Bewegliches neu gezeichnet. Flackernde Lichter werden immer neu gezeichnet. Vor allem für Innenräume mit vielen Lichtern."));
+				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters and moving objects are drawn again each frame. Flickering lights are always redrawn. Mainly for interiors with many lights. Test feature, default OFF: with some lighting mods (e.g. Lux) shadows near fires can pulse.",
+					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren und Bewegliches neu gezeichnet. Flackernde Lichter werden immer neu gezeichnet. Vor allem für Innenräume mit vielen Lichtern. Testfunktion, Standard AUS: mit manchen Lichtmods (z. B. Lux) können Schatten an Feuern pulsieren."));
 
 			MenuApi::SeparatorText(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"));
 			Toggle(T("Enabled##actor", "Aktiv##actor"), Config::actorShadowCulling.enabled,
@@ -633,6 +721,7 @@ namespace Menu
 		MenuApi::AddSectionItem(kSection + T("Texture streaming", "Textur-Streaming"), RenderTextures);
 		MenuApi::AddSectionItem(kSection + T("Lights and scene", "Licht und Szene"), RenderScene);
 		MenuApi::AddSectionItem(kSection + T("Help with visual issues", "Hilfe bei Bildfehlern"), RenderHelp);
+		MenuApi::AddSectionItem(kSection + "Beta", RenderBeta);
 		MenuApi::AddSectionItem(kSection + "Debug", RenderDebug);
 		logger::info("Menu registered in SKSE Menu Framework (version {:.1f})", MenuApi::Version());
 	}

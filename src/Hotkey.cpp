@@ -26,7 +26,8 @@ namespace Hotkey
 						continue;
 					}
 					const auto button = event->AsButtonEvent();
-					if (!button || !button->IsDown() || button->GetIDCode() != Config::toggleKey.load(std::memory_order_relaxed)) {
+					if (!button || !button->IsDown() || Config::toggleKey.load(std::memory_order_relaxed) == 0 ||  // 0 = keine Taste
+					button->GetIDCode() != Config::toggleKey.load(std::memory_order_relaxed)) {
 						continue;
 					}
 					if (const auto ui = RE::UI::GetSingleton(); ui && ui->IsMenuOpen(RE::Console::MENU_NAME)) {
@@ -54,7 +55,7 @@ namespace Hotkey
 	{
 		if (const auto input = RE::BSInputDeviceManager::GetSingleton()) {
 			input->AddEventSink(InputSink::GetSingleton());
-			logger::info("Hotkey registered: key 0x{:X} toggles all optimizations on/off", Config::toggleKey.load());
+			logger::info("Hotkey registered: key 0x{:X} toggles all optimizations on/off (0 = none, master switch only in the menu)", Config::toggleKey.load());
 		}
 	}
 }
