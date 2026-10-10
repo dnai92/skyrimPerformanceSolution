@@ -21,10 +21,14 @@ Texture2D<float> DepthTex : register(t0);
 RWTexture2D<float2> OutTex : register(u0);
 cbuffer Params : register(b0)
 {
+	uint SrcX;
+	uint SrcY;
 	uint SrcW;
 	uint SrcH;
 	uint DstW;
 	uint DstH;
+	uint Pad0;
+	uint Pad1;
 };
 
 [numthreads(8, 8, 1)]
@@ -32,10 +36,10 @@ void main(uint3 id : SV_DispatchThreadID)
 {
 	if (id.x >= DstW || id.y >= DstH)
 		return;
-	uint x0 = id.x * SrcW / DstW;
-	uint x1 = max(x0 + 1, (id.x + 1) * SrcW / DstW);
-	uint y0 = id.y * SrcH / DstH;
-	uint y1 = max(y0 + 1, (id.y + 1) * SrcH / DstH);
+	uint x0 = SrcX + id.x * SrcW / DstW;
+	uint x1 = max(x0 + 1, SrcX + (id.x + 1) * SrcW / DstW);
+	uint y0 = SrcY + id.y * SrcH / DstH;
+	uint y1 = max(y0 + 1, SrcY + (id.y + 1) * SrcH / DstH);
 	float lo = 1e30;
 	float hi = -1e30;
 	for (uint y = y0; y < y1; ++y) {
@@ -51,7 +55,7 @@ void main(uint3 id : SV_DispatchThreadID)
 
 		struct Params
 		{
-			std::uint32_t srcW, srcH, dstW, dstH;
+			std::uint32_t srcX, srcY, srcW, srcH, dstW, dstH, pad0, pad1;
 		};
 
 		ID3D11Device*              g_device = nullptr;
@@ -63,6 +67,7 @@ void main(uint3 id : SV_DispatchThreadID)
 		bool                       g_busy[kRing]{};
 		std::uint32_t              g_tag[kRing]{};
 		std::uint32_t              g_srcW[kRing]{}, g_srcH[kRing]{};
+		std::uint32_t              g_reg[kRing][4]{};
 		std::uint32_t              g_write = 0, g_read = 0;  // naechster freier / aeltester belegter Platz
 		bool                       g_ready = false;
 
@@ -110,7 +115,7 @@ void main(uint3 id : SV_DispatchThreadID)
 		}
 
 		D3D11_BUFFER_DESC cb{};
-		cb.ByteWidth = 16;
+		cb.ByteWidth = 32;
 		cb.Usage = D3D11_USAGE_DYNAMIC;
 		cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 		cb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -147,7 +152,26 @@ void main(uint3 id : SV_DispatchThreadID)
 
 	bool Ready() noexcept { return g_ready; }
 
-	bool Capture(void* a_context, void* a_depthSRV, std::uint32_t a_tag) noexcept
+	bool CurrentViewport(void* a_context, float a_out[4]) noexcept
+	{
+		const auto ctx = static_cast<ID3D11DeviceContext*>(a_context);
+		if (!ctx) {
+			return false;
+		}
+		D3D11_VIEWPORT vps[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
+		UINT           n = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+		ctx->RSGetViewports(&n, vps);
+		if (n == 0 || !(vps[0].Width > 0.0f) || !(vps[0].Height > 0.0f)) {
+			return false;
+		}
+		a_out[0] = vps[0].TopLeftX;
+		a_out[1] = vps[0].TopLeftY;
+		a_out[2] = vps[0].Width;
+		a_out[3] = vps[0].Height;
+		return true;
+	}
+
+	bool Capture(void* a_context, void* a_depthSRV, std::uint32_t a_tag, const float a_region[4]) noexcept
 	{
 		const auto ctx = static_cast<ID3D11DeviceContext*>(a_context);
 		const auto srv = static_cast<ID3D11ShaderResourceView*>(a_depthSRV);
@@ -174,7 +198,15 @@ void main(uint3 id : SV_DispatchThreadID)
 		if (FAILED(ctx->Map(g_params, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
 			return false;
 		}
-		const Params p{ sd.Width, sd.Height, kWidth, kHeight };
+		// Bereich auf den Puffer begrenzen; ohne gueltigen Viewport den ganzen Puffer
+		std::uint32_t rx = 0, ry = 0, rw = sd.Width, rh = sd.Height;
+		if (a_region && a_region[2] >= 16.0f && a_region[3] >= 16.0f) {
+			rx = static_cast<std::uint32_t>(std::clamp(a_region[0], 0.0f, static_cast<float>(sd.Width - 1)));
+			ry = static_cast<std::uint32_t>(std::clamp(a_region[1], 0.0f, static_cast<float>(sd.Height - 1)));
+			rw = std::min(static_cast<std::uint32_t>(a_region[2] + 0.5f), sd.Width - rx);
+			rh = std::min(static_cast<std::uint32_t>(a_region[3] + 0.5f), sd.Height - ry);
+		}
+		const Params p{ rx, ry, rw, rh, kWidth, kHeight, 0, 0 };
 		std::memcpy(m.pData, &p, sizeof(p));
 		ctx->Unmap(g_params, 0);
 
@@ -215,6 +247,10 @@ void main(uint3 id : SV_DispatchThreadID)
 		g_tag[g_write] = a_tag;
 		g_srcW[g_write] = sd.Width;
 		g_srcH[g_write] = sd.Height;
+		g_reg[g_write][0] = rx;
+		g_reg[g_write][1] = ry;
+		g_reg[g_write][2] = rw;
+		g_reg[g_write][3] = rh;
 		g_write = (g_write + 1) % kRing;
 		return true;
 	}
@@ -242,6 +278,10 @@ void main(uint3 id : SV_DispatchThreadID)
 		a_out.tag = g_tag[g_read];
 		a_out.srcW = g_srcW[g_read];
 		a_out.srcH = g_srcH[g_read];
+		a_out.regX = g_reg[g_read][0];
+		a_out.regY = g_reg[g_read][1];
+		a_out.regW = g_reg[g_read][2];
+		a_out.regH = g_reg[g_read][3];
 		g_busy[g_read] = false;
 		g_read = (g_read + 1) % kRing;
 		return true;

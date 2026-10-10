@@ -44,6 +44,11 @@ namespace Occlusion
 			// Viewport-Tiefenbereich: die Hauptszene liegt nur in [depthMin, depthMax] des Puffers, darueber der Himmel.
 			// Ohne Umrechnung endeten alle Entfernungen bei ~450 Einheiten -> ferne sichtbare Objekte galten als verdeckt.
 			float         depthMin = 0.0f, depthMax = 1.0f;
+			// Bereich der Szene im Tiefenpuffer: mit Upscaler (DLSS/FSR ueber Community Shaders) oder dynamischer
+			// Aufloesung nur ein Teil (links oben). Ohne das passten Tiefenbild und Objekte nicht zusammen ->
+			// sichtbare Objekte wurden weggelassen (grau-blaue Flaechen).
+			float         vp[4]{};                   // Viewport des Tiefenvorpasses (x, y, Breite, Hoehe)
+			float         resW = 1.0f, resH = 1.0f;  // dynamische Aufloesung der Engine
 		};
 
 		float         g_rightSign = 1.0f, g_upSign = 1.0f;
@@ -338,6 +343,21 @@ namespace Occlusion
 			return Config::occlusionProbe.load(std::memory_order_relaxed) || (Config::occlusionCull.load(std::memory_order_relaxed) && Config::masterEnabled.load(std::memory_order_relaxed));
 		}
 
+		// Ausgewerteter Bereich des Tiefenpuffers: Viewport des Vorpasses; ist der so gross wie der ganze Puffer, die
+		// Engine aber auf dynamischer Aufloesung, deren Anteil (links oben)
+		float         g_region[4]{};
+		const float*  Region(const OwnCam& a_c) noexcept
+		{
+			std::copy(std::begin(a_c.vp), std::end(a_c.vp), g_region);
+			const bool fullVp = !(a_c.vp[2] > 0.0f) || (g_lastSrcW && a_c.vp[2] >= g_lastSrcW - 1.0f);
+			if (fullVp && g_lastSrcW && g_lastSrcH && (a_c.resW < 0.99f || a_c.resH < 0.99f)) {
+				g_region[0] = g_region[1] = 0.0f;
+				g_region[2] = a_c.resW * g_lastSrcW;
+				g_region[3] = a_c.resH * g_lastSrcH;
+			}
+			return g_region;
+		}
+
 		// Zaehler, Zeitmessung und Minutenbericht nur beim Messen (Debug) oder mit Analyse-Protokoll
 		bool Diag() noexcept
 		{
@@ -362,10 +382,10 @@ namespace Occlusion
 					sky += cur->cam.reversed ? cur->rb.minDepth[i] <= 1e-6f : cur->rb.maxDepth[i] >= 0.99999f;
 				}
 			}
-			if (log) logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera matrix {} usable {} frames, not {} (avg w error {:.0f}) | GPU matrix at prepass start {} ok / {} not, depth range {:.4f}-{:.4f} | own projection: right {:+.0f} up {:+.0f} (compared {} frames), depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
+			if (log) logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera matrix {} usable {} frames, not {} (avg w error {:.0f}) | GPU matrix at prepass start {} ok / {} not, depth range {:.4f}-{:.4f} | own projection: right {:+.0f} up {:+.0f} (compared {} frames), depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}, used {}x{} at {},{}, viewport {:.0f}x{:.0f}, dyn. res. {:.2f}x{:.2f}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
 				secs, frames, g_prepassCalls, g_camLayout, g_learnFrames, g_camFail, g_camFail ? g_camFailErrSum / g_camFail : 0.0f, g_beginOk, g_beginFail, g_beginDepthMin, g_beginDepthMax, g_rightSign, g_upSign, g_gpuSignFrames,
 				g_learned ? "learned" : "formula", g_learnA, g_learnB, g_learnRev ? " reversed" : "", g_learnMaxErr, g_lastSource == 0 ? "post-prepass copy" : "main",
-				g_lastSrcW, g_lastSrcH, g_captures, g_ringFull, g_noSrv, g_reads, g_reads ? static_cast<double>(g_latencySum) / g_reads : 0.0,
+				g_lastSrcW, g_lastSrcH, cur ? cur->rb.regW : 0, cur ? cur->rb.regH : 0, cur ? cur->rb.regX : 0, cur ? cur->rb.regY : 0, cur ? cur->cam.vp[2] : 0.0f, cur ? cur->cam.vp[3] : 0.0f, cur ? cur->cam.resW : 0.0f, cur ? cur->cam.resH : 0.0f, g_captures, g_ringFull, g_noSrv, g_reads, g_reads ? static_cast<double>(g_latencySum) / g_reads : 0.0,
 				cur ? 100.0 * sky / cur->rb.maxDepth.size() : 0.0, g_testNs.exchange(0) / 1e6 / frames, g_noSnapshot.exchange(0));
 			for (auto& s : g_acc) {
 				const auto geoms = s.geoms.exchange(0);
@@ -510,6 +530,13 @@ namespace Occlusion
 		}
 		g_beginValid = false;
 		g_snapPending = true;
+		if (const auto renderer = RE::BSGraphics::Renderer::GetSingleton()) {
+			OcclusionGpu::CurrentViewport(renderer->GetRuntimeData().context, own.vp);
+		}
+		if (const auto gs = RE::BSGraphics::State::GetSingleton()) {
+			own.resW = std::clamp(gs->GetRuntimeData().dynamicResolutionWidthRatio, 0.1f, 1.0f);
+			own.resH = std::clamp(gs->GetRuntimeData().dynamicResolutionHeightRatio, 0.1f, 1.0f);
+		}
 
 		// Weglassen nur, wenn sich die Kamera seit dem geltenden Tiefenbild kaum bewegt hat (< 2 Grad, < 64 Einheiten)
 		{
@@ -691,7 +718,7 @@ namespace Occlusion
 			g_lastSource = source;
 			if (!srv) {
 				++g_noSrv;
-			} else if (OcclusionGpu::Capture(ctx, srv, g_nextTag)) {
+			} else if (OcclusionGpu::Capture(ctx, srv, g_nextTag, Region(g_snaps[g_nextTag % kSnaps]))) {
 				++g_captures;
 				++g_nextTag;
 			} else {
