@@ -593,11 +593,11 @@ namespace Menu
 					"Obergrenze für alle gestreamten Texturen, auch nahe, unabhängig von der VRAM-Belegung. Wirkt sofort und beim Laden. Ausgenommene Pfade und die Figuren-Schalter unten gelten weiter."));
 			}
 			Toggle(T("Also clothing and armor of characters (BETA)##ts", "Auch Kleidung und Rüstung von Figuren (BETA)##ts"), Config::textureStream.streamClothing,
-				T("Clothing and armor worn by NPCs far away are shrunk as well. Distance is taken from the character itself, so sitting or animated NPCs are measured correctly. Off by default. If armor or clothing looks wrong (black, purple, blurry), turn this off.",
-					"Kleidung und Rüstung weit entfernter NPCs werden ebenfalls verkleinert. Der Abstand wird an der Figur selbst gemessen, damit auch sitzende oder animierte NPCs richtig erfasst werden. Standard AUS. Sehen Rüstung oder Kleidung falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
+				T("Clothing and armor worn by NPCs far away are shrunk as well. Distance is taken from the character itself, so sitting or animated NPCs are measured correctly. Off by default. With some armor and clothing mods textures can turn black, purple or blurry until you come close. Whether it works depends on your installed mods, so if it looks wrong, turn this off.",
+					"Kleidung und Rüstung weit entfernter NPCs werden ebenfalls verkleinert. Der Abstand wird an der Figur selbst gemessen, damit auch sitzende oder animierte NPCs richtig erfasst werden. Standard AUS. Bei manchen Rüstungs- und Kleidungsmods können Texturen schwarz, lila oder unscharf werden, bis man näher kommt. Ob es funktioniert, hängt von den installierten Mods ab. Sieht es falsch aus, bitte ausschalten."));
 			Toggle(T("Also bodies, faces and hair (BETA)##ts", "Auch Körper, Gesichter und Haare (BETA)##ts"), Config::textureStream.streamCharacters,
-				T("Body, face and hair textures (textures/actors/character) of far characters are shrunk as well. If faces or hair look wrong (black, purple, blurry), turn this off.",
-					"Körper-, Gesichts- und Haartexturen (textures/actors/character) ferner Figuren werden ebenfalls verkleinert. Sehen Gesichter oder Haare falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
+				T("Body, face and hair textures (textures/actors/character) of far characters are shrunk as well. Whether it works depends on your installed body, face and hair mods. If faces or hair look wrong (black, purple, blurry), turn this off.",
+					"Körper-, Gesichts- und Haartexturen (textures/actors/character) ferner Figuren werden ebenfalls verkleinert. Ob es funktioniert, hängt von den installierten Körper-, Gesichts- und Haarmods ab. Sehen Gesichter oder Haare falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
 
 			MenuApi::SeparatorText(T("Troubleshooting and tests (not saved)", "Fehlersuche und Tests (nicht gespeichert)"));
 			if (MenuApi::Button(T("Log textures under crosshair##dbg", "Texturen unter dem Fadenkreuz protokollieren##dbg"))) {
