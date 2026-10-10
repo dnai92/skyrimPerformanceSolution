@@ -336,6 +336,12 @@ namespace Menu
 												"Das Analyse-Protokoll ist aktiv und kostet 2-4 ms pro Bild. Für normales Spielen und FPS-Vergleiche ausschalten."));
 			}
 
+			if (MenuApi::Button(T("Log textures under crosshair##dbg", "Texturen unter dem Fadenkreuz protokollieren##dbg"))) {
+				TextureStream::RequestCenterProbe();
+			}
+			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
+				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
+
 			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));
 			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
 				T("For testing only, can make whole objects disappear. Default OFF (saved).", "Nur zum Testen, kann ganze Objekte verschwinden lassen. Standard AUS (wird gespeichert)."));
@@ -599,14 +605,7 @@ namespace Menu
 				T("Body, face and hair textures (textures/actors/character) of far characters are shrunk as well. Whether it works depends on your installed body, face and hair mods. If faces or hair look wrong (black, purple, blurry), turn this off.",
 					"Körper-, Gesichts- und Haartexturen (textures/actors/character) ferner Figuren werden ebenfalls verkleinert. Ob es funktioniert, hängt von den installierten Körper-, Gesichts- und Haarmods ab. Sehen Gesichter oder Haare falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
 
-			MenuApi::SeparatorText(T("Troubleshooting and tests (not saved)", "Fehlersuche und Tests (nicht gespeichert)"));
-			if (MenuApi::Button(T("Log textures under crosshair##dbg", "Texturen unter dem Fadenkreuz protokollieren##dbg"))) {
-				TextureStream::RequestCenterProbe();
-			}
-			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
-				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
-
-			MenuApi::SeparatorText(T("Also include excluded types (test)", "Ausgenommene Arten mit einbeziehen (Test)"));
+			MenuApi::SeparatorText(T("Test: also include excluded types (not saved)", "Test: ausgenommene Arten mit einbeziehen (nicht gespeichert)"));
 			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size.",
 											"Diese Texturarten werden normalerweise nie verkleinert. Häkchen setzen, um live zu sehen, wie sie sich verhalten, am besten zusammen mit einer kleinen max. Texturgröße (1K). Häkchen weg, dann kommen sie wieder in voller Größe."));
 			DebugInclude(T("Distant terrain and LOD##dbg", "Ferne Landschaft und LOD##dbg"), TextureStream::kIncludeLod,
@@ -686,7 +685,7 @@ namespace Menu
 			HelpEntry(T("Clothing or armor of NPCs looks blurry", "Kleidung oder Rüstung von NPCs ist unscharf"),
 				T("Texture streaming > Also clothing and armor of characters", "Textur-Streaming > Auch Kleidung und Rüstung von Figuren"));
 			HelpEntry(T("Use 'Log textures under crosshair' to report a texture issue (writes path and size to SPS.log)", "Für Texturfehler 'Texturen unter dem Fadenkreuz protokollieren' nutzen (schreibt Pfad und Größe in SPS.log)"),
-				T("Texture streaming > Log textures under crosshair", "Textur-Streaming > Texturen unter dem Fadenkreuz protokollieren"));
+				T("Debug > Log textures under crosshair", "Debug > Texturen unter dem Fadenkreuz protokollieren"));
 
 			MenuApi::SeparatorText(T("Scene", "Szene"));
 			HelpEntry(T("Footprints, blood or leaves on the ground are missing in the distance", "Fußspuren, Blut oder Laub auf dem Boden fehlen in der Ferne"),
