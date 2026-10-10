@@ -168,7 +168,7 @@ namespace Config
 		float       minEdge = 1024.0f;    // nie unter diese Kantenlaenge verkleinern (Zweierpotenz)
 		float       maxEdge = 0.0f;       // Obergrenze fuer alle gestreamten Texturen (1024/2048/4096/8192, 0 = keine)
 		float       budgetMs = 0.4f;      // Zeit pro Frame fuer den Szenen-Durchlauf
-		bool        streamClothing = true;     // Kleidung/Ruestung an Figuren verkleinern (Abstand ueber die Figur, nicht ihre Huelle)
+		bool        streamClothing = false;    // Kleidung/Ruestung an Figuren verkleinern (Abstand ueber die Figur, nicht ihre Huelle)
 		bool        streamCharacters = false;  // Koerper, Gesichter, Haare (textures/actors/character/) verkleinern
 		std::string exclude = "interface\\,\\maps\\,mapmarker,\\lod\\,terrain\\,fonts\\,book,\\sky\\,effects\\,cubemaps\\";  // Pfadteile (kleingeschrieben), nie verkleinern
 	};

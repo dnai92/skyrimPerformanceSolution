@@ -335,11 +335,6 @@ namespace Menu
 				MenuApi::TextWrapped("%s", T("Analysis logging is active and costs 2-4 ms per frame. Switch it off for normal play and FPS comparisons.",
 												"Das Analyse-Protokoll ist aktiv und kostet 2-4 ms pro Bild. Für normales Spielen und FPS-Vergleiche ausschalten."));
 			}
-			if (MenuApi::Button(T("Log textures under crosshair##dbg", "Texturen unter dem Fadenkreuz protokollieren##dbg"))) {
-				TextureStream::RequestCenterProbe();
-			}
-			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
-				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
 
 			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));
 			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
@@ -366,27 +361,6 @@ namespace Menu
 			}
 			Tip(T("Writes the current depth image of the occlusion test next to SPS.log (SPS_OcclusionDepth_N.pgm). Take a screenshot at the same time.",
 				"Schreibt das aktuelle Tiefenbild des Verdeckungs-Tests neben SPS.log (SPS_OcclusionDepth_N.pgm). Gleichzeitig einen Screenshot machen."));
-
-			MenuApi::SeparatorText(T("Texture streaming: also include excluded types", "Textur-Streaming: ausgenommene Arten mit einbeziehen"));
-			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size.",
-											"Diese Texturarten werden normalerweise nie verkleinert. Häkchen setzen, um live zu sehen, wie sie sich verhalten, am besten zusammen mit einer kleinen max. Texturgröße (1K). Häkchen weg, dann kommen sie wieder in voller Größe."));
-			DebugInclude(T("Distant terrain and LOD##dbg", "Ferne Landschaft und LOD##dbg"), TextureStream::kIncludeLod,
-				T("Paths with \\lod\\ or terrain\\. Distant ground, mountains and simplified objects far away.",
-					"Pfade mit \\lod\\ oder terrain\\. Ferner Boden, Berge und vereinfachte Objekte in der Ferne."));
-			DebugInclude(T("Effects##dbg", "Effekte##dbg"), TextureStream::kIncludeEffects,
-				T("textures\\effects\\. Fire, magic, glow, smoke. Effects drawn with the effect shader are not covered at all.",
-					"textures\\effects\\. Feuer, Magie, Leuchten, Rauch. Effekte mit eigenem Effekt-Shader werden gar nicht erfasst."));
-			DebugInclude(T("Books##dbg", "Bücher##dbg"), TextureStream::kIncludeBooks,
-				T("Every path containing 'book', also bookshelves. Excluded so text stays readable.",
-					"Alle Pfade mit 'book', auch Bücherregale. Ausgenommen, damit Schrift lesbar bleibt."));
-			DebugInclude(T("Sky##dbg", "Himmel##dbg"), TextureStream::kIncludeSky,
-				T("Paths with \\sky\\. Clouds, moons, stars - most use their own shader and are not covered.",
-					"Pfade mit \\sky\\. Wolken, Monde, Sterne - die meisten haben einen eigenen Shader und werden nicht erfasst."));
-			DebugInclude(T("Reflections (cubemaps)##dbg", "Reflexionen (Cubemaps)##dbg"), TextureStream::kIncludeCubemaps,
-				T("cubemaps\\. Real cube maps can never be downscaled, only flat textures in this folder.",
-					"cubemaps\\. Echte Würfelkarten lassen sich nie verkleinern, nur flache Texturen in diesem Ordner."));
-			MenuApi::TextWrapped("%s", T("Not possible at all: grass, water and effect shader textures (other shaders), textures without mipmaps.",
-											"Gar nicht möglich: Gras, Wasser und Effekt-Shader-Texturen (andere Shader), Texturen ohne Mipmaps."));
 		}
 
 		// Beta: fertige, aber noch wenig erprobte Funktionen, Standard AUS
@@ -618,14 +592,40 @@ namespace Menu
 				Tip(T("Upper limit for all streamed textures, near ones too, independent of VRAM usage. Applied right away and when textures load. Excluded paths and the character switches below still apply.",
 					"Obergrenze für alle gestreamten Texturen, auch nahe, unabhängig von der VRAM-Belegung. Wirkt sofort und beim Laden. Ausgenommene Pfade und die Figuren-Schalter unten gelten weiter."));
 			}
-			Toggle(T("Also clothing and armor of characters##ts", "Auch Kleidung und Rüstung von Figuren##ts"), Config::textureStream.streamClothing,
-				T("Clothing and armor worn by NPCs far away are shrunk as well. Distance is taken from the character itself, so sitting or animated NPCs are measured correctly.",
-					"Kleidung und Rüstung weit entfernter NPCs werden ebenfalls verkleinert. Der Abstand wird an der Figur selbst gemessen, damit auch sitzende oder animierte NPCs richtig erfasst werden."));
+			Toggle(T("Also clothing and armor of characters (BETA)##ts", "Auch Kleidung und Rüstung von Figuren (BETA)##ts"), Config::textureStream.streamClothing,
+				T("Clothing and armor worn by NPCs far away are shrunk as well. Distance is taken from the character itself, so sitting or animated NPCs are measured correctly. Off by default. If armor or clothing looks wrong (black, purple, blurry), turn this off.",
+					"Kleidung und Rüstung weit entfernter NPCs werden ebenfalls verkleinert. Der Abstand wird an der Figur selbst gemessen, damit auch sitzende oder animierte NPCs richtig erfasst werden. Standard AUS. Sehen Rüstung oder Kleidung falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
 			Toggle(T("Also bodies, faces and hair (BETA)##ts", "Auch Körper, Gesichter und Haare (BETA)##ts"), Config::textureStream.streamCharacters,
 				T("Body, face and hair textures (textures/actors/character) of far characters are shrunk as well. If faces or hair look wrong (black, purple, blurry), turn this off.",
 					"Körper-, Gesichts- und Haartexturen (textures/actors/character) ferner Figuren werden ebenfalls verkleinert. Sehen Gesichter oder Haare falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
-			MenuApi::TextWrapped("%s", T("Logging the textures under the crosshair and testing excluded texture types: page Debug.",
-											"Texturen unter dem Fadenkreuz protokollieren und ausgenommene Texturarten testen: Seite Debug."));
+
+			MenuApi::SeparatorText(T("Troubleshooting and tests (not saved)", "Fehlersuche und Tests (nicht gespeichert)"));
+			if (MenuApi::Button(T("Log textures under crosshair##dbg", "Texturen unter dem Fadenkreuz protokollieren##dbg"))) {
+				TextureStream::RequestCenterProbe();
+			}
+			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
+				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
+
+			MenuApi::SeparatorText(T("Also include excluded types (test)", "Ausgenommene Arten mit einbeziehen (Test)"));
+			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size.",
+											"Diese Texturarten werden normalerweise nie verkleinert. Häkchen setzen, um live zu sehen, wie sie sich verhalten, am besten zusammen mit einer kleinen max. Texturgröße (1K). Häkchen weg, dann kommen sie wieder in voller Größe."));
+			DebugInclude(T("Distant terrain and LOD##dbg", "Ferne Landschaft und LOD##dbg"), TextureStream::kIncludeLod,
+				T("Paths with \\lod\\ or terrain\\. Distant ground, mountains and simplified objects far away.",
+					"Pfade mit \\lod\\ oder terrain\\. Ferner Boden, Berge und vereinfachte Objekte in der Ferne."));
+			DebugInclude(T("Effects##dbg", "Effekte##dbg"), TextureStream::kIncludeEffects,
+				T("textures\\effects\\. Fire, magic, glow, smoke. Effects drawn with the effect shader are not covered at all.",
+					"textures\\effects\\. Feuer, Magie, Leuchten, Rauch. Effekte mit eigenem Effekt-Shader werden gar nicht erfasst."));
+			DebugInclude(T("Books##dbg", "Bücher##dbg"), TextureStream::kIncludeBooks,
+				T("Every path containing 'book', also bookshelves. Excluded so text stays readable.",
+					"Alle Pfade mit 'book', auch Bücherregale. Ausgenommen, damit Schrift lesbar bleibt."));
+			DebugInclude(T("Sky##dbg", "Himmel##dbg"), TextureStream::kIncludeSky,
+				T("Paths with \\sky\\. Clouds, moons, stars - most use their own shader and are not covered.",
+					"Pfade mit \\sky\\. Wolken, Monde, Sterne - die meisten haben einen eigenen Shader und werden nicht erfasst."));
+			DebugInclude(T("Reflections (cubemaps)##dbg", "Reflexionen (Cubemaps)##dbg"), TextureStream::kIncludeCubemaps,
+				T("cubemaps\\. Real cube maps can never be downscaled, only flat textures in this folder.",
+					"cubemaps\\. Echte Würfelkarten lassen sich nie verkleinern, nur flache Texturen in diesem Ordner."));
+			MenuApi::TextWrapped("%s", T("Not possible at all: grass, water and effect shader textures (other shaders), textures without mipmaps.",
+											"Gar nicht möglich: Gras, Wasser und Effekt-Shader-Texturen (andere Shader), Texturen ohne Mipmaps."));
 		}
 
 		void __stdcall RenderScene()
@@ -686,7 +686,7 @@ namespace Menu
 			HelpEntry(T("Clothing or armor of NPCs looks blurry", "Kleidung oder Rüstung von NPCs ist unscharf"),
 				T("Texture streaming > Also clothing and armor of characters", "Textur-Streaming > Auch Kleidung und Rüstung von Figuren"));
 			HelpEntry(T("Use 'Log textures under crosshair' to report a texture issue (writes path and size to SPS.log)", "Für Texturfehler 'Texturen unter dem Fadenkreuz protokollieren' nutzen (schreibt Pfad und Größe in SPS.log)"),
-				T("Debug > Log textures under crosshair", "Debug > Texturen unter dem Fadenkreuz protokollieren"));
+				T("Texture streaming > Log textures under crosshair", "Textur-Streaming > Texturen unter dem Fadenkreuz protokollieren"));
 
 			MenuApi::SeparatorText(T("Scene", "Szene"));
 			HelpEntry(T("Footprints, blood or leaves on the ground are missing in the distance", "Fußspuren, Blut oder Laub auf dem Boden fehlen in der Ferne"),
