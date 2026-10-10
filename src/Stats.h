@@ -126,6 +126,7 @@ namespace Stats
 	void Init();
 
 	void Add(Zone a_zone, std::int64_t a_ns) noexcept;
+	bool Enabled() noexcept;  // Analyse-Protokoll an (Zeitmessung der Bereiche)
 	void Count(Counter a_counter) noexcept;
 	void CountNpcUpdate() noexcept;
 	void OnOverstressed() noexcept;
@@ -138,11 +139,20 @@ namespace Stats
 	class ScopedTimer
 	{
 	public:
+		// Misst nur mit eingeschaltetem Analyse-Protokoll (sonst nur ein Flag-Vergleich)
 		explicit ScopedTimer(Zone a_zone) noexcept :
-			_zone(a_zone), _start(std::chrono::steady_clock::now()) {}
+			_zone(a_zone), _on(Enabled())
+		{
+			if (_on) {
+				_start = std::chrono::steady_clock::now();
+			}
+		}
 
 		~ScopedTimer() noexcept
 		{
+			if (!_on) {
+				return;
+			}
 			const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - _start).count();
 			Add(_zone, ns);
 		}
@@ -152,6 +162,7 @@ namespace Stats
 
 	private:
 		Zone                                  _zone;
-		std::chrono::steady_clock::time_point _start;
+		bool                                  _on;
+		std::chrono::steady_clock::time_point _start{};
 	};
 }

@@ -338,12 +338,19 @@ namespace Occlusion
 			return Config::occlusionProbe.load(std::memory_order_relaxed) || (Config::occlusionCull.load(std::memory_order_relaxed) && Config::masterEnabled.load(std::memory_order_relaxed));
 		}
 
+		// Zaehler, Zeitmessung und Minutenbericht nur beim Messen (Debug) oder mit Analyse-Protokoll
+		bool Diag() noexcept
+		{
+			return Config::occlusionProbe.load(std::memory_order_relaxed) || Config::analysis.load(std::memory_order_relaxed);
+		}
+
 		void Report()
 		{
 			const auto now = Clock::now();
 			if (now - g_reportStart < std::chrono::seconds(60)) {
 				return;
 			}
+			const bool   log = Diag();
 			const double secs = std::chrono::duration<double>(now - g_reportStart).count();
 			g_reportStart = now;
 			// je gerendertem Bild (Tiefenvorpass) - mit Frame Generation gibt es doppelt so viele Presents
@@ -355,7 +362,7 @@ namespace Occlusion
 					sky += cur->cam.reversed ? cur->rb.minDepth[i] <= 1e-6f : cur->rb.maxDepth[i] >= 0.99999f;
 				}
 			}
-			logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera matrix {} usable {} frames, not {} (avg w error {:.0f}) | GPU matrix at prepass start {} ok / {} not, depth range {:.4f}-{:.4f} | own projection: right {:+.0f} up {:+.0f} (compared {} frames), depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
+			if (log) logger::info("[Occlusion] {:.0f} s, {:.0f} frames | prepass {} | camera matrix {} usable {} frames, not {} (avg w error {:.0f}) | GPU matrix at prepass start {} ok / {} not, depth range {:.4f}-{:.4f} | own projection: right {:+.0f} up {:+.0f} (compared {} frames), depth {} A {:.5f} B {:.3f}{}, max NDC diff {:.3f} | depth source {} ({}x{}) | captures {}, ring full {}, no depth {} | reads {}, latency {:.1f} frames | sky tiles {:.0f} % | test time {:.2f} ms/frame (all threads) | no snapshot yet {}",
 				secs, frames, g_prepassCalls, g_camLayout, g_learnFrames, g_camFail, g_camFail ? g_camFailErrSum / g_camFail : 0.0f, g_beginOk, g_beginFail, g_beginDepthMin, g_beginDepthMax, g_rightSign, g_upSign, g_gpuSignFrames,
 				g_learned ? "learned" : "formula", g_learnA, g_learnB, g_learnRev ? " reversed" : "", g_learnMaxErr, g_lastSource == 0 ? "post-prepass copy" : "main",
 				g_lastSrcW, g_lastSrcH, g_captures, g_ringFull, g_noSrv, g_reads, g_reads ? static_cast<double>(g_latencySum) / g_reads : 0.0,
@@ -366,7 +373,7 @@ namespace Occlusion
 				const auto draws = s.draws.exchange(0), tested = s.tested.exchange(0), occGeoms = s.occGeoms.exchange(0), occDraws = s.occDraws.exchange(0);
 				const auto culled = s.culledDraws.exchange(0);
 				const auto tooBig = s.tooBig.exchange(0), occSkinned = s.occSkinned.exchange(0), occSmall = s.occSmall.exchange(0), occMid = s.occMid.exchange(0), occLarge = s.occLarge.exchange(0);
-				if (!acc || !geoms) {
+				if (!log || !acc || !geoms) {
 					continue;
 				}
 				logger::info("[Occlusion]   accumulator {} | per frame: objects {:.0f}, draws {:.0f}, tested {:.0f} | occluded: objects {:.0f} ({:.0f} % of tested), draws {:.0f} ({:.0f} % of all) | occluded draws by radius <50 {:.0f}, <200 {:.0f}, larger {:.0f}, skinned {:.0f} | too big {:.0f} | culled draws {:.0f}{}",
@@ -375,12 +382,12 @@ namespace Occlusion
 			}
 			g_accOther = 0;
 			g_prepassCalls = g_camFail = g_captures = g_ringFull = g_noSrv = g_reads = g_latencySum = 0;
-			logger::info("[Occlusion]   hiding occluded objects: {} | frames without hiding because the camera moved: {} | settings: pause from {:.1f} deg / {:.0f} units, margin {:.1f} % + {:.0f}, hidden in {} images in a row, max {} tiles, characters {}", Config::occlusionCull.load() && Config::masterEnabled.load() ? "ON" : "off", g_cullBlockedFrames, Config::occlTurnDeg.load(), Config::occlMoveUnits.load(), Config::occlMarginPct.load(), Config::occlMarginUnits.load(), Config::occlStreak.load(), Config::occlMaxTiles.load(), Config::occlSkipSkinned.load() ? "never" : "allowed");
+			if (log) logger::info("[Occlusion]   hiding occluded objects: {} | frames without hiding because the camera moved: {} | settings: pause from {:.1f} deg / {:.0f} units, margin {:.1f} % + {:.0f}, hidden in {} images in a row, max {} tiles, characters {}", Config::occlusionCull.load() && Config::masterEnabled.load() ? "ON" : "off", g_cullBlockedFrames, Config::occlTurnDeg.load(), Config::occlMoveUnits.load(), Config::occlMarginPct.load(), Config::occlMarginUnits.load(), Config::occlStreak.load(), Config::occlMaxTiles.load(), Config::occlSkipSkinned.load() ? "never" : "allowed");
 			g_cullBlockedFrames = 0;
 			{
 				std::scoped_lock l(g_sampleLock);
 				for (const auto& smp : g_samples) {
-					logger::info("[Occlusion]     hidden: {}", smp);
+					if (log) logger::info("[Occlusion]     hidden: {}", smp);
 				}
 				g_samples.clear();
 			}
@@ -584,8 +591,8 @@ namespace Occlusion
 	void OnPresent() noexcept
 	{
 		++g_frame;
-		// Tracy-Marke bei jeder Aenderung von Schalter/Stellschrauben (Abschnitte einer Aufnahme zuordnen)
-		{
+		// Tracy-/Log-Marke bei jeder Aenderung von Schalter/Stellschrauben (Abschnitte einer Aufnahme zuordnen), nur mit Analyse-Protokoll
+		if (Config::analysis.load(std::memory_order_relaxed)) {
 			static std::string       last, pending;
 			static Clock::time_point pendingSince{};
 			auto cur = std::format("Occlusion: hiding {} | measure {} | pause {:.1f} deg / {:.0f} | margin {:.1f} % + {:.0f} | streak {} | max tiles {} | characters {}",
@@ -703,23 +710,34 @@ namespace Occlusion
 		if (!Config::occlusionProbe.load(std::memory_order_relaxed) && !cullOn) {
 			return false;
 		}
-		auto& s = Slot(a_accumulator);
-		s.geoms.fetch_add(1, std::memory_order_relaxed);
-		s.draws.fetch_add(a_draws, std::memory_order_relaxed);
-		s.window.fetch_add(1, std::memory_order_relaxed);
+		const bool diag = Diag();
+		auto&      s = Slot(a_accumulator);
+		s.window.fetch_add(1, std::memory_order_relaxed);  // Hauptbild erkennen - wird auch zum Weglassen gebraucht
+		if (diag) {
+			s.geoms.fetch_add(1, std::memory_order_relaxed);
+			s.draws.fetch_add(a_draws, std::memory_order_relaxed);
+		}
 		const auto snap = g_current.load();
 		if (!snap) {
-			g_noSnapshot.fetch_add(1, std::memory_order_relaxed);
+			if (diag) {
+				g_noSnapshot.fetch_add(1, std::memory_order_relaxed);
+			}
 			return false;
 		}
-		const auto t0 = Clock::now();
+		const auto t0 = diag ? Clock::now() : Clock::time_point{};
 		const int  r = Test(*snap, a_geom.worldBound);
-		g_testNs.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count()), std::memory_order_relaxed);
+		if (diag) {
+			g_testNs.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count()), std::memory_order_relaxed);
+		}
 		if (r == 3) {
-			s.tooBig.fetch_add(1, std::memory_order_relaxed);
+			if (diag) {
+				s.tooBig.fetch_add(1, std::memory_order_relaxed);
+			}
 			return false;
 		}
-		s.tested.fetch_add(1, std::memory_order_relaxed);
+		if (diag) {
+			s.tested.fetch_add(1, std::memory_order_relaxed);
+		}
 		const bool skinned = const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData().skinInstance != nullptr;
 		const bool isMain = a_accumulator && a_accumulator == g_mainAcc.load(std::memory_order_relaxed);
 		// Verlauf nur fuer feste Objekte im Hauptbild (Figuren: Huelle hinkt der Animation hinterher)
@@ -727,12 +745,14 @@ namespace Occlusion
 		if (r != 2) {
 			return false;
 		}
-		s.occGeoms.fetch_add(1, std::memory_order_relaxed);
-		s.occDraws.fetch_add(a_draws, std::memory_order_relaxed);
-		const float rad = a_geom.worldBound.radius;
-		(rad < 50.0f ? s.occSmall : rad < 200.0f ? s.occMid : s.occLarge).fetch_add(a_draws, std::memory_order_relaxed);
-		if (skinned) {
-			s.occSkinned.fetch_add(a_draws, std::memory_order_relaxed);
+		if (diag) {
+			s.occGeoms.fetch_add(1, std::memory_order_relaxed);
+			s.occDraws.fetch_add(a_draws, std::memory_order_relaxed);
+			const float rad = a_geom.worldBound.radius;
+			(rad < 50.0f ? s.occSmall : rad < 200.0f ? s.occMid : s.occLarge).fetch_add(a_draws, std::memory_order_relaxed);
+			if (skinned) {
+				s.occSkinned.fetch_add(a_draws, std::memory_order_relaxed);
+			}
 		}
 		const bool willCull = cullOn && twice && snap->cam.gpu && g_cullAllowed.load(std::memory_order_relaxed);
 		if (snap->id == g_listSnapId.load(std::memory_order_relaxed)) {
@@ -748,8 +768,8 @@ namespace Occlusion
 			}
 		}
 		if (willCull) {
-			s.culledDraws.fetch_add(a_draws, std::memory_order_relaxed);
-			{
+			if (diag) {
+				s.culledDraws.fetch_add(a_draws, std::memory_order_relaxed);
 				std::scoped_lock l(g_sampleLock);
 				if (g_samples.size() < 12) {
 					TestInfo info;

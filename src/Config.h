@@ -9,8 +9,8 @@ namespace Config
 	inline std::atomic<bool>          analysis{ false };  // Diagnose-Auswertungen (Instancing-Analyse, Decal-/Culled-Listen, Kamera-Zaehler). Kosten Hauptthread-Zeit -> Standard AUS
 	inline std::atomic<std::uint32_t> toggleKey{ 0xC9 };  // DirectInput-Scancode, 0xC9 = Bild auf (Page Up)
 	// Verdeckte Objekte weglassen (Beta, Standard AUS). [Occlusion] bCull und die Stellschrauben werden im Menue
-	// gespeichert. bProbe (nur messen) und iDepthSource (0 = Kopie nach dem Tiefenvorpass, 1 = Haupt-Tiefenpuffer)
-	// sind Diagnose auf der Debug-Seite und werden nicht gespeichert.
+	// gespeichert. Messen und Tiefenquelle (0 = Kopie nach dem Tiefenvorpass, 1 = Haupt-Tiefenpuffer) sind Diagnose
+	// auf der Debug-Seite, nur fuer die laufende Sitzung.
 	inline std::atomic<bool>          occlusionProbe{ false };
 	inline std::atomic<std::uint32_t> occlusionDepthSource{ 0 };
 	inline std::atomic<bool>          occlusionCull{ false };
@@ -29,7 +29,7 @@ namespace Config
 		std::uint32_t minCascade = 1;         // nur Sonne: Kaskaden darunter bleiben unangetastet
 		float         minDistance = 1500.0f;  // naeher an der Kamera -> immer Schatten
 		float         maxRadius = 150.0f;     // groessere Objekte -> immer Schatten
-		float         minAngularSize = 0.02f; // Radius/Distanz darunter -> kein Schatten mehr
+		float         minAngularSize = 0.035f; // Radius/Distanz darunter -> kein Schatten mehr
 		bool          skipSkinned = true;     // Charaktere/Kreaturen nie cullen
 	};
 
@@ -109,8 +109,8 @@ namespace Config
 		bool          verify = false;         // Pruefmodus: Engine zeichnet alles, Instanzen werden ZUSAETZLICH gezeichnet
 		float         debugOffsetZ = 0.0f;    // Pruefmodus: Instanzen um diesen Wert nach oben versetzen (sichtbarer Beweis)
 		std::uint32_t technique = 0xC046;     // erste Technik der Liste (Kompatibilitaet)
-		std::array<std::uint32_t, 16> techniques{ 0xC046 };  // erlaubte Utility-Techniken (Shadowmap ohne Alpha-Test)
-		std::uint32_t techniqueCount = 1;
+		std::array<std::uint32_t, 16> techniques{ 0xC046, 0xC045 };  // erlaubte Utility-Techniken (Shadowmap ohne Alpha-Test)
+		std::uint32_t techniqueCount = 2;
 		bool          allowTwoSided = false;  // zweiseitige Meshes (anderer Rasterizer-Zustand) mit instanzieren
 		std::uint32_t minGroup = 2;           // ab so vielen gleichen Meshes pro Batch
 		std::uint32_t debugMode = 0;          // Diagnose: 1 = Flush ohne Draw-Aufrufe (nur Zustand), 2 = gar kein Flush, 3 = nur sammeln/zaehlen

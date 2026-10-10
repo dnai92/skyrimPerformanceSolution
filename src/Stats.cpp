@@ -65,10 +65,11 @@ namespace Stats
 					const auto z = [](Zone a_z) { return static_cast<double>(g_frameNs[static_cast<std::size_t>(a_z)].load(std::memory_order_relaxed)) / 1e6; };
 					const double sun = z(Zone::SunShadowAccumulate) + z(Zone::SunShadowRender), torch = z(Zone::LightShadowRender), lights = z(Zone::LightGather),
 								 papyrus = z(Zone::PapyrusUpdate) + z(Zone::PapyrusTasklets), npc = z(Zone::NpcUpdate) + z(Zone::PlayerUpdate), present = z(Zone::PresentWait);
-					logger::info("[Hitch] {:.0f} ms | SPS this frame: {} | frame before: {} | VRAM {:.0f} %, paged out {:.0f} MB{}{} | measured: sun shadows {:.1f}, torch shadows {:.1f} (cache rebuilds {}), "
-								 "light assignment {:.1f}, papyrus {:.1f}, actors {:.1f}, present wait {:.1f}, not measured {:.1f} ms",
-						a_frameMs, Describe(act), Describe(g_prevAct), std::max(0.0f, act.vramPct), act.pagedMB, cell ? " | cell loaded" : "", menu ? " | menu opened/closed" : "",
-						sun, torch, builds, lights, papyrus, npc, present, std::max(0.0, a_frameMs - sun - torch - lights - papyrus - npc - present));
+					const auto measured = Enabled() ? std::format(" | measured: sun shadows {:.1f}, torch shadows {:.1f} (cache rebuilds {}), light assignment {:.1f}, papyrus {:.1f}, actors {:.1f}, present wait {:.1f}, not measured {:.1f} ms",
+														  sun, torch, builds, lights, papyrus, npc, present, std::max(0.0, a_frameMs - sun - torch - lights - papyrus - npc - present)) :
+					                                  std::string(" | times per area only with analysis logging (Debug page)");
+					logger::info("[Hitch] {:.0f} ms | SPS this frame: {} | frame before: {} | VRAM {:.0f} %, paged out {:.0f} MB{}{}{}", a_frameMs, Describe(act), Describe(g_prevAct),
+						std::max(0.0f, act.vramPct), act.pagedMB, cell ? " | cell loaded" : "", menu ? " | menu opened/closed" : "", measured);
 				}
 			}
 			g_prevAct = act;
@@ -214,6 +215,8 @@ namespace Stats
 		g_frameMs.reserve(2048);
 	}
 
+	bool Enabled() noexcept { return Config::analysis.load(std::memory_order_relaxed); }
+
 	void Add(Zone a_zone, std::int64_t a_ns) noexcept
 	{
 		g_frameNs[static_cast<std::size_t>(a_zone)].fetch_add(a_ns, std::memory_order_relaxed);
@@ -299,10 +302,10 @@ namespace Stats
 		if (frameMs < kMaxFrameMs) {
 			try {
 				g_frameMs.push_back(frameMs);
-				for (std::size_t i = 0; i < kZoneCount; ++i) {
+				for (std::size_t i = 0; Enabled() && i < kZoneCount; ++i) {
 					g_zoneMs[i].push_back(static_cast<double>(g_frameNs[i].load(std::memory_order_relaxed)) / 1'000'000.0);
 				}
-				for (std::size_t i = 0; i < kCounterCount; ++i) {
+				for (std::size_t i = 0; Enabled() && i < kCounterCount; ++i) {
 					const auto v = g_frameCounters[i].load(std::memory_order_relaxed);
 					g_counterValues[i].push_back(static_cast<double>(v));
 					TracyPlot(kCounterNames[i], static_cast<std::int64_t>(v));

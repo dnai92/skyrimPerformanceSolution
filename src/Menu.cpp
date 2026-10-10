@@ -235,8 +235,8 @@ namespace Menu
 					"Schaltet alle Optimierungen auf einmal an/aus (wie die Taste, Standard Bild auf). Wird nicht gespeichert - startet AN."),
 				false);
 			HotkeyPicker();
-			MenuApi::TextWrapped("%s", T("Use this switch (or the hotkey) to compare FPS and look with and without SPS. The 10-second report in SPS.log shows the numbers.",
-											"Mit diesem Schalter (oder der Taste) FPS und Bild mit und ohne SPS vergleichen. Der 10-Sekunden-Bericht in SPS.log zeigt die Zahlen."));
+			MenuApi::TextWrapped("%s", T("Use this switch (or the hotkey) to compare FPS and look with and without SPS. The report in SPS.log (every minute) shows the numbers.",
+											"Mit diesem Schalter (oder der Taste) FPS und Bild mit und ohne SPS vergleichen. Der Bericht in SPS.log (jede Minute) zeigt die Zahlen."));
 
 			// Status der Engine-Eingriffe (andere Spielversion / andere Mod an derselben Stelle)
 			{
@@ -265,17 +265,12 @@ namespace Menu
 				T("Small, far objects do not cast sun shadows.", "Kleine, ferne Objekte werfen keinen Sonnenschatten."));
 			Toggle(T("Torch / point light shadow culling", "Fackelschatten kleiner Objekte weglassen"), Config::pointLightCulling.enabled,
 				T("Small, far objects do not cast shadows from torches and fires.", "Kleine, ferne Objekte werfen keinen Schatten von Fackeln und Feuern."));
-			Toggle(T("Shadow cache for static lights (test)", "Schatten fester Lichter zwischenspeichern (Test)"), Config::lightShadowCache.enabled,
-				T("Shadows of lights that do not move are kept, only characters and moving things are redrawn. Mainly for interiors. Default OFF: with some lighting mods (e.g. Lux) shadows near fires can pulse.",
-					"Schatten von Lichtern, die sich nicht bewegen, werden aufbewahrt, nur Figuren und Bewegliches werden neu gezeichnet. Vor allem für Innenräume. Standard AUS: mit manchen Lichtmods (z. B. Lux) können Schatten an Feuern pulsieren."));
 			Toggle(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"), Config::actorShadowCulling.enabled,
 				T("Characters far away do not cast shadows.", "Weit entfernte Figuren werfen keinen Schatten."));
 			Toggle(T("Skylighting culling (Community Shaders)", "Himmelslicht: kleine Objekte weglassen (Community Shaders)"), Config::skylightingCulling.enabled,
 				T("Small objects are left out of the skylighting occlusion map.", "Kleine Objekte werden in der Himmelslicht-Karte weggelassen."));
 			Toggle(T("Decal culling", "Ferne Bodendetails weglassen"), Config::decalCulling.enabled,
 				T("Small decals (footprints, blood, dirt) far away are not drawn.", "Kleine Bodendetails (Fußspuren, Blut, Schmutz) in der Ferne werden nicht gezeichnet."));
-			Toggle(T("Shadow instancing", "Gleiche Schatten bündeln"), Config::shadowInstancing.enabled,
-				T("Draws identical simple meshes in sun shadows with one draw call. Small gain, off by default - switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn, standardmäßig aus - bei flackernden Schatten oder Objekten wieder ausschalten."));
 			Toggle(T("Light assignment throttle", "Licht-Zuordnung drosseln"), Config::lightGather.enabled,
 				T("Moving lights (torches, flickering lights) only search for the objects they light when they really moved.",
 					"Bewegte Lichter (Fackeln, flackernde Lichter) suchen die beleuchteten Objekte nur neu, wenn sie sich wirklich bewegt haben."));
@@ -286,22 +281,20 @@ namespace Menu
 				T("Textures of far objects are shrunk in VRAM and reloaded at full size when you come closer.",
 					"Texturen ferner Objekte werden im VRAM verkleinert und bei Annäherung in voller Größe neu geladen."));
 
-			MenuApi::SeparatorText(T("Experimental (known side effects)", "Experimentell (bekannte Nebenwirkungen)"));
-			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
-				T("Can make whole objects disappear. Default OFF.", "Kann ganze Objekte verschwinden lassen. Standard AUS."));
-			Toggle(T("Main view micro culling", "Winzige Objekte im Bild weglassen"), Config::mainViewCulling.enabled,
-				T("Tiny far objects are not drawn at all - can pop in. Default OFF.", "Winzige ferne Objekte werden gar nicht gezeichnet - können aufploppen. Standard AUS."));
-			Toggle(T("Calmer far shadows (test)", "Ruhigere ferne Schatten (Test)"), Config::stableCascade.enabled,
-				T("Holds the far sun shadow cascade still instead of realigning it every frame - far shadows shimmer less when you move. They follow the sun in tiny steps. No performance gain. Default OFF.",
-					"Hält die ferne Sonnenschatten-Kaskade ruhig, statt sie jedes Frame neu auszurichten - ferne Schatten flimmern beim Bewegen weniger. Sie folgen der Sonne in kleinen Schritten. Kein Leistungsgewinn. Standard AUS."));
-			// Kaskaden-Cache (flackert, kaum Ersparnis - 10/2026 zurueckgestellt) und Kaskaden-Diagnose nur per INI bzw. mit Analyse-Protokoll
-			if (Config::analysis.load(std::memory_order_relaxed)) {
-				if (MenuApi::Button(T("Log shadow cascades (300 frames)##cc", "Schattenkaskaden protokollieren (300 Frames)##cc"))) {
-					ShadowCulling::RequestCascadeDump(300);
-				}
-				Tip(T("Diagnostics: writes how the game aligns the sun shadow cascades in each frame to SPS.log.",
-					"Diagnose: schreibt pro Frame, wie das Spiel die Sonnenschatten-Kaskaden ausrichtet, in SPS.log."));
-			}
+			MenuApi::SeparatorText(T("Beta (off by default)", "Beta (standardmäßig aus)"));
+			MenuApi::TextWrapped("%s", T("These work, but not perfectly on every setup yet. Switch off again if something looks wrong.", "Diese funktionieren, aber noch nicht auf jedem System perfekt. Bei Bildfehlern wieder ausschalten."));
+			Toggle(T("Shadow cache for static lights (BETA)", "Schatten fester Lichter zwischenspeichern (BETA)"), Config::lightShadowCache.enabled,
+				T("Shadows of lights that do not move are kept, only characters and moving things are redrawn. Mainly for interiors. With some lighting mods (e.g. Lux) shadows near fires can pulse.",
+					"Schatten von Lichtern, die sich nicht bewegen, werden aufbewahrt, nur Figuren und Bewegliches werden neu gezeichnet. Vor allem für Innenräume. Mit manchen Lichtmods (z. B. Lux) können Schatten an Feuern pulsieren."));
+			Toggle(T("Shadow instancing (BETA)", "Gleiche Schatten bündeln (BETA)"), Config::shadowInstancing.enabled,
+				T("Draws identical simple meshes in sun shadows with one draw call. Small gain. Switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn. Bei flackernden Schatten oder Objekten wieder ausschalten."));
+			Toggle(T("Main view micro culling (BETA)", "Winzige Objekte im Bild weglassen (BETA)"), Config::mainViewCulling.enabled,
+				T("Tiny far objects are not drawn at all. They can pop in.", "Winzige ferne Objekte werden gar nicht gezeichnet. Sie können aufploppen."));
+			Toggle(T("Calmer far shadows (BETA)", "Ruhigere ferne Schatten (BETA)"), Config::stableCascade.enabled,
+				T("Holds the far sun shadow cascade still instead of realigning it every frame, so far shadows shimmer less when you move. They follow the sun in tiny steps. No performance gain.",
+					"Hält die ferne Sonnenschatten-Kaskade ruhig, statt sie jedes Frame neu auszurichten, ferne Schatten flimmern beim Bewegen weniger. Sie folgen der Sonne in kleinen Schritten. Kein Leistungsgewinn."));
+			AtomicToggle(T("Hide occluded objects (BETA)", "Verdeckte Objekte weglassen (BETA)"), Config::occlusionCull,
+				T("Objects completely hidden behind walls, houses or terrain are not drawn. Fine-tuning on the page Beta.", "Objekte, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Feineinstellung auf der Seite Beta."));
 
 			MenuApi::SeparatorText(T("Settings", "Einstellungen"));
 			if (MenuApi::Button(T("Reset to defaults", "Auf Standard zurücksetzen"))) {
@@ -348,6 +341,14 @@ namespace Menu
 			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
 				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
 
+			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));
+			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
+				T("For testing only, can make whole objects disappear. Default OFF (saved).", "Nur zum Testen, kann ganze Objekte verschwinden lassen. Standard AUS (wird gespeichert)."));
+			if (MenuApi::Button(T("Log shadow cascades (300 frames)##cc", "Schattenkaskaden protokollieren (300 Frames)##cc"))) {
+				ShadowCulling::RequestCascadeDump(300);
+			}
+			Tip(T("Writes how the game aligns the sun shadow cascades in each frame to SPS.log.", "Schreibt pro Frame, wie das Spiel die Sonnenschatten-Kaskaden ausrichtet, in SPS.log."));
+
 			MenuApi::SeparatorText(T("Hiding occluded objects (diagnostics)", "Verdeckte Objekte weglassen (Diagnose)"));
 			AtomicToggle(T("Measure hidden objects##occ", "Verdeckte Objekte messen##occ"), Config::occlusionProbe,
 				T("Counts how many objects in the main view are hidden behind the depth of the previous frame and writes it to SPS.log every minute. Nothing is left out.",
@@ -393,7 +394,7 @@ namespace Menu
 		{
 			MenuApi::TextWrapped("%s", T("Beta features work, but have not been tested on many setups yet. All are off by default. Please report what you notice on Nexus, ideally with SPS.log.",
 											"Beta-Funktionen funktionieren, sind aber noch auf wenigen Systemen erprobt. Alle sind standardmäßig aus. Auffälligkeiten bitte auf Nexus melden, am besten mit SPS.log."));
-			MenuApi::SeparatorText(T("Hide occluded objects (beta)", "Verdeckte Objekte weglassen (Beta)"));
+			MenuApi::SeparatorText(T("Hide occluded objects (BETA)", "Verdeckte Objekte weglassen (BETA)"));
 			AtomicToggle(T("Enabled##occ", "Aktiv##occ"), Config::occlusionCull,
 				T("Objects in the main view that are completely hidden behind walls, houses or terrain are not drawn. A small depth image of the previous frame decides what is hidden. Shadows, reflections and water are never affected. Pauses while the camera turns or moves fast. Saves draw calls in cities, the effect on FPS depends on your setup. Watch for objects popping in. Default OFF.",
 					"Objekte im Hauptbild, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Ein kleines Tiefenbild des vorigen Bildes entscheidet, was verdeckt ist. Schatten, Spiegelungen und Wasser sind nie betroffen. Pausiert, wenn sich die Kamera schnell dreht oder bewegt. Spart Draw Calls in Städten, wie viel FPS das bringt, hängt vom System ab. Auf aufploppende Objekte achten. Standard AUS."));
@@ -466,10 +467,10 @@ namespace Menu
 					"Innenräume werden fast nur von Fackeln und Feuern beleuchtet, fehlende Schatten fallen dort auf. Aus = in Innenräumen volle Fackelschatten."));
 			RuleControls("point", Config::pointLightCulling, 5000.0f);
 
-			MenuApi::SeparatorText(T("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern"));
+			MenuApi::SeparatorText(T("Shadow cache for static lights (BETA)", "Schatten fester Lichter zwischenspeichern (BETA)"));
 			Toggle(T("Enabled##lcache", "Aktiv##lcache"), Config::lightShadowCache.enabled,
-				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters and moving objects are drawn again each frame. Flickering lights are always redrawn. Mainly for interiors with many lights. Test feature, default OFF: with some lighting mods (e.g. Lux) shadows near fires can pulse.",
-					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren und Bewegliches neu gezeichnet. Flackernde Lichter werden immer neu gezeichnet. Vor allem für Innenräume mit vielen Lichtern. Testfunktion, Standard AUS: mit manchen Lichtmods (z. B. Lux) können Schatten an Feuern pulsieren."));
+				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters and moving objects are drawn again each frame. Flickering lights are always redrawn. Mainly for interiors with many lights. BETA, default OFF: with some lighting mods (e.g. Lux) shadows near fires can pulse.",
+					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren und Bewegliches neu gezeichnet. Flackernde Lichter werden immer neu gezeichnet. Vor allem für Innenräume mit vielen Lichtern. BETA, Standard AUS: mit manchen Lichtmods (z. B. Lux) können Schatten an Feuern pulsieren."));
 
 			MenuApi::SeparatorText(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"));
 			Toggle(T("Enabled##actor", "Aktiv##actor"), Config::actorShadowCulling.enabled,
@@ -480,7 +481,7 @@ namespace Menu
 			Toggle(T("Also torch shadows##actor", "Auch Fackelschatten##actor"), Config::actorShadowCulling.pointLights,
 				T("Also leave out character shadows cast by torches and fires.", "Auch Figurenschatten von Fackeln und Feuern weglassen."));
 
-			MenuApi::SeparatorText(T("Shadow instancing", "Gleiche Schatten bündeln"));
+			MenuApi::SeparatorText(T("Shadow instancing (BETA)", "Gleiche Schatten bündeln (BETA)"));
 			Toggle(T("Enabled##inst", "Aktiv##inst"), Config::shadowInstancing.enabled,
 				T("Draws identical simple meshes in sun shadows with one draw call. Small gain, off by default - switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn, standardmäßig aus - bei flackernden Schatten oder Objekten wieder ausschalten."));
 		}
@@ -620,7 +621,7 @@ namespace Menu
 			Toggle(T("Also clothing and armor of characters##ts", "Auch Kleidung und Rüstung von Figuren##ts"), Config::textureStream.streamClothing,
 				T("Clothing and armor worn by NPCs far away are shrunk as well. Distance is taken from the character itself, so sitting or animated NPCs are measured correctly.",
 					"Kleidung und Rüstung weit entfernter NPCs werden ebenfalls verkleinert. Der Abstand wird an der Figur selbst gemessen, damit auch sitzende oder animierte NPCs richtig erfasst werden."));
-			Toggle(T("Also bodies, faces and hair (test)##ts", "Auch Körper, Gesichter und Haare (Test)##ts"), Config::textureStream.streamCharacters,
+			Toggle(T("Also bodies, faces and hair (BETA)##ts", "Auch Körper, Gesichter und Haare (BETA)##ts"), Config::textureStream.streamCharacters,
 				T("Body, face and hair textures (textures/actors/character) of far characters are shrunk as well. If faces or hair look wrong (black, purple, blurry), turn this off.",
 					"Körper-, Gesichts- und Haartexturen (textures/actors/character) ferner Figuren werden ebenfalls verkleinert. Sehen Gesichter oder Haare falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
 			MenuApi::TextWrapped("%s", T("Logging the textures under the crosshair and testing excluded texture types: page Debug.",
@@ -695,7 +696,7 @@ namespace Menu
 			HelpEntry(T("Characters walking past a torch are lit a moment late", "An einer Fackel vorbeilaufende Figuren werden einen Moment zu spät beleuchtet"),
 				T("Lights and scene > Light assignment throttle (or lower 'Max. age')", "Licht und Szene > Licht-Zuordnung drosseln (oder 'Max. Alter' senken)"));
 			HelpEntry(T("Whole objects disappear, or tiny objects pop in", "Ganze Objekte verschwinden, oder winzige Objekte ploppen auf"),
-				T("Overview > Experimental switches (both off by default)", "Übersicht > Experimentelle Schalter (beide standardmäßig aus)"));
+				T("Overview > Beta: Main view micro culling or Hide occluded objects (off by default)", "Übersicht > Beta: Winzige Objekte im Bild weglassen oder Verdeckte Objekte weglassen (standardmäßig aus)"));
 
 			MenuApi::SeparatorText(T("Reporting a bug", "Fehler melden"));
 			MenuApi::TextWrapped("%s", T("Please attach SPS.log (Documents\\My Games\\Skyrim Special Edition\\SKSE) and say where it happened and which switch makes it go away.",
