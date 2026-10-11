@@ -992,8 +992,13 @@ namespace ShadowCulling
 		bool BelongsToActorNode(const RE::NiAVObject* a_obj) noexcept;
 
 		// Spiel pausiert (Inventar, Container, Handel ...): das 3D-Modell im Menue wird mit eigener Kamera gezeichnet,
-		// die Abstaende zur Weltkamera stimmen dann nicht -> im Hauptbild nichts weglassen (fehlende Inventarbilder 1.0.50)
-		std::atomic<bool> g_gamePaused{ false };
+		// die Abstaende zur Weltkamera stimmen dann nicht -> im Hauptbild nichts weglassen (fehlende Inventarbilder 1.0.50).
+		// Direkt abfragen: OnFrame haengt am Spieler-Update und laeuft bei pausiertem Spiel nicht (1.0.53 griff deshalb nie).
+		bool GamePaused() noexcept
+		{
+			const auto ui = RE::UI::GetSingleton();
+			return ui && ui->GameIsPaused();
+		}
 
 		struct LightingRenderPasses
 		{
@@ -1005,7 +1010,7 @@ namespace ShadowCulling
 				// Deshalb eine leere Liste zurueckgeben und den Zwischenspeicher unangetastet lassen.
 				thread_local RE::BSShaderProperty::RenderPassArray empty{ nullptr, 0 };
 				const auto passes = func(a_this, a_geometry, a_renderFlags, a_accumulator);
-				if (g_gamePaused.load(std::memory_order_relaxed)) {
+				if (GamePaused()) {
 					return passes;
 				}
 				if (passes && passes->head && a_geometry && ShouldCullMain(*a_geometry)) {
@@ -1697,9 +1702,6 @@ namespace ShadowCulling
 		}
 
 		g_mainCamera.store(RE::Main::WorldRootCamera(), std::memory_order_relaxed);
-		if (const auto ui = RE::UI::GetSingleton()) {
-			g_gamePaused.store(ui->GameIsPaused(), std::memory_order_relaxed);
-		}
 		{
 			const auto player = RE::PlayerCharacter::GetSingleton();
 			const auto cell = player ? player->GetParentCell() : nullptr;
