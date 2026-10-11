@@ -989,6 +989,12 @@ namespace ShadowCulling
 		// BSLightingShaderProperty::GetRenderPasses (vfunc 0x2A): Draws fuer die normale Darstellung (Hauptszene,
 		// Reflexions-Cubemaps). Community Shaders (TruePBR) haengt sich ebenfalls hier ein und ruft das Original auf;
 		// wir liegen dahinter und leeren die Liste fuer ferne kleine Decals bzw. winzige Objekte.
+		bool BelongsToActorNode(const RE::NiAVObject* a_obj) noexcept;
+
+		// Spiel pausiert (Inventar, Container, Handel ...): das 3D-Modell im Menue wird mit eigener Kamera gezeichnet,
+		// die Abstaende zur Weltkamera stimmen dann nicht -> im Hauptbild nichts weglassen (fehlende Inventarbilder 1.0.50)
+		std::atomic<bool> g_gamePaused{ false };
+
 		struct LightingRenderPasses
 		{
 			static RE::BSShaderProperty::RenderPassArray* thunk(RE::BSLightingShaderProperty* a_this, RE::BSGeometry* a_geometry, std::uint32_t a_renderFlags, RE::BSShaderAccumulator* a_accumulator)
@@ -999,6 +1005,9 @@ namespace ShadowCulling
 				// Deshalb eine leere Liste zurueckgeben und den Zwischenspeicher unangetastet lassen.
 				thread_local RE::BSShaderProperty::RenderPassArray empty{ nullptr, 0 };
 				const auto passes = func(a_this, a_geometry, a_renderFlags, a_accumulator);
+				if (g_gamePaused.load(std::memory_order_relaxed)) {
+					return passes;
+				}
 				if (passes && passes->head && a_geometry && ShouldCullMain(*a_geometry)) {
 					empty.head = nullptr;
 					return &empty;
@@ -1007,7 +1016,8 @@ namespace ShadowCulling
 					for (auto p = passes->head; p && draws < 64; p = p->next) {
 						++draws;
 					}
-					if (Occlusion::CountMain(*a_geometry, a_accumulator, draws)) {
+					// Teile an Figuren (Waffen, Schilde, Trommel auf dem Ruecken) bewegen sich mit der Animation -> nie weglassen
+					if (Occlusion::CountMain(*a_geometry, a_accumulator, draws) && !BelongsToActorNode(a_geometry)) {
 						empty.head = nullptr;
 						return &empty;
 					}
@@ -1687,6 +1697,9 @@ namespace ShadowCulling
 		}
 
 		g_mainCamera.store(RE::Main::WorldRootCamera(), std::memory_order_relaxed);
+		if (const auto ui = RE::UI::GetSingleton()) {
+			g_gamePaused.store(ui->GameIsPaused(), std::memory_order_relaxed);
+		}
 		{
 			const auto player = RE::PlayerCharacter::GetSingleton();
 			const auto cell = player ? player->GetParentCell() : nullptr;

@@ -91,6 +91,7 @@ namespace Occlusion
 		{
 			std::uint32_t lastId = 0;  // Tiefenbild der letzten Pruefung
 			std::uint8_t  count = 0;   // so viele Tiefenbilder hintereinander verdeckt
+			float         x = 0, y = 0, z = 0;  // Mittelpunkt bei der letzten Pruefung
 		};
 		struct Shard
 		{
@@ -100,8 +101,9 @@ namespace Occlusion
 		constexpr std::size_t kShards = 32;
 		Shard                 g_shards[kShards];
 
-		// true = in den letzten zwei Tiefenbildern verdeckt
-		bool UpdateStreak(const void* a_geom, std::uint32_t a_snapId, bool a_occluded) noexcept
+		// true = in den letzten Tiefenbildern verdeckt und seitdem nicht bewegt. Bewegte Objekte (Fische, Tueren,
+		// Physik-Objekte) stehen im alten Tiefenbild woanders -> nie weglassen (Beta 1.0.52: Fische wurden grau)
+		bool UpdateStreak(const void* a_geom, std::uint32_t a_snapId, bool a_occluded, const RE::NiPoint3& a_center) noexcept
 		{
 			auto&            sh = g_shards[(reinterpret_cast<std::uintptr_t>(a_geom) >> 4) % kShards];
 			std::scoped_lock l(sh.lock);
@@ -110,7 +112,12 @@ namespace Occlusion
 			if (e.lastId == a_snapId) {
 				return a_occluded && e.count >= need;  // mehrere Passes desselben Objekts im selben Frame
 			}
-			if (!a_occluded) {
+			const float dx = a_center.x - e.x, dy = a_center.y - e.y, dz = a_center.z - e.z;
+			const bool  moved = e.lastId != 0 && dx * dx + dy * dy + dz * dz > 1.0f;
+			e.x = a_center.x;
+			e.y = a_center.y;
+			e.z = a_center.z;
+			if (!a_occluded || moved) {
 				e.count = 0;
 			} else {
 				e.count = (e.lastId + 1 == a_snapId) ? static_cast<std::uint8_t>(std::min(e.count + 1, 8)) : 1;
@@ -768,7 +775,7 @@ namespace Occlusion
 		const bool skinned = const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData().skinInstance != nullptr;
 		const bool isMain = a_accumulator && a_accumulator == g_mainAcc.load(std::memory_order_relaxed);
 		// Verlauf nur fuer feste Objekte im Hauptbild (Figuren: Huelle hinkt der Animation hinterher)
-		const bool twice = isMain && !(skinned && Config::occlSkipSkinned.load(std::memory_order_relaxed)) && UpdateStreak(&a_geom, snap->id, r == 2);
+		const bool twice = isMain && !(skinned && Config::occlSkipSkinned.load(std::memory_order_relaxed)) && UpdateStreak(&a_geom, snap->id, r == 2, a_geom.worldBound.center);
 		if (r != 2) {
 			return false;
 		}
