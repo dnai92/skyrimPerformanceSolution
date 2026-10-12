@@ -747,12 +747,19 @@ namespace InstancingAnalysis
 		LightShadowRender<1>::func = frustumVtbl.write_vfunc(0xA, LightShadowRender<1>::thunk);
 		logger::info("Hooks installed: BSShadowParabolicLight / BSShadowFrustumLight::Render (0xA) - GPU timing");
 
-		RenderBatches::func = reinterpret_cast<decltype(RenderBatches::func)>(REL::RelocationID(100852, 107642).address());
-		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&RenderBatches::func), reinterpret_cast<void*>(&RenderBatches::thunk)); err != 0) {
-			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", false, std::format("Detours error {} at RenderBatches", err));
+		// Den Detour braucht nur das Buendeln. Aeltere Community-Shaders-Versionen vertragen ihn nicht (CTD im Hauptmenue),
+		// deshalb nur installieren, wenn die Funktion beim Start an ist. Einschalten wirkt dann erst nach einem Neustart.
+		if (!Config::shadowInstancing.enabled) {
+			logger::info("Shadow instancing off at startup - RenderBatches detour not installed");
+			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", false, "off at startup (restart after enabling)", true);
 		} else {
-			logger::info("Detour installed: BSBatchRenderer::RenderBatches (instancing analysis, batch boundaries)");
-			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", REL::Module::IsAE(), REL::Module::IsAE() ? "" : "Anniversary Edition only", !REL::Module::IsAE());
+			RenderBatches::func = reinterpret_cast<decltype(RenderBatches::func)>(REL::RelocationID(100852, 107642).address());
+			if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&RenderBatches::func), reinterpret_cast<void*>(&RenderBatches::thunk)); err != 0) {
+				Features::Report("Shadow instancing", "Gleiche Schatten bündeln", false, std::format("Detours error {} at RenderBatches", err));
+			} else {
+				logger::info("Detour installed: BSBatchRenderer::RenderBatches (instancing analysis, batch boundaries)");
+				Features::Report("Shadow instancing", "Gleiche Schatten bündeln", REL::Module::IsAE(), REL::Module::IsAE() ? "" : "Anniversary Edition only", !REL::Module::IsAE());
+			}
 		}
 
 		REL::Relocation<std::uintptr_t> utilVtbl{ RE::VTABLE_BSUtilityShader[0] };

@@ -287,7 +287,7 @@ namespace Menu
 				T("Shadows of lights that do not move are kept, only characters and moving things are redrawn. Mainly for interiors. With some lighting mods (e.g. Lux) shadows near fires can pulse.",
 					"Schatten von Lichtern, die sich nicht bewegen, werden aufbewahrt, nur Figuren und Bewegliches werden neu gezeichnet. Vor allem für Innenräume. Mit manchen Lichtmods (z. B. Lux) können Schatten an Feuern pulsieren."));
 			Toggle(T("Shadow instancing (BETA)", "Gleiche Schatten bündeln (BETA)"), Config::shadowInstancing.enabled,
-				T("Draws identical simple meshes in sun shadows with one draw call. Small gain. Switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn. Bei flackernden Schatten oder Objekten wieder ausschalten."));
+				T("Draws identical simple meshes in sun shadows with one draw call. Small gain. Takes effect after restarting the game. Switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn. Wirkt erst nach einem Neustart des Spiels. Bei flackernden Schatten oder Objekten wieder ausschalten."));
 			Toggle(T("Main view micro culling (BETA)", "Winzige Objekte im Bild weglassen (BETA)"), Config::mainViewCulling.enabled,
 				T("Tiny far objects are not drawn at all. They can pop in.", "Winzige ferne Objekte werden gar nicht gezeichnet. Sie können aufploppen."));
 			Toggle(T("Calmer far shadows (BETA)", "Ruhigere ferne Schatten (BETA)"), Config::stableCascade.enabled,
@@ -464,7 +464,7 @@ namespace Menu
 
 			MenuApi::SeparatorText(T("Shadow instancing (BETA)", "Gleiche Schatten bündeln (BETA)"));
 			Toggle(T("Enabled##inst", "Aktiv##inst"), Config::shadowInstancing.enabled,
-				T("Draws identical simple meshes in sun shadows with one draw call. Small gain, off by default - switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn, standardmäßig aus - bei flackernden Schatten oder Objekten wieder ausschalten."));
+				T("Draws identical simple meshes in sun shadows with one draw call. Small gain, off by default. Takes effect after restarting the game. Switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn, standardmäßig aus. Wirkt erst nach einem Neustart des Spiels. Bei flackernden Schatten oder Objekten wieder ausschalten."));
 		}
 
 		void RenderLightsAndPruning()

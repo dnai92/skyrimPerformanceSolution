@@ -1039,12 +1039,16 @@ namespace ShadowCulling
 		{
 			static RE::BSShaderProperty::RenderPassArray* thunk(RE::BSLightingShaderProperty* a_this, RE::BSGeometry* a_geometry, std::uint32_t a_renderMode, RE::BSShaderAccumulator* a_accumulator)
 			{
+				// Wie beim Hauptbild: leere Liste zurueckgeben statt Clear(). Clear() gibt die Passes an den Pool zurueck,
+				// waehrend die Engine sie evtl. noch eingetragen hat -> spaeter wird ein wiederverwendeter Pass gezeichnet (CTD).
+				thread_local RE::BSShaderProperty::RenderPassArray empty{ nullptr, 0 };
 				const auto passes = func(a_this, a_geometry, a_renderMode, a_accumulator);
 				const auto& cfg = Config::skylightingCulling;
 				if (passes && a_geometry && passes->head) {
 					if (cfg.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && a_geometry->worldBound.radius < cfg.minRadius) {
-						passes->Clear();
 						Stats::Count(Stats::Counter::SkylightCulled);
+						empty.head = nullptr;
+						return &empty;
 					} else {
 						Stats::Count(Stats::Counter::SkylightKept);
 					}
