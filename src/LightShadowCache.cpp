@@ -37,6 +37,11 @@ namespace LightShadowCache
 			std::array<RE::NiTransform, kMaxCams> pose{};
 			std::uint32_t                         camCount = 0;
 			float                                 radius = 0;
+			// Lage der Schattenkameras und Radius beim Aufbau (Render-Thread): der Cache passt nur zu genau dieser Projektion.
+			// Bis 1.0.55 nur gegen den Vorframe verglichen - ein flackerndes Licht, das pro Frame < 0,5 Einheiten wandert,
+			// galt nie als bewegt, die Karte lief langsam aus der Projektion (Pulsieren an Feuern, Lux)
+			std::array<RE::NiTransform, kMaxCams> buildPose{};
+			float                                 buildRadius = 0;
 			std::uint32_t                         stableFrames = 0;
 			std::uint32_t                         lastSeen = 0;
 			bool                                  valid = false;        // Cache-Inhalt passt
@@ -154,6 +159,13 @@ namespace LightShadowCache
 			if (prop && netimmerse_cast<RE::BSEffectShaderProperty*>(prop)) {
 				return true;
 			}
+			// Wind (Baeume) und Vertex-Animation bewegen das Mesh, ohne seine Lage zu aendern -> Schatten fror im Cache ein
+			if (prop && prop->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kTreeAnim)) {
+				return true;
+			}
+			if (netimmerse_cast<RE::BSDynamicTriShape*>(&a_geom)) {
+				return true;
+			}
 			RE::NiAVObject* obj = &a_geom;
 			for (int depth = 0; obj && depth < 32; ++depth, obj = obj->parent) {
 				if (const auto ref = SceneUtil::OwnUserData(obj)) {
@@ -267,13 +279,15 @@ namespace LightShadowCache
 			return tex;
 		}
 
-		bool EnsureTexture(REX::W32::ID3D11Texture2D*& a_tex, std::uint32_t& a_w, std::uint32_t& a_h, std::uint32_t& a_format, REX::W32::ID3D11Texture2D* a_src) noexcept
+		bool EnsureTexture(REX::W32::ID3D11Texture2D*& a_tex, std::uint32_t& a_w, std::uint32_t& a_h, std::uint32_t& a_format, REX::W32::ID3D11Texture2D* a_src,
+			bool& a_recreated) noexcept
 		{
 			REX::W32::D3D11_TEXTURE2D_DESC desc{};
 			a_src->GetDesc(&desc);
 			if (a_tex && a_w == desc.width && a_h == desc.height && a_format == static_cast<std::uint32_t>(desc.format)) {
 				return true;
 			}
+			a_recreated = true;  // neue Kopie ist leer - Inhalt erst nach dem naechsten Aufbau gueltig
 			if (a_tex) {
 				a_tex->Release();
 				a_tex = nullptr;
@@ -295,9 +309,11 @@ namespace LightShadowCache
 			return true;
 		}
 
-		bool EnsureCacheTexture(LightState& a_l, REX::W32::ID3D11Texture2D* a_src) noexcept
+		bool EnsureCacheTexture(LightState& a_l, REX::W32::ID3D11Texture2D* a_src, bool& a_recreated) noexcept
 		{
-			return EnsureTexture(a_l.tex, a_l.texW, a_l.texH, a_l.texFormat, a_src) && EnsureTexture(a_l.prevTex, a_l.prevW, a_l.prevH, a_l.prevFormat, a_src);
+			a_recreated = false;
+			return EnsureTexture(a_l.tex, a_l.texW, a_l.texH, a_l.texFormat, a_src, a_recreated) &&
+			       EnsureTexture(a_l.prevTex, a_l.prevW, a_l.prevH, a_l.prevFormat, a_src, a_recreated);
 		}
 
 		// Kopieren bei abgehaengten Render-Zielen (die Schattenkarte ist gerade als Tiefenpuffer gebunden)
@@ -488,11 +504,27 @@ namespace LightShadowCache
 				} else if (target != l->boundTex || sub != l->boundSub) {
 					l->unsupported = true;  // Karten eines Lichts in verschiedenen Ebenen
 				}
-				if (!target || l->unsupported || !EnsureCacheTexture(*l, target)) {
+				bool recreated = false;
+				if (!target || l->unsupported || !EnsureCacheTexture(*l, target, recreated)) {
 					func(a_camera, a_accumulator, a_flags);
 					l->valid = false;
 					++g_win.buildFailed;
 					return;
+				}
+				const auto  niLight = light->light.get();
+				const float radius = niLight ? niLight->GetLightRuntimeData().radius.x : 0.0f;
+				if (mode == Mode::kCached && (recreated || idx >= kMaxCams || PoseChanged(a_camera->world, l->buildPose[idx]) ||
+												 std::abs(radius - l->buildRadius) > kMoveEpsilon)) {
+					// Cache passt nicht zur aktuellen Projektion (Licht gewandert, Radius geaendert, Kopie neu angelegt):
+					// normal zeichnen und neu aufbauen
+					func(a_camera, a_accumulator, a_flags);
+					l->valid = false;
+					++g_win.lightMoved;
+					return;
+				}
+				if (mode == Mode::kBuild && idx < kMaxCams) {
+					l->buildPose[idx] = a_camera->world;
+					l->buildRadius = radius;
 				}
 				if (mode == Mode::kWait) {
 					func(a_camera, a_accumulator, a_flags);  // normal, alles
