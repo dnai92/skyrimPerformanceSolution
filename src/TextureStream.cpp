@@ -216,6 +216,8 @@ namespace TextureStream
 			std::uint32_t                      extCap = 0;
 			bool                               ours = false;  // die aktuelle Verkleinerung stammt von uns
 			std::uint8_t                       fails = 0;      // fehlgeschlagene Neuladungen in Folge
+			bool                               isCharacter = false;           // Pfad unter actors\character\ (einmal bestimmt)
+			std::uint32_t                      remembered = 0xFFFFFFFFu;      // zuletzt an RememberEdge gemeldet (nur Aenderungen melden)
 			Clock::time_point                  retryAfter{};   // nach Fehler erst danach wieder versuchen
 
 			std::uint32_t FullEdge() const noexcept { return std::max(fullW, fullH); }
@@ -596,6 +598,8 @@ namespace TextureStream
 		std::deque<Job>         g_jobs;
 		std::vector<Result>     g_results;
 		std::atomic<bool>       g_workerStarted{ false };
+		std::atomic<bool>       g_saveRequested{ false };  // gemerkte Groessen speichern (Worker)
+		void                    SaveSizes();
 
 		bool SkipBytes(RE::BSResourceNiBinaryStream& a_s, std::uint64_t a_bytes)
 		{
@@ -857,6 +861,12 @@ namespace TextureStream
 						g_results.push_back(std::move(res));
 					}
 					// Uebernommen wird in OnFrame (Haupt-Thread) bzw. PreviewTick (Menues) - nicht mehr per eigener Task
+				}
+				if (g_saveRequested.exchange(false, std::memory_order_relaxed)) {
+					try {
+						SaveSizes();
+					} catch (...) {
+					}
 				}
 				if (Clock::now() - lastGpu >= 1s) {
 					lastGpu = Clock::now();
@@ -1376,6 +1386,7 @@ namespace TextureStream
 					st.format = static_cast<std::uint32_t>(d.format);
 					st.fi = InfoOf(st.format);
 					st.path = NormalizePath(a_src->name.c_str());
+				st.isCharacter = IsCharacterPath(st.path);
 					st.eligibleBase = d.arraySize == 1 && d.sampleDesc.count == 1 && !(d.miscFlags & 0x4) && d.mipLevels > 1 && st.fi.bytes > 0 &&
 					                  st.path.starts_with("textures\\") && st.path.ends_with(".dds") && IsFileTexture(r);
 					st.eligible = st.eligibleBase && !Excluded(st.path);
@@ -1411,7 +1422,7 @@ namespace TextureStream
 				st.skinPass = g_passId;
 			}
 			// Koerper/Gesicht/Haare nur mit eigenem Schalter (schwarze/lila Gesichter 1.0.8) - sonst immer voll
-			if (IsCharacterPath(st.path) ? !Config::textureStream.streamCharacters : (a_skinned && !Config::textureStream.streamClothing)) {
+			if (st.isCharacter ? !Config::textureStream.streamCharacters : (a_skinned && !Config::textureStream.streamClothing)) {
 				a_needPx = 1.0e6f;
 			}
 			if (st.passId != g_passId) {
@@ -1942,7 +1953,11 @@ namespace TextureStream
 				}
 				// Benoetigte Groesse immer lernen (Stufe 3 wendet sie beim Laden nur bei Druck an)
 				if (seen && st.eligible && (st.probe == Probe::kOk || st.probe == Probe::kNone)) {
-					RememberEdge(st.path, SafeLoadEdge(st, NeededEdge(st, st.passNeed)));
+					// Nur bei Aenderung melden (Sperre + Pfad-Hash, konkurriert beim Laden mit den Lade-Threads)
+					if (const auto edge = SafeLoadEdge(st, NeededEdge(st, st.passNeed)); edge != st.remembered) {
+						RememberEdge(st.path, edge);
+						st.remembered = edge;
+					}
 					if (g_userCap && st.FullEdge() > g_userCap && (st.probe == Probe::kOk || !st.Reduced())) {
 						RememberCapEdge(st.path, g_userCap, SafeLoadEdge(st, g_userCap));
 					}
@@ -1966,7 +1981,7 @@ namespace TextureStream
 					} else if (active && seen && g_userCap && st.CurEdge() > g_userCap && st.hold && st.probe == Probe::kNone) {
 						QueueProbe(st, r);  // Obergrenze erst nach der Datei-Pruefung (sonst kein Weg zurueck)
 					} else if (active && seen && g_userCap && st.CurEdge() > g_userCap && st.hold && st.probe == Probe::kOk &&
-					           !(IsCharacterPath(st.path) ? !cfg.streamCharacters : (st.skinPass == g_passId && !cfg.streamClothing))) {
+					           !(st.isCharacter ? !cfg.streamCharacters : (st.skinPass == g_passId && !cfg.streamClothing))) {
 						// Obergrenze aus dem Menue: sofort, unabhaengig vom VRAM
 						st.busy = true;
 						const std::uint32_t w = std::max(1u, st.curW * g_userCap / st.CurEdge()), h = std::max(1u, st.curH * g_userCap / st.CurEdge());
@@ -2455,7 +2470,12 @@ namespace TextureStream
 		static Clock::time_point lastSave = Clock::now();
 		if (Clock::now() - lastSave >= 300s) {
 			lastSave = Clock::now();
-			SaveSizes();
+			// Datei schreiben im Hintergrund-Thread (bis 1.0.57 im Hauptthread unter der Zustands-Sperre)
+			if (g_workerStarted.load(std::memory_order_relaxed)) {
+				g_saveRequested.store(true, std::memory_order_relaxed);
+			} else {
+				SaveSizes();
+			}
 		}
 		static Clock::time_point lastReport = Clock::now();
 		const auto&              cfg = Config::textureStream;

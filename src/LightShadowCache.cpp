@@ -665,12 +665,11 @@ namespace LightShadowCache
 	bool Filter(LightState* l, RE::BSGeometry& geom) noexcept
 	{
 		const auto mode = g_curMode;
-		bool       dynamic = IsDynamic(geom);
 		try {
-			std::scoped_lock lock(l->lock);
-			dynamic = dynamic || l->promoted.contains(&geom);
 			if (mode == Mode::kBuild) {
-				if (dynamic) {
+				const bool dynamic = IsDynamic(geom);
+				std::scoped_lock lock(l->lock);
+				if (dynamic || l->promoted.contains(&geom)) {
 					return true;  // Aufbau-Frame: nur Unbewegliche in die Karte
 				}
 				l->statics.try_emplace(&geom, LightState::Entry{ geom.world, 0 });
@@ -680,11 +679,18 @@ namespace LightShadowCache
 			if (DebugMode() == 3) {
 				return false;  // Pruef-Modus: zurueckkopieren, aber alles zeichnen
 			}
-			if (dynamic) {
+			std::scoped_lock lock(l->lock);
+			if (l->promoted.contains(&geom)) {
 				g_drawnDynamic.fetch_add(1, std::memory_order_relaxed);
 				return false;
 			}
+			// Beim Aufbau als unbeweglich eingestuft -> IsDynamic (Elternkette bis 32 Ebenen) nicht erneut; bis 1.0.57 lief
+			// es fuer jeden Draw jeder gecachten Karte (zehntausende je Frame)
 			const auto it = l->statics.find(&geom);
+			if (it == l->statics.end() && IsDynamic(geom)) {
+				g_drawnDynamic.fetch_add(1, std::memory_order_relaxed);
+				return false;
+			}
 			if (it == l->statics.end()) {
 				// neu im Lichtradius: zusaetzlich zeichnen, der Cache bleibt gueltig (zu viele -> neu aufbauen)
 				l->extras.insert(&geom);

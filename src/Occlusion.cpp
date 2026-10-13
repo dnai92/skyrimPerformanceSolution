@@ -81,6 +81,28 @@ namespace Occlusion
 			std::uint32_t          id = 0;  // fortlaufend je veroeffentlichtem Tiefenbild
 		};
 		std::atomic<std::shared_ptr<const Snapshot>> g_current;
+		// Erhoeht bei jedem neuen Tiefenbild. Die Pruef-Threads holen g_current nur bei Aenderung (atomarer shared_ptr
+		// = interne Sperre + Referenzzaehler auf gemeinsamer Cache-Zeile; bis 1.0.57 je Objekt, ~2000x pro Frame)
+		std::atomic<std::uint64_t>                   g_currentGen{ 1 };
+
+		void Publish(std::shared_ptr<const Snapshot> a_snap) noexcept
+		{
+			g_current.store(std::move(a_snap));
+			g_currentGen.fetch_add(1, std::memory_order_release);
+		}
+
+		// Aktuelles Tiefenbild fuer diesen Thread (haelt das alte bis zum naechsten Wechsel am Leben)
+		const Snapshot* CurrentForThread() noexcept
+		{
+			thread_local std::shared_ptr<const Snapshot> snap;
+			thread_local std::uint64_t                   gen = 0;
+			const auto                                   now = g_currentGen.load(std::memory_order_acquire);
+			if (now != gen) {
+				snap = g_current.load();
+				gen = now;
+			}
+			return snap.get();
+		}
 		std::uint32_t                                g_nextSnapshotId = 1;  // Main-Thread
 
 		// Stufe 2 (Weglassen): nur im Accumulator des Hauptbilds (der mit den meisten Objekten je Sekunde), nur feste
@@ -664,7 +686,9 @@ namespace Occlusion
 			}
 		}
 		if (!Active()) {
-			g_current.store(nullptr);
+			if (g_current.load()) {
+				Publish(nullptr);
+			}
 			return;
 		}
 		const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
@@ -702,7 +726,7 @@ namespace Occlusion
 		}
 		if (newest) {
 			newest->id = g_nextSnapshotId++;
-			g_current.store(std::move(newest));
+			Publish(std::move(newest));
 		}
 		if (const auto listId = g_listSnapId.load(); listId != 0) {
 			const auto cur = g_current.load();
@@ -766,12 +790,16 @@ namespace Occlusion
 		}
 		const bool diag = Diag();
 		auto&      s = Slot(a_accumulator);
-		s.window.fetch_add(1, std::memory_order_relaxed);  // Hauptbild erkennen - wird auch zum Weglassen gebraucht
+		// Hauptbild erkennen (wird auch zum Weglassen gebraucht) - Stichprobe je Thread genuegt fuer die Mehrheit
+		thread_local std::uint32_t tick = 0;
+		if ((++tick & 15) == 0) {
+			s.window.fetch_add(1, std::memory_order_relaxed);
+		}
 		if (diag) {
 			s.geoms.fetch_add(1, std::memory_order_relaxed);
 			s.draws.fetch_add(a_draws, std::memory_order_relaxed);
 		}
-		const auto snap = g_current.load();
+		const auto snap = CurrentForThread();
 		if (!snap) {
 			if (diag) {
 				g_noSnapshot.fetch_add(1, std::memory_order_relaxed);
@@ -843,7 +871,7 @@ namespace Occlusion
 
 	void Reset() noexcept
 	{
-		g_current.store(nullptr);
+		Publish(nullptr);
 		g_snapPending = false;
 		g_cullAllowed.store(false);
 		OcclusionGpu::Reset();
