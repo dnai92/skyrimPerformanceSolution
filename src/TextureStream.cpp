@@ -347,6 +347,15 @@ namespace TextureStream
 			return (static_cast<double>(budget) - static_cast<double>(usage) + static_cast<double>(g_recentFreedBytes.load(std::memory_order_relaxed))) / 1048576.0;
 		}
 
+		// Freier VRAM ohne "gerade freigegeben" (MB, -1 = unbekannt): fuer Neuladen. Der verzoegert freigegebene Speicher ist
+		// noch belegt - zaehlte er beim Neuladen als frei, fuellte sich das VRAM mit Neuladungen, waehrend gleichzeitig
+		// verkleinert wurde (Test 13.10.: 388 verkleinert, 903 neu geladen in einer Minute, 805 MB ausgelagert)
+		double FreeMBForReload() noexcept
+		{
+			const auto budget = g_vramBudget.load(std::memory_order_relaxed), usage = g_vramUsage.load(std::memory_order_relaxed);
+			return budget == 0 ? -1.0 : (static_cast<double>(budget) - static_cast<double>(usage)) / 1048576.0;
+		}
+
 		// Darf verkleinert werden? Im Budget-Modus nur, wenn weniger als der Puffer frei ist (unbekannt = ja)
 		bool Pressure() noexcept
 		{
@@ -1335,7 +1344,7 @@ namespace TextureStream
 			// alle anderen bis 32 MB. 1.0.56 liess sehr nahe unbegrenzt zu (3,9 GB/min bei 93 % VRAM), bis 1.0.55 alle bis 128 MB.
 			const std::uint64_t cap = (a_priority >= 4.0f ? 128ull : 32ull) * 1048576;
 			if (Active() && Config::textureStream.budgetMode && g_inflightUp >= cap) {
-				if (const double freeMB = FreeMB(); freeMB >= 0.0 &&
+				if (const double freeMB = FreeMBForReload(); freeMB >= 0.0 &&
 					(freeMB - Config::textureStream.reserveMB) * 1048576.0 - static_cast<double>(g_inflightUp) < static_cast<double>(job.extraBytes)) {
 					return;
 				}
