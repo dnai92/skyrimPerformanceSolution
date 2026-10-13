@@ -420,6 +420,7 @@ namespace TextureStream
 		{
 			std::uint32_t downs = 0, ups = 0, upFails = 0, probesBad = 0;
 			std::uint32_t downsSkipped = 0;  // Verkleinern verworfen: veraltet oder inzwischen gebraucht
+			std::uint32_t recognized = 0;    // von uns verkleinert, nach Reset/Vergessen am Kennzeichen wiedererkannt
 			std::uint32_t pingPong = 0;
 			std::uint32_t refills = 0;  // zum Auffuellen wieder voll geladen  // verkleinert, obwohl erst vor < 60 s neu geladen
 			double        upMs = 0, upMB = 0;
@@ -1387,6 +1388,9 @@ namespace TextureStream
 						st.fullMips = tag.fullMips;
 						st.probe = Probe::kOk;
 						known = true;
+						if (st.Reduced()) {
+							++g_stats.recognized;
+						}
 					}
 					// Datei in dieser Sitzung schon geprueft -> sofort einordnen, sonst bei evtl. verkleinertem Laden (Stufe 3)
 					// die Originalgroesse aus der Datei holen, damit ein naheliegendes Objekt gleich wieder voll wird
@@ -2169,9 +2173,9 @@ namespace TextureStream
 			const auto& s = g_stats;
 			const auto  capText = g_userCap ? std::format(" (by max. size {}: {}, {:.0f} MB)", g_userCap, capped, cappedMB) : std::string{};
 			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, paged out {:.0f} MB) | downscaled {} textures, {:.0f} MB saved{} | last minute: "
-						 "downscaled {} (skipped {}), reloaded {} ({:.0f} MB), ping-pong {}, refilled {}, loaded reduced {}, from RAM {}, load errors {}",
+						 "downscaled {} (skipped {}), reloaded {} ({:.0f} MB), ping-pong {}, refilled {}, loaded reduced {}, from RAM {}, load errors {}, recognized after reset {}",
 				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_procShared.load() / 1048576.0, reduced,
-				savedMB, capText, s.downs, s.downsSkipped, s.ups, s.upMB, s.pingPong, s.refills, g_loadedReduced.exchange(0), g_cacheHits.exchange(0), s.upFails);
+				savedMB, capText, s.downs, s.downsSkipped, s.ups, s.upMB, s.pingPong, s.refills, g_loadedReduced.exchange(0), g_cacheHits.exchange(0), s.upFails, s.recognized);
 			g_cacheMisses.exchange(0);
 			g_diagCreate.exchange(0);
 			g_diagDDS.exchange(0);

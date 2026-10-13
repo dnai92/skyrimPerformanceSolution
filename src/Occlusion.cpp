@@ -276,16 +276,36 @@ namespace Occlusion
 			if (!(wn > 16.0f)) {
 				return 1;  // reicht bis an die Kamera oder dahinter
 			}
-			// Ausdehnung konservativ mit der naechsten Tiefe; x/y aus dem Mittelpunkt (perspektivisch leicht zu klein,
-			// deshalb unten eine Kachel Rand)
-			const float ex = c.gpu ? rad * c.sx / wn : rad / wn * 2.0f / (c.r - c.l);
-			const float ey = c.gpu ? rad * c.sy / wn : rad / wn * 2.0f / (c.t - c.b);
+			// Bildausdehnung ueber die 8 Ecken des Wuerfels um die Kugel (enthaelt die Kugel, Projektion damit sicher gross
+			// genug). Bis 1.0.55 Mittelpunkt +- Radius/Tiefe: am Bildrand perspektivisch deutlich zu klein (bei 45 Grad
+			// ~10 Kacheln) -> halb verdeckte grosse Objekte am Rand konnten verschwinden.
+			float minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f;
+			for (int i = 0; i < 8; ++i) {
+				const RE::NiPoint3 p{ a_b.center.x + ((i & 1) ? rad : -rad), a_b.center.y + ((i & 2) ? rad : -rad), a_b.center.z + ((i & 4) ? rad : -rad) };
+				float px, py, pw;
+				if (c.gpu) {
+					float clip[4];
+					Mul(c.gm, p, clip);
+					pw = clip[3];
+					px = pw != 0.0f ? clip[0] / pw : 0.0f;
+					py = pw != 0.0f ? clip[1] / pw : 0.0f;
+				} else {
+					Project(c, p, px, py, pw);
+				}
+				if (!(pw > 1.0f)) {
+					return 1;  // Ecke an oder hinter der Kamera - Ausdehnung unbekannt
+				}
+				minX = std::min(minX, px);
+				maxX = std::max(maxX, px);
+				minY = std::min(minY, py);
+				maxY = std::max(maxY, py);
+			}
 			constexpr float W = static_cast<float>(OcclusionGpu::kWidth), H = static_cast<float>(OcclusionGpu::kHeight);
 			// eine Kachel Rand: Bild ist 1-2 Frames alt
-			const int u0 = std::max(0, static_cast<int>(std::floor(((x - ex) * 0.5f + 0.5f) * W)) - 1);
-			const int u1 = std::min(static_cast<int>(W) - 1, static_cast<int>(std::floor(((x + ex) * 0.5f + 0.5f) * W)) + 1);
-			const int v0 = std::max(0, static_cast<int>(std::floor((0.5f - (y + ey) * 0.5f) * H)) - 1);
-			const int v1 = std::min(static_cast<int>(H) - 1, static_cast<int>(std::floor((0.5f - (y - ey) * 0.5f) * H)) + 1);
+			const int u0 = std::max(0, static_cast<int>(std::floor((minX * 0.5f + 0.5f) * W)) - 1);
+			const int u1 = std::min(static_cast<int>(W) - 1, static_cast<int>(std::floor((maxX * 0.5f + 0.5f) * W)) + 1);
+			const int v0 = std::max(0, static_cast<int>(std::floor((0.5f - maxY * 0.5f) * H)) - 1);
+			const int v1 = std::min(static_cast<int>(H) - 1, static_cast<int>(std::floor((0.5f - minY * 0.5f) * H)) + 1);
 			if (u0 > u1 || v0 > v1) {
 				return 1;  // ausserhalb des alten Bildausschnitts - nichts bekannt
 			}

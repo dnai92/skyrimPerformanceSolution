@@ -159,19 +159,16 @@ namespace MenuApi
 	{
 		using FormatV = void (*)(const char*, va_list);
 
-		inline void CallV(const char* a_export, const char* a_fmt, va_list a_args)
-		{
-			if (const auto f = Get<FormatV>(a_export)) {
-				f(a_fmt, a_args);
-			}
-		}
 	}
 
 	inline void Text(const char* a_fmt, ...)
 	{
 		va_list args;
 		va_start(args, a_fmt);
-		detail::CallV("igTextV", a_fmt, args);
+		static const auto f = detail::Get<detail::FormatV>("igTextV");
+		if (f) {
+			f(a_fmt, args);
+		}
 		va_end(args);
 	}
 
@@ -179,7 +176,10 @@ namespace MenuApi
 	{
 		va_list args;
 		va_start(args, a_fmt);
-		detail::CallV("igTextWrappedV", a_fmt, args);
+		static const auto f = detail::Get<detail::FormatV>("igTextWrappedV");
+		if (f) {
+			f(a_fmt, args);
+		}
 		va_end(args);
 	}
 
@@ -187,7 +187,10 @@ namespace MenuApi
 	{
 		va_list args;
 		va_start(args, a_fmt);
-		detail::CallV("igBulletTextV", a_fmt, args);
+		static const auto f = detail::Get<detail::FormatV>("igBulletTextV");
+		if (f) {
+			f(a_fmt, args);
+		}
 		va_end(args);
 	}
 
@@ -195,7 +198,10 @@ namespace MenuApi
 	{
 		va_list args;
 		va_start(args, a_fmt);
-		detail::CallV("igSetTooltipV", a_fmt, args);
+		static const auto f = detail::Get<detail::FormatV>("igSetTooltipV");
+		if (f) {
+			f(a_fmt, args);
+		}
 		va_end(args);
 	}
 

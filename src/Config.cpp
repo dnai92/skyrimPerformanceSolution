@@ -163,6 +163,12 @@ namespace Config
 			if (!migrated && !std::filesystem::exists(kUserPath, ec) && std::filesystem::exists(L"Data/SKSE/Plugins/SkyrimPerf_User.ini", ec)) {
 				std::filesystem::copy_file(L"Data/SKSE/Plugins/SkyrimPerf_User.ini", kUserPath, ec);
 				logger::info("Menu settings migrated from SkyrimPerf_User.ini{}", ec ? " - ERROR: " + ec.message() : "");
+				// Alte Datei umbenennen: sonst holte sie nach "Standard laden" (loescht SPS_User.ini) beim naechsten Start
+				// die alten Werte zurueck
+				if (!ec) {
+					std::error_code ec2;
+					std::filesystem::rename(L"Data/SKSE/Plugins/SkyrimPerf_User.ini", L"Data/SKSE/Plugins/SkyrimPerf_User.ini.migrated", ec2);
+				}
 			}
 			migrated = true;
 		}
@@ -199,7 +205,7 @@ namespace Config
 
 		const auto readRule = [&](const char* a_section, CullRule& a_rule) {
 			a_rule.enabled = ini.GetBoolValue(a_section, "bEnabled", a_rule.enabled);
-			a_rule.minCascade = static_cast<std::uint32_t>(ini.GetLongValue(a_section, "iMinCascade", a_rule.minCascade));
+			a_rule.minCascade = static_cast<std::uint32_t>(std::clamp(ini.GetLongValue(a_section, "iMinCascade", a_rule.minCascade), 0L, 8L));
 			a_rule.minDistance = static_cast<float>(ini.GetDoubleValue(a_section, "fMinDistance", a_rule.minDistance));
 			a_rule.maxRadius = static_cast<float>(ini.GetDoubleValue(a_section, "fMaxRadius", a_rule.maxRadius));
 			a_rule.minAngularSize = static_cast<float>(ini.GetDoubleValue(a_section, "fMinAngularSize", a_rule.minAngularSize));
@@ -249,7 +255,7 @@ namespace Config
 		si.debugOffsetZ = static_cast<float>(ini.GetDoubleValue("ShadowInstancing", "fDebugOffsetZ", si.debugOffsetZ));
 		{
 			// Kommagetrennte Hex-Liste, z. B. "C046,C006"
-			std::string list = ini.GetValue("ShadowInstancing", "sTechnique", "C046");
+			std::string list = ini.GetValue("ShadowInstancing", "sTechnique", "C046,C045");
 			si.techniqueCount = 0;
 			std::size_t pos = 0;
 			while (pos < list.size() && si.techniqueCount < si.techniques.size()) {
@@ -318,10 +324,15 @@ namespace Config
 				}
 			}
 		}
-		ts.safetyFactor = static_cast<float>(ini.GetDoubleValue("TextureStream", "fSafetyFactor", ts.safetyFactor));
+		// Handeintraege auf die Menue-Bereiche begrenzen (0 oder negativ verkleinerte alles auf die Mindestgroesse)
+		ts.safetyFactor = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fSafetyFactor", ts.safetyFactor)), 1.0f, 4.0f);
 		ts.minEdge = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fMinEdge", ts.minEdge)), 256.0f, 4096.0f);
 		ts.maxEdge = static_cast<float>(ini.GetDoubleValue("TextureStream", "fMaxEdge", ts.maxEdge));
-		ts.budgetMs = static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetMs", ts.budgetMs));
+		// Nur die Menue-Stufen (1K/2K/4K/8K/unbegrenzt) - krumme Werte wirkten, das Menue zeigte aber "unbegrenzt"
+		if (ts.maxEdge != 0.0f && ts.maxEdge != 1024.0f && ts.maxEdge != 2048.0f && ts.maxEdge != 4096.0f && ts.maxEdge != 8192.0f) {
+			ts.maxEdge = ts.maxEdge < 1024.0f ? (ts.maxEdge > 0.0f ? 1024.0f : 0.0f) : ts.maxEdge < 2048.0f ? 1024.0f : ts.maxEdge < 4096.0f ? 2048.0f : ts.maxEdge < 8192.0f ? 4096.0f : 8192.0f;
+		}
+		ts.budgetMs = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fBudgetMs", ts.budgetMs)), 0.05f, 5.0f);
 		ts.exclude = ini.GetValue("TextureStream", "sExclude", ts.exclude.c_str());
 		ts.streamClothing = ini.GetBoolValue("TextureStream", "bStreamClothing", ts.streamClothing);
 		ts.streamCharacters = ini.GetBoolValue("TextureStream", "bStreamCharacters", ts.streamCharacters);

@@ -749,7 +749,10 @@ namespace InstancingAnalysis
 
 		// Den Detour braucht nur das Buendeln. Aeltere Community-Shaders-Versionen vertragen ihn nicht (CTD im Hauptmenue),
 		// deshalb nur installieren, wenn die Funktion beim Start an ist. Einschalten wirkt dann erst nach einem Neustart.
-		if (!Config::shadowInstancing.enabled) {
+		if (!REL::Module::IsAE()) {
+			// Buendeln laeuft auf SE nie (InstancingWanted) -> Detour waere nur Konfliktrisiko
+			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", false, "Anniversary Edition only", true);
+		} else if (!Config::shadowInstancing.enabled) {
 			logger::info("Shadow instancing off at startup - RenderBatches detour not installed");
 			Features::Report("Shadow instancing", "Gleiche Schatten bündeln", false, "off at startup (restart after enabling)", true);
 		} else {
@@ -758,7 +761,7 @@ namespace InstancingAnalysis
 				Features::Report("Shadow instancing", "Gleiche Schatten bündeln", false, std::format("Detours error {} at RenderBatches", err));
 			} else {
 				logger::info("Detour installed: BSBatchRenderer::RenderBatches (instancing analysis, batch boundaries)");
-				Features::Report("Shadow instancing", "Gleiche Schatten bündeln", REL::Module::IsAE(), REL::Module::IsAE() ? "" : "Anniversary Edition only", !REL::Module::IsAE());
+				Features::Report("Shadow instancing", "Gleiche Schatten bündeln", true);
 			}
 		}
 

@@ -6,4 +6,12 @@
 namespace EngineTimers
 {
 	void Install();
+
+	// A/B-Messung Himmelslicht-Culling (Debug-Seite): 8 Abschnitte a 15 s, abwechselnd an/aus, je Abschnitt Zeit von
+	// Precipitation::SetupMask und gezeichnete/weggelassene Objekte. Braucht die Zeitmessung (bEngineProbes).
+	bool PrecipTimerInstalled() noexcept;
+	void StartSkylightAB() noexcept;
+	bool SkylightABRunning() noexcept;
+	void CountSkylight(bool a_culled) noexcept;  // aus dem Skylighting-Hook, nur waehrend der Messung
+	void OnFrame();                              // Main-Thread, je Frame im Spiel
 }

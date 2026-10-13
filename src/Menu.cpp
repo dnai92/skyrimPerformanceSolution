@@ -1,6 +1,7 @@
 #include "Menu.h"
 
 #include "Config.h"
+#include "EngineTimers.h"
 #include "Features.h"
 #include "Occlusion.h"
 #include "ShadowCulling.h"
@@ -350,6 +351,19 @@ namespace Menu
 				ShadowCulling::RequestCascadeDump(300);
 			}
 			Tip(T("Writes how the game aligns the sun shadow cascades in each frame to SPS.log.", "Schreibt pro Frame, wie das Spiel die Sonnenschatten-Kaskaden ausrichtet, in SPS.log."));
+
+			MenuApi::SeparatorText(T("Skylighting culling (measurement)", "Himmelslicht-Culling (Messung)"));
+			if (!EngineTimers::PrecipTimerInstalled()) {
+				MenuApi::TextWrapped("%s", T("Needs bEngineProbes = true in SPS.ini [General] and a game restart.",
+												"Braucht bEngineProbes = true in SPS.ini [General] und einen Neustart des Spiels."));
+			} else if (EngineTimers::SkylightABRunning()) {
+				MenuApi::TextWrapped("%s", T("Measurement running (2 min) - close the menu and stand still or walk the same route.",
+												"Messung läuft (2 min) - Menü schließen und stehen bleiben oder dieselbe Strecke laufen."));
+			} else if (MenuApi::Button(T("Measure skylighting culling (2 min)##sky", "Himmelslicht-Culling messen (2 min)##sky"))) {
+				EngineTimers::StartSkylightAB();
+			}
+			Tip(T("Switches skylighting culling on and off every 15 s and writes the time of the rain/sky map with and without it to SPS.log ([Skylight-AB]).",
+				"Schaltet das Himmelslicht-Culling alle 15 s an und aus und schreibt die Zeit der Regen-/Himmelskarte mit und ohne in SPS.log ([Skylight-AB])."));
 
 			MenuApi::SeparatorText(T("Hiding occluded objects (diagnostics)", "Verdeckte Objekte weglassen (Diagnose)"));
 			AtomicToggle(T("Measure hidden objects##occ", "Verdeckte Objekte messen##occ"), Config::occlusionProbe,

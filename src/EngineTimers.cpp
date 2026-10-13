@@ -1,6 +1,7 @@
 #include "EngineTimers.h"
 #include "Features.h"
 
+#include "Config.h"
 #include "DetourHelper.h"
 #include "Stats.h"
 
@@ -10,15 +11,85 @@ namespace EngineTimers
 	{
 		// SetupMask wird mit Community Shaders nicht ueber die Aufrufstelle in ID 26175 aufgerufen (Zeit dort 0),
 		// daher am Funktionsanfang per Detours (verkettet sich mit evtl. vorhandenen Detours anderer Mods)
+		// A/B-Messung Himmelslicht-Culling
+		std::atomic<bool>          g_abRunning{ false };
+		std::atomic<std::uint64_t> g_abMaskNs{ 0 }, g_abMaskCalls{ 0 }, g_abCulled{ 0 }, g_abKept{ 0 };
+		bool                       g_precipInstalled = false;
+
 		struct PrecipSetupMask
 		{
 			static void thunk(void* a_precipitation)
 			{
 				Stats::ScopedTimer timer(Stats::Zone::PrecipMask);
+				if (!g_abRunning.load(std::memory_order_relaxed)) {
+					func(a_precipitation);
+					return;
+				}
+				const auto t0 = std::chrono::steady_clock::now();
 				func(a_precipitation);
+				g_abMaskNs.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count()),
+					std::memory_order_relaxed);
+				g_abMaskCalls.fetch_add(1, std::memory_order_relaxed);
 			}
 			static inline void (*func)(void*) = nullptr;
 		};
+
+		constexpr int  kAbPhases = 8;
+		constexpr auto kAbPhaseLength = std::chrono::seconds(15);
+		struct AbPhase
+		{
+			bool          on = false;
+			std::uint64_t frames = 0, ns = 0, calls = 0, culled = 0, kept = 0;
+		};
+		std::array<AbPhase, kAbPhases>        g_abPhases;
+		int                                   g_abPhase = -1;
+		bool                                  g_abOriginal = true;
+		std::chrono::steady_clock::time_point g_abPhaseStart{};
+		std::atomic<bool>                     g_abStartRequested{ false };
+
+		void AbBeginPhase(int a_phase)
+		{
+			g_abPhase = a_phase;
+			// Abwechselnd, beginnend mit AN (Reihenfolge-Effekte wie Nachladen mitteln sich ueber 4 Paare heraus)
+			const bool on = (a_phase % 2) == 0;
+			Config::skylightingCulling.enabled = on;
+			g_abPhases[a_phase] = AbPhase{ on };
+			g_abMaskNs.store(0);
+			g_abMaskCalls.store(0);
+			g_abCulled.store(0);
+			g_abKept.store(0);
+			g_abPhaseStart = std::chrono::steady_clock::now();
+		}
+
+		void AbEndPhase()
+		{
+			auto& p = g_abPhases[g_abPhase];
+			p.ns = g_abMaskNs.load();
+			p.calls = g_abMaskCalls.load();
+			p.culled = g_abCulled.load();
+			p.kept = g_abKept.load();
+			const double f = p.frames ? static_cast<double>(p.frames) : 1.0;
+			logger::info("[Skylight-AB] phase {} culling {}: {} frames | rain/sky map {:.3f} ms/frame ({:.2f} calls/frame) | objects drawn {:.0f}/frame, left out {:.0f}/frame",
+				g_abPhase + 1, p.on ? "ON " : "OFF", p.frames, p.ns / 1e6 / f, p.calls / f, p.kept / f, p.culled / f);
+		}
+
+		void AbFinish()
+		{
+			double nsOn = 0, nsOff = 0, frOn = 0, frOff = 0, keptOn = 0, keptOff = 0;
+			for (const auto& p : g_abPhases) {
+				(p.on ? nsOn : nsOff) += static_cast<double>(p.ns);
+				(p.on ? frOn : frOff) += static_cast<double>(p.frames);
+				(p.on ? keptOn : keptOff) += static_cast<double>(p.kept);
+			}
+			const double msOn = frOn > 0 ? nsOn / 1e6 / frOn : 0.0, msOff = frOff > 0 ? nsOff / 1e6 / frOff : 0.0;
+			const bool   cs = GetModuleHandleW(L"CommunityShaders.dll") != nullptr;
+			logger::info("[Skylight-AB] result: rain/sky map ON {:.3f} ms/frame, OFF {:.3f} ms/frame -> saves {:.3f} ms/frame ({:.0f} %) | objects drawn ON {:.0f}, OFF {:.0f} per frame | Community Shaders {}",
+				msOn, msOff, msOff - msOn, msOff > 0 ? 100.0 * (msOff - msOn) / msOff : 0.0, frOn > 0 ? keptOn / frOn : 0.0, frOff > 0 ? keptOff / frOff : 0.0,
+				cs ? "loaded" : "not loaded");
+			Config::skylightingCulling.enabled = g_abOriginal;
+			g_abRunning.store(false);
+			g_abPhase = -1;
+		}
 
 		struct MainCull
 		{
@@ -43,6 +114,7 @@ namespace EngineTimers
 		auto& trampoline = SKSE::GetTrampoline();
 		PrecipSetupMask::func = reinterpret_cast<void (*)(void*)>(REL::Relocation<std::uintptr_t>{ RELOCATION_ID(25641, 26183) }.address());
 		if (const auto err = DetourHelper::Attach(reinterpret_cast<void**>(&PrecipSetupMask::func), reinterpret_cast<void*>(&PrecipSetupMask::thunk)); err == 0) {
+			g_precipInstalled = true;
 			logger::info("Timing installed: Precipitation::SetupMask (rain/sky map, Detours)");
 			Features::Report("Timing: rain/sky map", "Zeitmessung: Regen-/Himmelskarte", true);
 		} else {
@@ -60,6 +132,43 @@ namespace EngineTimers
 			Features::Report("Timing: main camera culling", "Zeitmessung: Hauptkamera", true);
 		} else {
 			Features::Report("Timing: main camera culling", "Zeitmessung: Hauptkamera", false, "call site ID 36560+0xE9 differs");
+		}
+	}
+
+	bool PrecipTimerInstalled() noexcept { return g_precipInstalled; }
+	bool SkylightABRunning() noexcept { return g_abRunning.load(std::memory_order_relaxed) || g_abStartRequested.load(std::memory_order_relaxed); }
+	void StartSkylightAB() noexcept
+	{
+		if (g_precipInstalled && !SkylightABRunning()) {
+			g_abStartRequested.store(true);
+		}
+	}
+
+	void CountSkylight(bool a_culled) noexcept
+	{
+		(a_culled ? g_abCulled : g_abKept).fetch_add(1, std::memory_order_relaxed);
+	}
+
+	void OnFrame()
+	{
+		if (g_abStartRequested.exchange(false)) {
+			g_abOriginal = Config::skylightingCulling.enabled;
+			logger::info("[Skylight-AB] start: {} phases of {} s, alternating culling on/off (stand still or walk the same route)", kAbPhases, kAbPhaseLength.count());
+			g_abRunning.store(true);
+			AbBeginPhase(0);
+			return;
+		}
+		if (!g_abRunning.load(std::memory_order_relaxed)) {
+			return;
+		}
+		++g_abPhases[g_abPhase].frames;
+		if (std::chrono::steady_clock::now() - g_abPhaseStart >= kAbPhaseLength) {
+			AbEndPhase();
+			if (g_abPhase + 1 < kAbPhases) {
+				AbBeginPhase(g_abPhase + 1);
+			} else {
+				AbFinish();
+			}
 		}
 	}
 }

@@ -4,6 +4,7 @@
 #include "Config.h"
 #include "TextureStream.h"
 #include "DetourHelper.h"
+#include "EngineTimers.h"
 #include "GpuTimer.h"
 #include "LightShadowCache.h"
 #include "Occlusion.h"
@@ -1045,12 +1046,19 @@ namespace ShadowCulling
 				const auto passes = func(a_this, a_geometry, a_renderMode, a_accumulator);
 				const auto& cfg = Config::skylightingCulling;
 				if (passes && a_geometry && passes->head) {
+					const bool ab = EngineTimers::SkylightABRunning();
 					if (cfg.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && a_geometry->worldBound.radius < cfg.minRadius) {
 						Stats::Count(Stats::Counter::SkylightCulled);
+						if (ab) {
+							EngineTimers::CountSkylight(true);
+						}
 						empty.head = nullptr;
 						return &empty;
 					} else {
 						Stats::Count(Stats::Counter::SkylightKept);
+						if (ab) {
+							EngineTimers::CountSkylight(false);
+						}
 					}
 				}
 				return passes;
@@ -1138,12 +1146,50 @@ namespace ShadowCulling
 			}
 		}
 
+		// Enthaelt der Teilbaum Figuren oder geskinnte Meshes (Stoff-Banner, Figuren in Gruppenknoten)? Die Regel fuer
+		// einzelne Meshes nimmt sie aus (bSkipSkinned, eigene Figuren-Regel) - das Ueberspringen ganzer Knoten tat das bis
+		// 1.0.55 nicht. Nur fuer Knoten geprueft, die sonst uebersprungen wuerden (klein, weit weg -> wenige Kinder);
+		// zu grosse Teilbaeume gelten vorsichtshalber als "enthaelt".
+		bool ContainsSkinnedOrActor(RE::NiAVObject* a_root) noexcept
+		{
+			std::array<RE::NiAVObject*, 64> stack;
+			std::size_t                     n = 0, visited = 0;
+			stack[n++] = a_root;
+			while (n > 0) {
+				const auto obj = stack[--n];
+				if (!obj) {
+					continue;
+				}
+				if (++visited > 128) {
+					return true;
+				}
+				if (const auto ref = SceneUtil::OwnUserData(obj); ref && ref->GetFormType() == RE::FormType::ActorCharacter) {
+					return true;
+				}
+				if (const auto geom = obj->AsGeometry()) {
+					if (geom->GetGeometryRuntimeData().skinInstance) {
+						return true;
+					}
+				} else if (const auto node = obj->AsNode()) {
+					for (const auto& child : node->GetChildren()) {
+						if (child) {
+							if (n >= stack.size()) {
+								return true;
+							}
+							stack[n++] = child.get();
+						}
+					}
+				}
+			}
+			return false;
+		}
+
 		template <int N, bool Parabolic>
 		struct Process
 		{
 			static void thunk(RE::BSCullingProcess* a_this, RE::NiAVObject* a_obj, std::uint32_t a_arg)
 			{
-				if (ShouldPrune(a_this, a_obj, Parabolic) && !BelongsToActorNode(a_obj)) {
+				if (ShouldPrune(a_this, a_obj, Parabolic) && !BelongsToActorNode(a_obj) && !ContainsSkinnedOrActor(a_obj)) {
 					return;
 				}
 				func(a_this, a_obj, a_arg);
@@ -1691,6 +1737,7 @@ namespace ShadowCulling
 	void OnFrame()
 	{
 		Config::ReloadIfChanged();
+		EngineTimers::OnFrame();
 		TextureStream::OnFrame();
 		g_viewValid.store(false, std::memory_order_relaxed);  // neu erst beim naechsten Sonnen-Accumulate (Innenraeume: nie)
 #ifndef SPS_VR
