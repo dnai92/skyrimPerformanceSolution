@@ -40,6 +40,10 @@ namespace TextureStream
 	// Ladebildschirm geschlossen: gehaltene Texturverweise freigeben (laufende Auftraege ausgenommen)
 	void ReleaseHolds();
 
+	// Ladezeit-Zeile: Texturen ueber den DDS-Lader seit Start (davon verkleinert geladen), Streaming an?
+	void GetLoadCounters(std::uint64_t& a_loaded, std::uint64_t& a_reduced) noexcept;
+	bool StreamingActive() noexcept;
+
 	void Reset(const char* a_reason);
 
 	// Diagnose: Texturen der Objekte unter dem Fadenkreuz beim naechsten Frame ins Log schreiben

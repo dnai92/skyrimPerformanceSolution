@@ -179,8 +179,24 @@ namespace Hooks
 					LightShadowCache::Reset();
 					Occlusion::Reset();
 				}
-				if (a_event && !a_event->opening && a_event->menuName == RE::LoadingMenu::MENU_NAME) {
-					TextureStream::ReleaseHolds();
+				if (a_event && a_event->menuName == RE::LoadingMenu::MENU_NAME) {
+					// Ladezeit: vom Oeffnen bis zum Schliessen des Ladebildschirms, mit Texturen, die dabei geladen wurden
+					static std::chrono::steady_clock::time_point opened{};
+					static std::uint64_t                         loaded0 = 0, reduced0 = 0;
+					if (a_event->opening) {
+						opened = std::chrono::steady_clock::now();
+						TextureStream::GetLoadCounters(loaded0, reduced0);
+					} else {
+						TextureStream::ReleaseHolds();
+						if (opened.time_since_epoch().count() != 0) {
+							std::uint64_t loaded = 0, reduced = 0;
+							TextureStream::GetLoadCounters(loaded, reduced);
+							logger::info("[Load] loading screen {:.1f} s | textures loaded {} (of these reduced {}) | texture streaming {} | SPS {}",
+								std::chrono::duration<double>(std::chrono::steady_clock::now() - opened).count(), loaded - loaded0, reduced - reduced0,
+								TextureStream::StreamingActive() ? "on" : "off", Config::masterEnabled.load(std::memory_order_relaxed) ? "on" : "off");
+							opened = {};
+						}
+					}
 				}
 				if (TracyIsConnected && a_event) {
 					const auto msg = std::format("Menue {}: {}", a_event->opening ? "auf" : "zu", a_event->menuName.c_str());

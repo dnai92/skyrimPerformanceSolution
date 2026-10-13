@@ -1051,6 +1051,7 @@ namespace TextureStream
 		thread_local std::string                       t_loadPath;     // Pfad der Textur, fuer die LoadMaxSize einen Wert lieferte
 		bool                                           g_sizesDirty = false;
 		std::atomic<std::uint32_t>                     g_loadedReduced{ 0 };
+		std::atomic<std::uint64_t>                     g_totalLoaded{ 0 }, g_totalLoadedReduced{ 0 };  // seit Start (Ladezeit-Zeile)
 		// Diagnose Stufe 3 (je Berichtszeitraum)
 		std::atomic<std::uint32_t> g_diagPreset{ 0 }, g_diagPresetValue{ 0 };  // maxsize schon vom Aufrufer gesetzt
 		std::atomic<std::uint32_t> g_diagCreate{ 0 }, g_diagDDS{ 0 }, g_diagNoSrc{ 0 }, g_diagMiss{ 0 }, g_diagOff{ 0 };
@@ -1207,6 +1208,7 @@ namespace TextureStream
 					return 0;
 				}
 				g_loadedReduced.fetch_add(1, std::memory_order_relaxed);
+				g_totalLoadedReduced.fetch_add(1, std::memory_order_relaxed);
 				t_loadPath = path;
 				return edge;
 			} catch (...) {
@@ -1236,6 +1238,7 @@ namespace TextureStream
 			static std::int32_t thunk(void* a_device, void* a_stream, void** a_out, void* a_header, std::uint64_t a_maxSize, std::uint64_t a_6)
 			{
 				g_diagDDS.fetch_add(1, std::memory_order_relaxed);
+				g_totalLoaded.fetch_add(1, std::memory_order_relaxed);
 				// Eine andere Mod kann schon eine Obergrenze mitgeben -> der kleinere Wert gilt (verkleinert nur, nie groesser)
 				if (a_maxSize != 0) {
 					g_diagPreset.fetch_add(1, std::memory_order_relaxed);
@@ -2498,6 +2501,14 @@ namespace TextureStream
 
 	void SetDebugInclude(std::uint32_t a_mask) noexcept { g_debugInclude.store(a_mask, std::memory_order_relaxed); }
 	std::uint32_t GetDebugInclude() noexcept { return g_debugInclude.load(std::memory_order_relaxed); }
+
+	void GetLoadCounters(std::uint64_t& a_loaded, std::uint64_t& a_reduced) noexcept
+	{
+		a_loaded = g_totalLoaded.load(std::memory_order_relaxed);
+		a_reduced = g_totalLoadedReduced.load(std::memory_order_relaxed);
+	}
+
+	bool StreamingActive() noexcept { return Active(); }
 
 	void GetVram(std::uint64_t& a_usage, std::uint64_t& a_budget)
 	{
