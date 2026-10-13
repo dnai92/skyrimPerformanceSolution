@@ -1331,9 +1331,9 @@ namespace TextureStream
 			// Budget-Modus: nur so viel gleichzeitig neu laden, wie bis zum Puffer passt (laufende und gerade fertige
 			// Auftraege mitgezaehlt). 1.0.50: Obergrenze 1K -> unbegrenzt lud 817 Texturen (8,4 GB) in einer Minute,
 			// VRAM 104 %, 1,8 GB ausgelagert. Bis 128 MB laufen immer, damit nahe Texturen auch bei Knappheit nachkommen.
-			// Sehr nahe (Bedarf >= 4x aktuell) duerfen bis 256 MB statt 128 MB gleichzeitig laufen - nicht unbegrenzt: nach Ladebildschirmen
-			// sind viele nahe Texturen verkleinert, 1.0.56 lud dann 3,9 GB in einer Minute bei 93 % VRAM (ausgelagert stieg)
-			const std::uint64_t cap = (a_priority >= 4.0f ? 256ull : 128ull) * 1048576;
+			// Ohne Platz bis zur Reserve laufen nur noch begrenzt viele gleichzeitig: sehr nahe (Bedarf >= 4x aktuell) bis 128 MB,
+			// alle anderen bis 32 MB. 1.0.56 liess sehr nahe unbegrenzt zu (3,9 GB/min bei 93 % VRAM), bis 1.0.55 alle bis 128 MB.
+			const std::uint64_t cap = (a_priority >= 4.0f ? 128ull : 32ull) * 1048576;
 			if (Active() && Config::textureStream.budgetMode && g_inflightUp >= cap) {
 				if (const double freeMB = FreeMB(); freeMB >= 0.0 &&
 					(freeMB - Config::textureStream.reserveMB) * 1048576.0 - static_cast<double>(g_inflightUp) < static_cast<double>(job.extraBytes)) {
@@ -1482,7 +1482,6 @@ namespace TextureStream
 			RE::NiPointer<RE::NiSourceTexture> src;
 			std::uint32_t                      targetEdge;
 			bool                               cap = false;  // Obergrenze aus dem Menue - auch ohne VRAM-Knappheit
-			Clock::time_point                  queued = Clock::now();
 		};
 		std::deque<DownJob> g_down;
 
@@ -1500,9 +1499,11 @@ namespace TextureStream
 			if (!a_job.src || a_job.src->rendererTexture != r || r->texture != st.res || !r->resourceView || !g_device || !g_context) {
 				return;
 			}
-			// Unter Druck stauen sich Tausende Auftraege; bis zur Ausfuehrung kann das Objekt laengst nah sein (der Spieler
-			// laeuft darauf zu) -> veraltete Auftraege verwerfen und den aktuellen Bedarf pruefen
-			if (!a_job.cap && (Clock::now() - a_job.queued > 2s || (st.passId == g_passId && WantedEdge(st, st.passNeed) > a_job.targetEdge))) {
+			// Unter Druck stauen sich Auftraege; bis zur Ausfuehrung kann das Objekt nah sein (der Spieler laeuft darauf zu).
+			// Nur verwerfen, wenn es so nah ist, dass es sofort wieder vergroessert wuerde (gleiche Schwelle wie beim Neuladen).
+			// 1.0.56 verwarf zusaetzlich alles aelter als 2 s und schon bei kleinstem Mehrbedarf -> unter Druck wurde kaum
+			// noch verkleinert, VRAM 107 %, 2 GB ausgelagert (Stadt, Test 13.10.)
+			if (!a_job.cap && st.passId == g_passId && WantedEdge(st, st.passNeed / UpMargin()) >= st.CurEdge()) {
 				++g_stats.downsSkipped;
 				return;
 			}
