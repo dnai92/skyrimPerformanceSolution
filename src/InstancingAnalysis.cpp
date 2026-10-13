@@ -178,6 +178,10 @@ namespace InstancingAnalysis
 
 		bool                                                    g_instBatchActive = false;  // aktueller RenderBatches-Aufruf sammelt
 		bool                                                    g_instCaptured = false;
+		// Instanzen im laufenden Batch: Flush zeichnet hoechstens die Ringpuffer-Kapazitaet (32768) - darueber schlug bis
+		// 1.0.57 der ganze Flush fehl, die schon uebernommenen Meshes fehlten fuer diesen Frame im Schatten
+		std::uint32_t                                           g_instTotal = 0;
+		constexpr std::uint32_t                                 kInstMax = 32000;
 		bool                                                    g_instInitFailed = false;
 		std::unordered_map<InstKey, std::uint32_t, InstKeyHash> g_instIndex;
 		std::vector<InstGroup>                                  g_instGroups;
@@ -329,7 +333,12 @@ namespace InstancingAnalysis
 					g.instances.clear();
 					return false;  // erstes Mesh zeichnet die Engine
 				}
+				// Nur uebernehmen, wenn der Zustand des Batches gesichert ist und der Puffer reicht - sonst zeichnet die Engine
+				if (!g_instCaptured || g_instTotal >= kInstMax) {
+					return false;
+				}
 				g_instGroups[it->second].instances.push_back(MakeInstance(geom));
+				++g_instTotal;
 				return !Config::shadowInstancing.verify;
 			} catch (...) {
 				return false;
@@ -361,10 +370,17 @@ namespace InstancingAnalysis
 					for (std::size_t n = 0; n < g_instFlatGroups.size(); ++n) {
 						Stats::Count(Stats::Counter::InstancedCalls);
 					}
+				} else {
+					static std::uint32_t logged = 0;
+					if (logged < 5) {
+						++logged;
+						logger::warn("ShadowInstancing: drawing {} instances failed - their shadows were missing for one frame", g_instFlat.size());
+					}
 				}
 			}
 			g_instIndex.clear();
 			g_instUsed = 0;
+			g_instTotal = 0;
 			InstancedDraw::ReleaseState();
 			g_instCaptured = false;
 		}

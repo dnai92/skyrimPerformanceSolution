@@ -25,10 +25,13 @@ namespace Config
 		}
 
 		// Nur die im Menue einstellbaren Werte; alles andere kommt weiter aus SPS.ini
-		void SaveUser()
+		bool SaveUser()
 		{
 			CSimpleIniA ini;
 			ini.SetUnicode();
+			// Vorhandene Datei als Grundlage: von Hand eingetragene Schluessel, die das Menue nicht kennt, bleiben erhalten
+			// (bis 1.0.57 wurde die Datei aus der festen Liste neu gebaut und alles andere ging verloren)
+			ini.LoadFile(kUserPath);
 			// Nur Abweichungen von SPS.ini speichern - sonst ueberdecken alte Vorgaben spaeter geaenderte Standards
 			// (so blieben bPointLights=true und fMinDistance=2500 aus alten Versionen haengen).
 			CSimpleIniA base;
@@ -37,17 +40,23 @@ namespace Config
 			const auto b = [&](const char* s, const char* k, bool v) {
 				if (!haveBase || !base.GetValue(s, k) || base.GetBoolValue(s, k, v) != v) {
 					ini.SetBoolValue(s, k, v);
+				} else {
+					ini.Delete(s, k, true);  // wieder Standard
 				}
 			};
 			const auto f = [&](const char* s, const char* k, float v) {
 				if (!haveBase || !base.GetValue(s, k) || std::abs(base.GetDoubleValue(s, k, v) - v) > 1e-4 * std::max(1.0, std::abs(double(v)))) {
 					ini.SetDoubleValue(s, k, v, nullptr, true);
+				} else {
+					ini.Delete(s, k, true);
 				}
 			};
 			{
 				const long key = static_cast<long>(toggleKey.load());
 				if (!haveBase || !base.GetValue("General", "iToggleKey") || base.GetLongValue("General", "iToggleKey", key) != key) {
 					ini.SetLongValue("General", "iToggleKey", key);
+				} else {
+					ini.Delete("General", "iToggleKey", true);
 				}
 			}
 			const auto rule = [&](const char* s, const CullRule& r) {
@@ -101,6 +110,8 @@ namespace Config
 				const long mask = static_cast<long>(::TextureStream::GetDebugInclude());
 				if (!haveBase || !base.GetValue("TextureStream", "iIncludeExcluded") || base.GetLongValue("TextureStream", "iIncludeExcluded", mask) != mask) {
 					ini.SetLongValue("TextureStream", "iIncludeExcluded", mask);
+				} else {
+					ini.Delete("TextureStream", "iIncludeExcluded", true);
 				}
 			}
 			b("SubtreePruning", "bSun", subtreePruning.sun);
@@ -108,8 +119,19 @@ namespace Config
 			f("LightGatherThrottle", "fMinMove", lightGather.minMove);
 			f("LightGatherThrottle", "fMinRadiusChange", lightGather.minRadiusChange);
 			f("LightGatherThrottle", "fMaxAgeMs", lightGather.maxAgeMs);
-			ini.SaveFile(kUserPath);
+			// Alte Prozent-Schwellen nach der Umrechnung nicht mehr mitschleppen
+			if (textureStream.legacyStartPct < 0.0f && textureStream.legacyGapPct < 0.0f) {
+				ini.Delete("TextureStream", "fBudgetStartPct", true);
+				ini.Delete("TextureStream", "fRefillGapPct", true);
+			}
+			// Erst in eine Zwischendatei, dann ersetzen: ein Absturz mitten im Schreiben loeschte sonst alle Einstellungen
+			const std::wstring tmp = std::wstring(kUserPath) + L".tmp";
+			if (ini.SaveFile(tmp.c_str()) < 0 || !MoveFileExW(tmp.c_str(), kUserPath, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+				logger::warn("Menu settings could not be saved to SPS_User.ini (write protected?)");
+				return false;
+			}
 			g_lastWriteUser = LastWrite(kUserPath);  // eigene Aenderung nicht erneut laden
+			return true;
 		}
 	}
 
@@ -145,8 +167,9 @@ namespace Config
 		}
 		g_lastCheck = now;
 		if (g_dirty.exchange(false)) {
-			SaveUser();
-			logger::info("Menu settings saved to SPS_User.ini");
+			if (SaveUser()) {
+				logger::info("Menu settings saved to SPS_User.ini");
+			}
 		}
 		if (LastWrite(kPath) != g_lastWrite || LastWrite(kUserPath) != g_lastWriteUser) {
 			logger::info("SPS.ini / SPS_User.ini changed - reloading");

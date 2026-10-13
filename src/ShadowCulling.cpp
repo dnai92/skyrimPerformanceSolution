@@ -975,6 +975,10 @@ namespace ShadowCulling
 			static void thunk(RE::BSCullingProcess* a_this, RE::BSGeometry& a_visible, std::int32_t a_alphaGroupIndex)
 			{
 				DiagRecord(a_this->camera);
+				// Figurenschatten ferner Figuren auch bei Rundum-Lichtern (Fackeln, Feuer) - bis 1.0.57 nur bei Spot-Lichtern
+				if (CullActorShadow(a_visible, true)) {
+					return;
+				}
 				if (g_pointCullAllowed.load(std::memory_order_relaxed) && PointCullOn() && !NearPointLight(a_this->camera, a_visible) &&
 					ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX, PointShadowScale(a_this->camera, a_visible))) {
 					Stats::Count(Stats::Counter::PointCulled);

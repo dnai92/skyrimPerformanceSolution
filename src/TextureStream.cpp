@@ -552,6 +552,28 @@ namespace TextureStream
 			return g_fileTex.contains(a_r->texture) || g_fileTex.contains(a_r->resourceView);
 		}
 
+		// Das Spiel merkt sich je Pixel-Shader-Platz die gebundene Textur und bindet nicht neu, wenn der Zeiger gleich ist.
+		// Wird die alte nach der Freigabe-Frist zerstoert und landet eine neue an derselben Adresse, glaubt es, sie stecke
+		// schon -> Platz ohne gueltige Textur (schwarz). Plaetze mit der alten Textur daher leeren und als geaendert markieren.
+		void ForgetBoundSrv(W::ID3D11ShaderResourceView* a_old) noexcept
+		{
+			const auto state = a_old ? RE::BSGraphics::RendererShadowState::GetSingleton() : nullptr;
+			if (!state) {
+				return;
+			}
+#ifdef SPS_VR
+			auto& rd = state->GetVRRuntimeData();
+#else
+			auto& rd = state->GetRuntimeData();
+#endif
+			for (std::uint32_t i = 0; i < 16; ++i) {
+				if (rd.PSTexture[i] == a_old) {
+					rd.PSTexture[i] = nullptr;
+					rd.PSResourceModifiedBits |= 1u << i;
+				}
+			}
+		}
+
 		// a_full*: Originalgroesse laut Datei; a_ours: Ersatz ist kleiner als erlaubt (von uns verkleinert)
 		void Swap(RE::BSGraphics::Texture* a_r, W::ID3D11Texture2D* a_tex, W::ID3D11ShaderResourceView* a_srv, std::uint64_t a_oldBytes,
 			std::uint32_t a_fullW, std::uint32_t a_fullH, std::uint32_t a_fullMips, bool a_ours)
@@ -560,6 +582,7 @@ namespace TextureStream
 			ForgetFileTexture(a_r->resourceView);
 			MarkFileTexture(a_tex);  // unser Ersatz stammt aus derselben Datei (Kopie oder Neuladen)
 			SetTag(a_tex, kTagFile | (a_ours ? kTagOurs : 0), a_fullW, a_fullH, a_fullMips);
+			ForgetBoundSrv(a_r->resourceView);
 			DeferRelease(a_r->texture, a_oldBytes);
 			DeferRelease(a_r->resourceView);
 			a_r->texture = a_tex;
@@ -1390,7 +1413,11 @@ namespace TextureStream
 					st.fi = InfoOf(st.format);
 					st.path = NormalizePath(a_src->name.c_str());
 				st.isCharacter = IsCharacterPath(st.path);
-					st.eligibleBase = d.arraySize == 1 && d.sampleDesc.count == 1 && !(d.miscFlags & 0x4) && d.mipLevels > 1 && st.fi.bytes > 0 &&
+					// Nur unveraenderliche Datei-Texturen: keine Render-Ziele, schreibbaren oder dynamischen (Mods erzeugen solche zur
+				// Laufzeit, z. B. RaceMenu-Overlays - liegt eine an der Adresse einer alten Datei-Textur, galt sie sonst als Datei)
+				const bool plain = d.bindFlags == W::D3D11_BIND_SHADER_RESOURCE && d.cpuAccessFlags == 0 &&
+				                   (d.usage == W::D3D11_USAGE_DEFAULT || d.usage == W::D3D11_USAGE_IMMUTABLE);
+				st.eligibleBase = plain && d.arraySize == 1 && d.sampleDesc.count == 1 && !(d.miscFlags & 0x4) && d.mipLevels > 1 && st.fi.bytes > 0 &&
 					                  st.path.starts_with("textures\\") && st.path.ends_with(".dds") && IsFileTexture(r);
 					st.eligible = st.eligibleBase && !Excluded(st.path);
 					st.ours = ReducedByUsAtLoad(st.res);
