@@ -995,6 +995,67 @@ namespace ShadowCulling
 		// Spiel pausiert (Inventar, Container, Handel ...): das 3D-Modell im Menue wird mit eigener Kamera gezeichnet,
 		// die Abstaende zur Weltkamera stimmen dann nicht -> im Hauptbild nichts weglassen (fehlende Inventarbilder 1.0.50).
 		// Direkt abfragen: OnFrame haengt am Spieler-Update und laeuft bei pausiertem Spiel nicht (1.0.53 griff deshalb nie).
+		// Hauptwelt-Accumulator: der mit den meisten Objekten in der letzten Sekunde. Mikro-Culling und Decals nur dort -
+		// GetRenderPasses laeuft auch fuer Vorschau-Modelle (modex, Inventar ohne Pause), Spiegelungen und Menue-3D, deren
+		// Abstand zur Weltkamera nichts bedeutet (Struempfe in der Vorschau erst nach Heranzoomen sichtbar, 1.0.50).
+		struct AccCount
+		{
+			std::atomic<const void*>   acc{ nullptr };
+			std::atomic<std::uint32_t> n{ 0 };
+		};
+		std::array<AccCount, 6>  g_accCounts;
+		std::atomic<const void*> g_mainWorldAcc{ nullptr };
+
+		void NoteAccumulator(const void* a_acc) noexcept
+		{
+			// Stichprobe (jedes 16. Objekt je Thread) - die Mehrheit genuegt, spart Zugriffe auf gemeinsame Zaehler
+			thread_local std::uint32_t tick = 0;
+			if (!a_acc || (++tick & 15) != 0) {
+				return;
+			}
+			for (auto& c : g_accCounts) {
+				if (c.acc.load(std::memory_order_relaxed) == a_acc) {
+					c.n.fetch_add(1, std::memory_order_relaxed);
+					return;
+				}
+			}
+			for (auto& c : g_accCounts) {
+				const void* expected = nullptr;
+				if (c.acc.compare_exchange_strong(expected, a_acc) || expected == a_acc) {
+					c.n.fetch_add(1, std::memory_order_relaxed);
+					return;
+				}
+			}
+		}
+
+		bool IsMainWorldAccumulator(const void* a_acc) noexcept
+		{
+			return a_acc && a_acc == g_mainWorldAcc.load(std::memory_order_relaxed);
+		}
+
+		void UpdateMainWorldAccumulator() noexcept
+		{
+			static auto last = std::chrono::steady_clock::now();
+			const auto  now = std::chrono::steady_clock::now();
+			if (now - last < std::chrono::seconds(1)) {
+				return;
+			}
+			last = now;
+			const void*   best = nullptr;
+			std::uint32_t most = 0;
+			for (auto& c : g_accCounts) {
+				const auto n = c.n.exchange(0, std::memory_order_relaxed);
+				if (n > most) {
+					most = n;
+					best = c.acc.load(std::memory_order_relaxed);
+				}
+				if (n == 0) {
+					c.acc.store(nullptr, std::memory_order_relaxed);  // Platz fuer neue Accumulatoren freigeben
+				}
+			}
+			g_mainWorldAcc.store(best, std::memory_order_relaxed);
+		}
+
 		bool GamePaused() noexcept
 		{
 			const auto ui = RE::UI::GetSingleton();
@@ -1014,7 +1075,8 @@ namespace ShadowCulling
 				if (GamePaused()) {
 					return passes;
 				}
-				if (passes && passes->head && a_geometry && ShouldCullMain(*a_geometry)) {
+				NoteAccumulator(a_accumulator);
+				if (passes && passes->head && a_geometry && IsMainWorldAccumulator(a_accumulator) && ShouldCullMain(*a_geometry)) {
 					empty.head = nullptr;
 					return &empty;
 				} else if (passes && passes->head && a_geometry) {
@@ -1751,6 +1813,7 @@ namespace ShadowCulling
 		LightShadowCache::OnFrame();
 #endif
 
+		UpdateMainWorldAccumulator();
 		if (const auto camera = RE::PlayerCamera::GetSingleton(); camera && camera->cameraRoot) {
 			const auto& pos = camera->cameraRoot->world.translate;
 			g_camX.store(pos.x, std::memory_order_relaxed);
