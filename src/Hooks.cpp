@@ -141,6 +141,7 @@ namespace Hooks
 			{
 				LightShadowCache::OnPresent();
 				Occlusion::OnPresent();
+				Config::ReloadIfIdle();
 				Stats::ScopedTimer timer{ Stats::Zone::PresentWait };
 				return func(a_swapChain, a_syncInterval, a_flags);
 			}

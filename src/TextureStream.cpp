@@ -215,6 +215,8 @@ namespace TextureStream
 			// ist die Obergrenze - bis 1.0.45 wurde auf Dateigroesse nachgeladen, auch bei ausgeschaltetem Streaming
 			std::uint32_t                      extCap = 0;
 			bool                               ours = false;  // die aktuelle Verkleinerung stammt von uns
+			std::uint8_t                       fails = 0;      // fehlgeschlagene Neuladungen in Folge
+			Clock::time_point                  retryAfter{};   // nach Fehler erst danach wieder versuchen
 
 			std::uint32_t FullEdge() const noexcept { return std::max(fullW, fullH); }
 			std::uint32_t CurEdge() const noexcept { return std::max(curW, curH); }
@@ -417,6 +419,7 @@ namespace TextureStream
 		struct Counters
 		{
 			std::uint32_t downs = 0, ups = 0, upFails = 0, probesBad = 0;
+			std::uint32_t downsSkipped = 0;  // Verkleinern verworfen: veraltet oder inzwischen gebraucht
 			std::uint32_t pingPong = 0;
 			std::uint32_t refills = 0;  // zum Auffuellen wieder voll geladen  // verkleinert, obwohl erst vor < 60 s neu geladen
 			double        upMs = 0, upMB = 0;
@@ -497,10 +500,41 @@ namespace TextureStream
 			}
 		}
 
-		bool ReducedByUsAtLoad(const void* a_obj)
+		// Kennzeichen direkt am D3D-Objekt (SetPrivateData): stirbt mit dem Objekt, ueberlebt aber Reset/Vergessen unseres
+		// Zustands. Bis 1.0.55 hing "von uns verkleinert" nur an unserer Tabelle - nach jedem Ladebildschirm (oder 120 s
+		// ungesehen) galt eine von uns verkleinerte Textur beim Wiederfinden als Originalgroesse bzw. als fremd verkleinert
+		// und wurde nie wieder voll geladen (schwarze/pixelige Felsen, "erst beim Vorbeilaufen").
+		constexpr W::GUID kTagGuid{ 0x5b0c2e71, 0x9a4d, 0x4c1e, { 0x8f, 0x2a, 0x53, 0x50, 0x53, 0x54, 0x61, 0x67 } };
+		constexpr std::uint32_t kTagMagic = 0x53505354;  // "SPST"
+		constexpr std::uint32_t kTagFile = 1, kTagOurs = 2;
+		struct Tag
 		{
+			std::uint32_t magic = kTagMagic;
+			std::uint32_t flags = 0;
+			std::uint32_t fullW = 0, fullH = 0, fullMips = 0;  // 0 = unbekannt (verkleinert geladen, Datei noch nicht geprueft)
+		};
+
+		void SetTag(W::ID3D11Resource* a_res, std::uint32_t a_flags, std::uint32_t a_fullW = 0, std::uint32_t a_fullH = 0, std::uint32_t a_fullMips = 0) noexcept
+		{
+			if (a_res) {
+				const Tag tag{ kTagMagic, a_flags, a_fullW, a_fullH, a_fullMips };
+				a_res->SetPrivateData(kTagGuid, sizeof(tag), &tag);
+			}
+		}
+
+		bool GetTag(W::ID3D11Resource* a_res, Tag& a_out) noexcept
+		{
+			std::uint32_t size = sizeof(Tag);
+			return a_res && a_res->GetPrivateData(kTagGuid, &size, &a_out) >= 0 && size == sizeof(Tag) && a_out.magic == kTagMagic;
+		}
+
+		bool ReducedByUsAtLoad(W::ID3D11Resource* a_res)
+		{
+			if (Tag tag; GetTag(a_res, tag)) {
+				return (tag.flags & kTagOurs) != 0;
+			}
 			std::scoped_lock lock(g_fileTexLock);
-			return g_ourLoadReduced.contains(a_obj);
+			return g_ourLoadReduced.contains(a_res);
 		}
 
 		bool IsFileTexture(const RE::BSGraphics::Texture* a_r)
@@ -508,15 +542,21 @@ namespace TextureStream
 			if (!g_fileTexTracking.load(std::memory_order_relaxed)) {
 				return true;  // ohne Lader-Hook keine Merkliste - altes Verhalten
 			}
+			if (Tag tag; GetTag(a_r->texture, tag)) {
+				return (tag.flags & kTagFile) != 0;
+			}
 			std::scoped_lock lock(g_fileTexLock);
 			return g_fileTex.contains(a_r->texture) || g_fileTex.contains(a_r->resourceView);
 		}
 
-		void Swap(RE::BSGraphics::Texture* a_r, W::ID3D11Texture2D* a_tex, W::ID3D11ShaderResourceView* a_srv, std::uint64_t a_oldBytes)
+		// a_full*: Originalgroesse laut Datei; a_ours: Ersatz ist kleiner als erlaubt (von uns verkleinert)
+		void Swap(RE::BSGraphics::Texture* a_r, W::ID3D11Texture2D* a_tex, W::ID3D11ShaderResourceView* a_srv, std::uint64_t a_oldBytes,
+			std::uint32_t a_fullW, std::uint32_t a_fullH, std::uint32_t a_fullMips, bool a_ours)
 		{
 			ForgetFileTexture(a_r->texture);
 			ForgetFileTexture(a_r->resourceView);
 			MarkFileTexture(a_tex);  // unser Ersatz stammt aus derselben Datei (Kopie oder Neuladen)
+			SetTag(a_tex, kTagFile | (a_ours ? kTagOurs : 0), a_fullW, a_fullH, a_fullMips);
 			DeferRelease(a_r->texture, a_oldBytes);
 			DeferRelease(a_r->resourceView);
 			a_r->texture = a_tex;
@@ -536,6 +576,7 @@ namespace TextureStream
 			std::uint32_t                      skip = 0;  // obere Mip-Stufen weglassen
 			W::D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
 			std::uint64_t                      extraBytes = 0;  // Neuladen: zusaetzlicher VRAM gegenueber jetzt
+			float                              priority = 0;    // Neuladen: benoetigt / aktuell - die dringendsten zuerst
 		};
 
 		struct Result
@@ -783,8 +824,22 @@ namespace TextureStream
 					std::unique_lock lock(g_qLock);
 					g_qCv.wait_for(lock, 250ms, [] { return !g_jobs.empty(); });
 					if (!g_jobs.empty()) {
-						job = std::move(g_jobs.front());
-						g_jobs.pop_front();
+						// Datei-Pruefungen in Reihenfolge zuerst, sonst die dringendste Neuladung (bis 1.0.55 Reihenfolge des
+						// Szenen-Durchlaufs: ferne Texturen verbrauchten das Budget, nahe Felsen warteten)
+						auto pick = g_jobs.begin();
+						if (pick->reload) {
+							for (auto it = g_jobs.begin(); it != g_jobs.end(); ++it) {
+								if (!it->reload) {
+									pick = it;
+									break;
+								}
+								if (it->priority > pick->priority) {
+									pick = it;
+								}
+							}
+						}
+						job = std::move(*pick);
+						g_jobs.erase(pick);
 						have = true;
 					}
 				}
@@ -1155,9 +1210,15 @@ namespace TextureStream
 				if (result >= 0 && a_out && *a_out) {
 					const auto tex = static_cast<RE::BSGraphics::Texture*>(*a_out)->texture;
 					MarkFileTexture(tex);
-					if (changed && tex) {
+					SetTag(tex, kTagFile | (changed ? kTagOurs : 0));
+					if (tex) {
+						// Adresse kann von einer frueheren, freigegebenen Textur stammen -> alten Eintrag nicht erben
 						std::scoped_lock lock(g_fileTexLock);
-						g_ourLoadReduced.insert(tex);
+						if (changed) {
+							g_ourLoadReduced.insert(tex);
+						} else {
+							g_ourLoadReduced.erase(tex);
+						}
 					}
 				}
 				// Sicherheitsnetz: schlaegt das Laden mit unserer Groesse fehl, diese Textur nie wieder verkleinert laden
@@ -1196,8 +1257,12 @@ namespace TextureStream
 			return a_edge;
 		}
 
-		void QueueReload(TexState& a_st, RE::BSGraphics::Texture* a_r, std::uint32_t a_targetEdge)
+		// a_priority: benoetigt / aktuell (ab 4 = sehr nah, laeuft auch ueber das Budget)
+		void QueueReload(TexState& a_st, RE::BSGraphics::Texture* a_r, std::uint32_t a_targetEdge, float a_priority)
 		{
+			if (Clock::now() < a_st.retryAfter) {
+				return;
+			}
 			std::uint32_t skip = 0;
 			while ((a_st.FullEdge() >> (skip + 1)) >= a_targetEdge && skip + 1 < a_st.fullMips) {
 				++skip;
@@ -1217,6 +1282,7 @@ namespace TextureStream
 			job.format = a_st.format;
 			job.fi = a_st.fi;
 			job.skip = skip;
+			job.priority = a_priority;
 			if (!a_r->resourceView) {
 				return;
 			}
@@ -1231,7 +1297,7 @@ namespace TextureStream
 			// Budget-Modus: nur so viel gleichzeitig neu laden, wie bis zum Puffer passt (laufende und gerade fertige
 			// Auftraege mitgezaehlt). 1.0.50: Obergrenze 1K -> unbegrenzt lud 817 Texturen (8,4 GB) in einer Minute,
 			// VRAM 104 %, 1,8 GB ausgelagert. Bis 128 MB laufen immer, damit nahe Texturen auch bei Knappheit nachkommen.
-			if (Active() && Config::textureStream.budgetMode && g_inflightUp >= 128ull * 1048576) {
+			if (Active() && Config::textureStream.budgetMode && g_inflightUp >= 128ull * 1048576 && a_priority < 4.0f) {
 				if (const double freeMB = FreeMB(); freeMB >= 0.0 &&
 					(freeMB - Config::textureStream.reserveMB) * 1048576.0 - static_cast<double>(g_inflightUp) < static_cast<double>(job.extraBytes)) {
 					return;
@@ -1313,9 +1379,18 @@ namespace TextureStream
 					                  st.path.starts_with("textures\\") && st.path.ends_with(".dds") && IsFileTexture(r);
 					st.eligible = st.eligibleBase && !Excluded(st.path);
 					st.ours = ReducedByUsAtLoad(st.res);
+					// Von uns ersetzt (Verkleinern/Neuladen): Originalgroesse steht am Objekt - keine Datei-Pruefung noetig
+					bool known = false;
+					if (Tag tag; st.ours && GetTag(st.res, tag) && tag.fullW >= st.curW && tag.fullH >= st.curH && tag.fullMips >= st.curMips && tag.fullMips > 0) {
+						st.fullW = tag.fullW;
+						st.fullH = tag.fullH;
+						st.fullMips = tag.fullMips;
+						st.probe = Probe::kOk;
+						known = true;
+					}
 					// Datei in dieser Sitzung schon geprueft -> sofort einordnen, sonst bei evtl. verkleinertem Laden (Stufe 3)
 					// die Originalgroesse aus der Datei holen, damit ein naheliegendes Objekt gleich wieder voll wird
-					if (st.eligible && !st.busy) {
+					if (st.eligible && !st.busy && !known) {
 						if (const auto pc = g_probeCache.find(st.path); pc != g_probeCache.end()) {
 							std::string why;
 							if (!ApplyProbe(st, pc->second, why)) {
@@ -1349,7 +1424,7 @@ namespace TextureStream
 			// zu klein fuer diesen Abstand -> sofort groesser laden (mit einer Stufe Reserve)
 			if (st.Reduced() && !st.busy && st.probe == Probe::kOk) {
 				if (WantedEdge(st, a_needPx / UpMargin()) > st.CurEdge()) {
-					QueueReload(st, r, UpTarget(WantedEdge(st, a_needPx), st.LimitEdge()));
+					QueueReload(st, r, UpTarget(WantedEdge(st, a_needPx), st.LimitEdge()), a_needPx / static_cast<float>(std::max(1u, st.CurEdge())));
 				}
 			}
 		}
@@ -1362,6 +1437,7 @@ namespace TextureStream
 			RE::NiPointer<RE::NiSourceTexture> src;
 			std::uint32_t                      targetEdge;
 			bool                               cap = false;  // Obergrenze aus dem Menue - auch ohne VRAM-Knappheit
+			Clock::time_point                  queued = Clock::now();
 		};
 		std::deque<DownJob> g_down;
 
@@ -1377,6 +1453,12 @@ namespace TextureStream
 			st.busy = false;
 			const auto r = a_job.r;
 			if (!a_job.src || a_job.src->rendererTexture != r || r->texture != st.res || !r->resourceView || !g_device || !g_context) {
+				return;
+			}
+			// Unter Druck stauen sich Tausende Auftraege; bis zur Ausfuehrung kann das Objekt laengst nah sein (der Spieler
+			// laeuft darauf zu) -> veraltete Auftraege verwerfen und den aktuellen Bedarf pruefen
+			if (!a_job.cap && (Clock::now() - a_job.queued > 2s || (st.passId == g_passId && WantedEdge(st, st.passNeed) > a_job.targetEdge))) {
+				++g_stats.downsSkipped;
 				return;
 			}
 			std::uint32_t drop = 0;
@@ -1423,7 +1505,7 @@ namespace TextureStream
 				g_context->CopySubresourceRegion(tex, i, 0, 0, 0, st.res, i + drop, nullptr);
 			}
 			const auto oldBytes = ChainBytes(st.fi, st.curW, st.curH, st.curMips);
-			Swap(r, tex, srv, oldBytes);
+			Swap(r, tex, srv, oldBytes, st.fullW, st.fullH, st.fullMips, true);
 			a_freed = oldBytes - ChainBytes(st.fi, desc.width, desc.height, desc.mipLevels);
 			st.res = tex;
 			st.curW = desc.width;
@@ -1519,19 +1601,27 @@ namespace TextureStream
 					if (!res.error.empty()) {
 						++g_stats.upFails;
 						if (it != g_tex.end()) {
-							it->second.eligible = false;
-							LogFail(job.path, "reload: " + res.error);
+							// Nicht gleich aufgeben (bis 1.0.55 blieb die Textur nach einem Fehler fuer immer klein, z. B. bei
+							// kurzem VRAM-Mangel) - erst nach drei Fehlern in Folge
+							auto& fst = it->second;
+							if (++fst.fails >= 3) {
+								fst.eligible = false;
+								LogFail(job.path, "reload: " + res.error);
+							} else {
+								fst.retryAfter = Clock::now() + std::chrono::seconds(10 * fst.fails);
+							}
 						}
 					}
 					continue;
 				}
 				auto& st = it->second;
-				Swap(job.r, res.tex, res.srv, ChainBytes(st.fi, st.curW, st.curH, st.curMips));
+				Swap(job.r, res.tex, res.srv, ChainBytes(st.fi, st.curW, st.curH, st.curMips), job.fullW, job.fullH, job.fullMips, job.skip > 0);
 				st.res = res.tex;
 				st.curW = std::max(1u, job.fullW >> job.skip);
 				st.curH = std::max(1u, job.fullH >> job.skip);
 				st.curMips = job.fullMips - job.skip;
 				st.ours = job.skip > 0;
+				st.fails = 0;
 				st.lastReload = Clock::now();
 				const double mb = ChainBytes(st.fi, st.curW, st.curH, st.curMips) / 1048576.0;
 				++g_act.reloads;
@@ -1589,6 +1679,21 @@ namespace TextureStream
 			const auto lsp = prop ? netimmerse_cast<RE::BSLightingShaderProperty*>(prop) : nullptr;
 			const auto material = lsp ? static_cast<RE::BSLightingShaderMaterialBase*>(lsp->material) : nullptr;
 			if (!material) {
+				// Effekt-Objekte (Feuer, Rauch, Magie, manche Blut-Effekte) teilen Texturdateien mit normalen Objekten: deren
+				// Bedarf mitzaehlen, sonst wird eine Textur wegen eines fernen Objekts verkleinert, die ein Effekt nah zeigt
+				const auto esp = prop ? netimmerse_cast<RE::BSEffectShaderProperty*>(prop) : nullptr;
+				const auto emat = esp ? static_cast<RE::BSEffectShaderMaterial*>(esp->material) : nullptr;
+				if (emat) {
+					const auto& b = a_geom->worldBound;
+					const float dx = b.center.x - g_camX, dy = b.center.y - g_camY, dz = b.center.z - g_camZ;
+					const float dist = std::sqrt(dx * dx + dy * dy + dz * dz) - b.radius;
+					const float need = a_forceNeed > 0 ? a_forceNeed : (dist <= 1.0f || b.radius <= 0.0f) ? 1.0e6f : 2.0f * b.radius / dist * g_pixelsPerUnit;
+					for (const auto& t : { emat->sourceTexture, emat->greyscaleTexture }) {
+						if (t) {
+							OnSeen(t.get(), need, false);
+						}
+					}
+				}
 				return;
 			}
 			float      need = a_forceNeed;
@@ -1614,7 +1719,8 @@ namespace TextureStream
 				const auto& b = a_geom->worldBound;
 				const float dx = b.center.x - g_camX, dy = b.center.y - g_camY, dz = b.center.z - g_camZ;
 				const float dist = std::sqrt(dx * dx + dy * dy + dz * dz) - b.radius;
-				need = dist <= 1.0f ? 1.0e6f : 2.0f * b.radius / dist * g_pixelsPerUnit;
+				// Huelle noch nicht berechnet (Radius 0, frisch geladen): Bedarf unbekannt -> nicht als winzig werten
+				need = (dist <= 1.0f || b.radius <= 0.0f) ? 1.0e6f : 2.0f * b.radius / dist * g_pixelsPerUnit;
 			}
 			RE::NiSourceTexture* textures[kMaxTextures]{};
 			const int            n = SafeGather(material, textures);
@@ -1824,7 +1930,7 @@ namespace TextureStream
 				const bool seen = st.passId == g_passId;
 				// per Debug-Schalter wieder ausgenommen, aber noch verkleinert: voll laden
 				if (!st.eligible && st.eligibleBase && !st.busy && st.hold && st.probe == Probe::kOk && st.CurEdge() < st.LimitEdge()) {
-					QueueReload(st, r, st.LimitEdge());
+					QueueReload(st, r, st.LimitEdge(), 1.0f);
 					continue;
 				}
 				if (st.Reduced()) {
@@ -1843,10 +1949,15 @@ namespace TextureStream
 				}
 				if (st.eligible && !st.busy) {
 					if (st.Reduced() && st.hold && st.probe == Probe::kOk && (!active || (seen && WantedEdge(st, st.passNeed / UpMargin()) > st.CurEdge()))) {
-						QueueReload(st, r, active ? UpTarget(WantedEdge(st, st.passNeed), st.LimitEdge()) : st.LimitEdge());
+						QueueReload(st, r, active ? UpTarget(WantedEdge(st, st.passNeed), st.LimitEdge()) : st.LimitEdge(),
+							active ? st.passNeed / static_cast<float>(std::max(1u, st.CurEdge())) : 1.0f);
 					} else if (st.Reduced() && st.hold && st.probe == Probe::kNone) {
 						// verkleinert, aber Datei nie geprueft: ohne Pruefung wird nie wieder voll geladen (1.0.48: Obergrenze
 						// verkleinerte ungeprueft, nach "unbegrenzt" blieben nahe Boeden in Weisslauf auf 1K)
+						QueueProbe(st, r);
+					} else if (st.ours && st.hold && st.probe == Probe::kNone) {
+						// von uns verkleinert geladen, Pruefung aber verloren (Zustand neu aufgebaut, waehrend ein Auftrag lief):
+						// ohne Originalgroesse gilt sie sonst als voll und wird nie wieder groesser
 						QueueProbe(st, r);
 					} else if (active && seen && g_userCap && st.CurEdge() > g_userCap && st.hold && st.probe == Probe::kNone) {
 						QueueProbe(st, r);  // Obergrenze erst nach der Datei-Pruefung (sonst kein Weg zurueck)
@@ -1892,7 +2003,7 @@ namespace TextureStream
 						break;
 					}
 					if (!c.st->busy) {
-						QueueReload(*c.st, c.r, c.st->LimitEdge());
+						QueueReload(*c.st, c.r, c.st->LimitEdge(), std::min(c.priority, 3.9f));
 						room -= static_cast<double>(c.bytes);
 						++g_stats.refills;
 						g_lastRefill = now;
@@ -2058,9 +2169,9 @@ namespace TextureStream
 			const auto& s = g_stats;
 			const auto  capText = g_userCap ? std::format(" (by max. size {}: {}, {:.0f} MB)", g_userCap, capped, cappedMB) : std::string{};
 			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, paged out {:.0f} MB) | downscaled {} textures, {:.0f} MB saved{} | last minute: "
-						 "downscaled {}, reloaded {} ({:.0f} MB), ping-pong {}, refilled {}, loaded reduced {}, from RAM {}, load errors {}",
+						 "downscaled {} (skipped {}), reloaded {} ({:.0f} MB), ping-pong {}, refilled {}, loaded reduced {}, from RAM {}, load errors {}",
 				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_procShared.load() / 1048576.0, reduced,
-				savedMB, capText, s.downs, s.ups, s.upMB, s.pingPong, s.refills, g_loadedReduced.exchange(0), g_cacheHits.exchange(0), s.upFails);
+				savedMB, capText, s.downs, s.downsSkipped, s.ups, s.upMB, s.pingPong, s.refills, g_loadedReduced.exchange(0), g_cacheHits.exchange(0), s.upFails);
 			g_cacheMisses.exchange(0);
 			g_diagCreate.exchange(0);
 			g_diagDDS.exchange(0);
@@ -2127,8 +2238,8 @@ namespace TextureStream
 				logger::info("[TextureStream]   figures (skinned, current size): {} textures, {:.0f} MB of {:.0f} MB seen | body/face/hair {} ({:.0f} MB), armor/clothing/other {} ({:.0f} MB) | 4K+ {} ({:.0f} MB)",
 					nChar + nOther, mbChar + mbOther, mbAll, nChar, mbChar, nOther, mbOther, nBig, mbBig);
 			}
-			logger::info("[TextureStream]   10 s: downscaled {} | reloaded {} ({:.0f} MB, avg {:.0f} ms) | load errors {} | ping-pong {} | refilled {} | queue {} | passes {} (avg {:.0f} frames, {:.0f} nodes, {:.2f} ms total)",
-				s.downs, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, s.pingPong, s.refills, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
+			logger::info("[TextureStream]   10 s: downscaled {} (skipped {}) | reloaded {} ({:.0f} MB, avg {:.0f} ms) | load errors {} | ping-pong {} | refilled {} | queue {} | passes {} (avg {:.0f} frames, {:.0f} nodes, {:.2f} ms total)",
+				s.downs, s.downsSkipped, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, s.pingPong, s.refills, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
 				s.passes ? double(s.passNodes) / s.passes : 0.0, s.passes ? s.passMs / s.passes : 0.0);
 			std::size_t remembered = 0;
 			{

@@ -116,8 +116,22 @@ namespace Config
 	void MarkDirty() noexcept { g_dirty.store(true); }
 	void RequestReset() noexcept { g_reset.store(true); }
 
+	namespace
+	{
+		std::atomic<std::chrono::steady_clock::rep> g_lastCallTicks{ 0 };
+	}
+
+	void ReloadIfIdle()
+	{
+		const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+		if (now - g_lastCallTicks.load(std::memory_order_relaxed) >= std::chrono::duration_cast<std::chrono::steady_clock::duration>(1s).count()) {
+			ReloadIfChanged();
+		}
+	}
+
 	void ReloadIfChanged()
 	{
+		g_lastCallTicks.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
 		if (g_reset.exchange(false)) {
 			g_dirty.store(false);
 			std::error_code ec;

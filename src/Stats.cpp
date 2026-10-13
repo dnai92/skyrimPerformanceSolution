@@ -271,8 +271,14 @@ namespace Stats
 				g_segNpc = 0;
 				g_segOn = on;
 			}
-			if (a_valid) {
+			// Begrenzt (~1 h bei 60 FPS), einmal reserviert: lief bis 1.0.55 ohne Umschalten unbegrenzt weiter und kopierte
+			// beim Vergroessern nach Stunden zweistellige MB im Hauptthread
+			constexpr std::size_t kMaxSegFrames = 200000;
+			if (a_valid && g_segMs.size() < kMaxSegFrames) {
 				try {
+					if (g_segMs.capacity() < kMaxSegFrames) {
+						g_segMs.reserve(kMaxSegFrames);
+					}
 					g_segMs.push_back(a_frameMs);
 				} catch (...) {
 				}

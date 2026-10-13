@@ -189,6 +189,10 @@ namespace Config
 	// Schreibt ausserdem vorgemerkte Menue-Aenderungen in SPS_User.ini.
 	void ReloadIfChanged();
 
+	// Aus dem Present-Hook: ReloadIfChanged, wenn der normale Aufruf (PlayerCharacter::Update) seit 1 s fehlt -
+	// Hauptmenue, pausiertes Spiel. Sonst gingen dort geaenderte Einstellungen und "Standard laden" verloren.
+	void ReloadIfIdle();
+
 	// Menue: Werte wurden direkt geaendert -> beim naechsten ReloadIfChanged in SPS_User.ini speichern
 	void MarkDirty() noexcept;
 
