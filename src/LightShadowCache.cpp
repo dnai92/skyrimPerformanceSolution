@@ -76,6 +76,21 @@ namespace LightShadowCache
 		// Bildern alles normal zeichnen. Entschieden je Bild an der Bildausgabe: lief seit der letzten kein Frame-Beginn?
 		std::atomic<bool> g_onFrameSeen{ false };
 		std::atomic<bool> g_stalled{ false };
+		// Bildausgaben seit dem letzten Frame-Beginn. Erst ab der zweiten ohne Frame-Beginn gilt das Spiel als pausiert:
+		// mit Frame Generation / Overlays kann es mehr als eine Ausgabe je Spiel-Frame geben - bis 1.0.56 galt dann jeder
+		// Frame als Pause, der Cache baute staendig neu auf
+		std::uint32_t     g_presentsSinceFrame = 0;
+		// Welche Lichter in diesem Frame in welche Ebene zeichnen: teilen sich zwei eine Ebene, wuerde das Zurueckkopieren
+		// des einen die Karte des anderen ueberschreiben -> beide nicht cachen
+		struct SliceUse
+		{
+			REX::W32::ID3D11Texture2D* tex = nullptr;
+			std::uint32_t              sub = 0;
+			const void*                owner = nullptr;
+		};
+		std::array<SliceUse, 32> g_sliceUse{};
+		std::uint32_t            g_sliceUseCount = 0;
+		std::uint32_t            g_sliceShared = 0;  // Bericht
 		bool                               g_installed = false;
 		bool                               g_drawFilter = false;
 		// Gerade gezeichnete Schattenkarte (Render-Thread, nur waehrend des Zeichen-Aufrufs gesetzt)
@@ -467,6 +482,32 @@ namespace LightShadowCache
 					port[3], d.clearRenderTarget, before.slice, before.arraySize, before.vx, before.vy, before.vw, before.vh, after.slice, after.vx, after.vy, after.vw, after.vh);
 			}
 
+			// Ebene merken; teilt sie sich ein anderes Licht in diesem Frame, beide nicht mehr cachen
+			static void NoteSlice(LightState* a_l) noexcept
+			{
+				std::uint32_t sub = 0;
+				const auto    tex = BoundDepth(sub);
+				if (!tex) {
+					return;
+				}
+				for (std::uint32_t i = 0; i < g_sliceUseCount; ++i) {
+					auto& u = g_sliceUse[i];
+					if (u.tex == tex && u.sub == sub) {
+						if (u.owner != a_l) {
+							a_l->unsupported = true;
+							if (const auto other = const_cast<LightState*>(static_cast<const LightState*>(u.owner))) {
+								other->unsupported = true;
+							}
+							++g_sliceShared;
+						}
+						return;
+					}
+				}
+				if (g_sliceUseCount < g_sliceUse.size()) {
+					g_sliceUse[g_sliceUseCount++] = { tex, sub, a_l };
+				}
+			}
+
 			static void thunk(RE::NiCamera* a_camera, void* a_accumulator, std::uint32_t a_flags)
 			{
 				// Diagnose: alle 5 s die Schattenkarten von 3 Frames protokollieren
@@ -475,6 +516,9 @@ namespace LightShadowCache
 					return;
 				}
 				LightState* l = a_camera ? FindByCamera(a_camera) : nullptr;
+				if (l) {
+					NoteSlice(l);  // auch normal gezeichnete verwaltete Lichter: ihre Karte koennte ueberschrieben werden
+				}
 				const auto  mode = l ? static_cast<Mode>(l->mode.load(std::memory_order_relaxed)) : Mode::kNormal;
 				if (mode != Mode::kBuild && mode != Mode::kCached && mode != Mode::kWait) {
 					func(a_camera, a_accumulator, a_flags);
@@ -491,6 +535,11 @@ namespace LightShadowCache
 					func(a_camera, a_accumulator, a_flags);
 					l->valid = false;
 					++g_win.buildFailed;
+					return;
+				}
+				if (l->unsupported) {
+					func(a_camera, a_accumulator, a_flags);
+					l->valid = false;
 					return;
 				}
 				const auto& descs = light->GetRuntimeData().shadowmapDescriptors;
@@ -668,6 +717,8 @@ namespace LightShadowCache
 		}
 		const auto frame = g_frame.fetch_add(1, std::memory_order_relaxed) + 1;
 		g_onFrameSeen.store(true, std::memory_order_relaxed);
+		g_presentsSinceFrame = 0;
+		g_sliceUseCount = 0;
 		const bool enabled = g_drawFilter && Config::lightShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed);
 
 		// 1. letzten Frame auswerten
@@ -814,7 +865,8 @@ namespace LightShadowCache
 
 	void OnPresent() noexcept
 	{
-		g_stalled.store(!g_onFrameSeen.exchange(false, std::memory_order_relaxed), std::memory_order_relaxed);
+		g_onFrameSeen.store(false, std::memory_order_relaxed);
+		g_stalled.store(++g_presentsSinceFrame >= 2, std::memory_order_relaxed);
 	}
 
 	std::uint32_t TakeFrameBuilds() noexcept
@@ -839,9 +891,9 @@ namespace LightShadowCache
 		auto&        w = g_win;
 		const double f = static_cast<double>(w.frames);
 		logger::info("[LightCache] {} (test mode {}) | maps/frame from cache {:.1f}, drawn normally {:.1f} | builds/frame {:.3f} | meshes/frame saved {:.0f}, still drawn: moving {:.0f}, added {:.0f} | "
-					 "rebuilds: light moved {}, mesh removed {}, mesh started moving {}, too many added {} | failed {}, lights not supported {:.1f} | draws outside filter {}",
+					 "rebuilds: light moved {}, mesh removed {}, mesh started moving {}, too many added {} | failed {}, lights not supported {:.1f} (shared slice {}) | draws outside filter {}",
 			Config::lightShadowCache.enabled ? "ON" : "OFF", DebugMode(), w.cachedMaps / f, w.normalMaps / f, w.builds / f, g_saved.exchange(0) / f, g_drawnDynamic.exchange(0) / f,
-			g_drawnExtra.exchange(0) / f, w.lightMoved, w.removed, w.promoted, w.extraFull, w.buildFailed, w.unsupported / f, w.uncoveredDraws);
+			g_drawnExtra.exchange(0) / f, w.lightMoved, w.removed, w.promoted, w.extraFull, w.buildFailed, w.unsupported / f, std::exchange(g_sliceShared, 0u), w.uncoveredDraws);
 		std::scoped_lock lock(g_moverLock);
 		for (const auto& [name, count] : g_movers) {
 			logger::info("[LightCache]   started moving: {}x {}", count, name);

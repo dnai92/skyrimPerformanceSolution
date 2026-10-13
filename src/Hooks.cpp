@@ -21,7 +21,8 @@ namespace Hooks
 		void ReportEngineWaits()
 		{
 			static std::uint32_t frames = 0;
-			if (++frames % 600 != 0 || !Config::analysis.load(std::memory_order_relaxed)) {
+			// Nur mit den Entwickler-Messungen (sonst nichts gesammelt: leere Zeile alle 10 s, Offset2ID-Aufbau = Ruckler)
+			if (!Config::engineProbes || ++frames % 600 != 0 || !Config::analysis.load(std::memory_order_relaxed)) {
 				return;
 			}
 			std::array<WaitProbe::CallerStat, WaitProbe::kMaxCallers> callers{};

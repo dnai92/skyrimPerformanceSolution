@@ -103,6 +103,9 @@ namespace Menu
 			if (!vk) {
 				return 0;
 			}
+			if (vk == 0x13) {
+				return 0xC5;  // Pause: MapVirtualKey liefert E11D (= Strg rechts nach der Umrechnung unten)
+			}
 			const auto sc = MapVirtualKeyW(vk, 4);  // MAPVK_VK_TO_VSC_EX: 0xE0xx bei erweiterten Tasten
 			if (!sc) {
 				return 0;
@@ -351,6 +354,14 @@ namespace Menu
 				ShadowCulling::RequestCascadeDump(300);
 			}
 			Tip(T("Writes how the game aligns the sun shadow cascades in each frame to SPS.log.", "Schreibt pro Frame, wie das Spiel die Sonnenschatten-Kaskaden ausrichtet, in SPS.log."));
+
+			MenuApi::SeparatorText(T("Main view micro culling (diagnostics)", "Winzige Objekte weglassen (Diagnose)"));
+			if (MenuApi::Button(T("Save list of left out objects##micro", "Liste weggelassener Objekte speichern##micro"))) {
+				ShadowCulling::RequestMicroCullList();
+				Notify(T("SPS: list of left out objects is being recorded (30 frames)", "SPS: Liste weggelassener Objekte wird aufgenommen (30 Frames)"));
+			}
+			Tip(T("Writes all objects that micro culling and far decal culling leave out in the main view over the next 30 frames to SPS_MicroCulled_N.csv next to SPS.log (name, reference, parent nodes, size, distance).",
+				"Schreibt alle Objekte, die Mikro-Culling und ferne Decals in den nächsten 30 Frames im Hauptbild weglassen, nach SPS_MicroCulled_N.csv neben SPS.log (Name, Referenz, übergeordnete Knoten, Größe, Abstand)."));
 
 			MenuApi::SeparatorText(T("Skylighting culling (measurement)", "Himmelslicht-Culling (Messung)"));
 			if (!EngineTimers::PrecipTimerInstalled()) {

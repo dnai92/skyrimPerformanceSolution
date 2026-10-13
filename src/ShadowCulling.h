@@ -25,6 +25,9 @@ namespace ShadowCulling
 	void SetInSunAccumulate(bool a_in) noexcept;
 	// Diagnose: die naechsten a_frames Frames die Kaskaden-Ausrichtung der Engine ins Log schreiben
 	void RequestCascadeDump(int a_frames) noexcept;
+	// Diagnose: 30 Frames lang alle im Hauptbild weggelassenen Objekte (Mikro-Culling, ferne Decals) sammeln und als
+	// SPS_MicroCulled_N.csv in den SKSE-Log-Ordner schreiben
+	void RequestMicroCullList() noexcept;
 
 	// Einmal pro Frame auf dem Main-Thread: Kamera-Position und Kaskaden-Culler der Sonne cachen
 	void OnFrame();

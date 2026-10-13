@@ -48,7 +48,7 @@ namespace InstancingAnalysis
 		struct GroupInfo
 		{
 			std::uint32_t count = 0;
-			const char*   sampleName = nullptr;
+			RE::BSFixedString sampleName;  // haelt den Namen (Objekt kann bis zum Bericht geloescht sein)
 		};
 
 		constexpr std::size_t kCallSites = 3;  // 0 = unbekannt, 1 = RenderBatches, 2 = zweite Aufrufstelle
@@ -378,12 +378,17 @@ namespace InstancingAnalysis
 				if (sun) {
 					++g_batchCounter;
 				}
-				g_instBatchActive = sun && !g_instBatchActive && InstancingWanted();
+				// Verschachtelter Aufruf: der innere sammelt nicht und stellt danach den Zustand des aeusseren wieder her
+				// (bis 1.0.56 beendete er das Sammeln des aeusseren stillschweigend)
+				const bool prev = g_instBatchActive;
+				g_instBatchActive = sun && !prev && InstancingWanted();
 				const bool mine = g_instBatchActive;
 				const bool r = func(a_renderer, a_currentPass, a_bucketIndex, a_passIndexList, a_renderFlags);
 				if (mine) {
 					FlushInstances();
 					g_instBatchActive = false;
+				} else {
+					g_instBatchActive = prev;
 				}
 				return r;
 			}
@@ -689,7 +694,7 @@ namespace InstancingAnalysis
 			if (w.frames % kReportFrames == kReportFrames - 1) {
 				g_topGroups.clear();
 				for (const auto& [key, g] : g_frameGroups) {
-					g_topGroups.emplace_back(g.count, std::format("{} (technique {:X})", g.sampleName ? g.sampleName : "?", key.technique));
+					g_topGroups.emplace_back(g.count, std::format("{} (technique {:X})", g.sampleName.empty() ? "?" : g.sampleName.c_str(), key.technique));
 				}
 				std::ranges::sort(g_topGroups, std::greater{}, &std::pair<std::uint32_t, std::string>::first);
 				if (g_topGroups.size() > 20) {

@@ -1056,6 +1056,74 @@ namespace ShadowCulling
 			g_mainWorldAcc.store(best, std::memory_order_relaxed);
 		}
 
+		// ---- Diagnose: Liste der im Hauptbild weggelassenen Objekte ----
+		std::atomic<int>                                          g_microListFrames{ 0 };
+		std::mutex                                                g_microListLock;
+		std::unordered_map<const RE::BSGeometry*, std::string>    g_microList;
+		int                                                       g_microListNumber = 0;
+
+		void RecordMicroCulled(const RE::BSGeometry& a_geom, const void* a_acc) noexcept
+		{
+			try {
+				{
+					std::scoped_lock lock(g_microListLock);
+					if (g_microList.size() >= 4000 || g_microList.contains(&a_geom)) {
+						return;
+					}
+				}
+				const auto  property = a_geom.GetGeometryRuntimeData().shaderProperty.get();
+				const bool  decal = property && property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kDecal, RE::BSShaderProperty::EShaderPropertyFlag::kDynamicDecal);
+				std::string path;
+				RE::TESObjectREFR* ref = nullptr;
+				const RE::NiAVObject* obj = a_geom.parent;
+				for (int depth = 0; obj && depth < 32; ++depth, obj = obj->parent) {
+					if (!ref) {
+						ref = SceneUtil::OwnUserData(obj);
+					}
+					if (depth < 6) {
+						path += obj->name.c_str() ? obj->name.c_str() : "";
+						path += '/';
+					} else if (!obj->parent) {
+						path += "../";
+						path += obj->name.c_str() ? obj->name.c_str() : "";  // Wurzel: WorldRoot, Kamera, Menue-Szene ...
+					}
+				}
+				const auto& b = a_geom.worldBound;
+				const float dx = b.center.x - g_camX.load(std::memory_order_relaxed), dy = b.center.y - g_camY.load(std::memory_order_relaxed),
+							dz = b.center.z - g_camZ.load(std::memory_order_relaxed);
+				std::string line = std::format("{};{};{};{:08X};{};{:.0f};{:.0f};{:.0f};{:.1f};{:.0f};{}", decal ? "decal" : "micro",
+					a_geom.name.c_str() ? a_geom.name.c_str() : "", ref ? ref->GetName() : "", ref ? ref->GetFormID() : 0u, path, b.center.x, b.center.y, b.center.z,
+					b.radius, std::sqrt(dx * dx + dy * dy + dz * dz), a_acc);
+				std::ranges::replace(line, '\n', ' ');
+				std::scoped_lock lock(g_microListLock);
+				g_microList.try_emplace(&a_geom, std::move(line));
+			} catch (...) {
+			}
+		}
+
+		void FinishMicroCullList() noexcept
+		{
+			try {
+				std::unordered_map<const RE::BSGeometry*, std::string> list;
+				{
+					std::scoped_lock lock(g_microListLock);
+					list.swap(g_microList);
+				}
+				const auto dir = SKSE::log::log_directory();
+				if (!dir) {
+					return;
+				}
+				const auto    path = *dir / std::format("SPS_MicroCulled_{}.csv", ++g_microListNumber);
+				std::ofstream f(path);
+				f << "rule;name;ref;formid;parents;cx;cy;cz;radius;distance;accumulator\n";
+				for (const auto& [k, line] : list) {
+					f << line << "\n";
+				}
+				logger::info("[MainViewCulling] list of left out objects saved: {} ({} objects, 30 frames)", path.string(), list.size());
+			} catch (...) {
+			}
+		}
+
 		bool GamePaused() noexcept
 		{
 			const auto ui = RE::UI::GetSingleton();
@@ -1077,6 +1145,9 @@ namespace ShadowCulling
 				}
 				NoteAccumulator(a_accumulator);
 				if (passes && passes->head && a_geometry && IsMainWorldAccumulator(a_accumulator) && ShouldCullMain(*a_geometry)) {
+					if (g_microListFrames.load(std::memory_order_relaxed) > 0) {
+						RecordMicroCulled(*a_geometry, a_accumulator);
+					}
 					empty.head = nullptr;
 					return &empty;
 				} else if (passes && passes->head && a_geometry) {
@@ -1578,6 +1649,11 @@ namespace ShadowCulling
 	std::atomic<int> g_cascadeDump{ 0 };
 	std::uint32_t    g_cascadeDumpFrame = 0;
 
+	void RequestMicroCullList() noexcept
+	{
+		g_microListFrames.store(30, std::memory_order_relaxed);
+	}
+
 	void RequestCascadeDump(int a_frames) noexcept
 	{
 		g_cascadeDumpFrame = 0;
@@ -1814,6 +1890,9 @@ namespace ShadowCulling
 #endif
 
 		UpdateMainWorldAccumulator();
+		if (const auto left = g_microListFrames.load(std::memory_order_relaxed); left > 0 && g_microListFrames.fetch_sub(1, std::memory_order_relaxed) == 1) {
+			FinishMicroCullList();
+		}
 		if (const auto camera = RE::PlayerCamera::GetSingleton(); camera && camera->cameraRoot) {
 			const auto& pos = camera->cameraRoot->world.translate;
 			g_camX.store(pos.x, std::memory_order_relaxed);

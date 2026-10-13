@@ -75,6 +75,7 @@ namespace Stats
 			g_prevAct = act;
 		}
 		std::filesystem::path                    g_csvPath;
+		void                                     WriteCsvHeaderOnce();
 
 		struct Summary
 		{
@@ -144,6 +145,7 @@ namespace Stats
 				return;
 			}
 
+			WriteCsvHeaderOnce();
 			std::ofstream csv(g_csvPath, std::ios::app);
 			const auto    ts = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 			csv << std::format("{},{},{:.2f},{:.3f},{:.3f},{:.3f},{:.1f},{},{}", ts, frames, fps, frame.avg, frame.p99, frame.max, npcPerFrame, overstressed, cellLoads);
@@ -188,24 +190,6 @@ namespace Stats
 			g_csvPath = *dir / "SPS.csv";
 		}
 
-		std::ofstream csv(g_csvPath, std::ios::trunc);
-		csv << "unix_time,frames,fps,frame_avg_ms,frame_p99_ms,frame_max_ms,npc_updates_per_frame,vm_overstressed,cell_loads";
-		for (const auto name : kZoneNames) {
-			std::string col{ name };
-			std::ranges::replace(col, ' ', '_');
-			std::erase(col, ':');
-			std::erase(col, '(');
-			std::erase(col, ')');
-			csv << std::format(",{0}_avg_ms,{0}_p99_ms,{0}_max_ms", col);
-		}
-		for (const auto name : kCounterNames) {
-			std::string col{ name };
-			std::ranges::replace(col, ' ', '_');
-			std::ranges::replace(col, '-', '_');
-			csv << std::format(",{0}_avg,{0}_p99,{0}_max", col);
-		}
-		csv << '\n';
-
 		for (auto& v : g_counterValues) {
 			v.reserve(2048);
 		}
@@ -213,6 +197,36 @@ namespace Stats
 			v.reserve(2048);
 		}
 		g_frameMs.reserve(2048);
+	}
+
+	namespace
+	{
+		// SPS.csv erst anlegen, wenn das Analyse-Protokoll zum ersten Mal Werte schreibt (bis 1.0.56 bei jedem Start)
+		void WriteCsvHeaderOnce()
+		{
+			static bool written = false;
+			if (written || g_csvPath.empty()) {
+				return;
+			}
+			written = true;
+			std::ofstream csv(g_csvPath, std::ios::trunc);
+			csv << "unix_time,frames,fps,frame_avg_ms,frame_p99_ms,frame_max_ms,npc_updates_per_frame,vm_overstressed,cell_loads";
+			for (const auto name : kZoneNames) {
+				std::string col{ name };
+				std::ranges::replace(col, ' ', '_');
+				std::erase(col, ':');
+				std::erase(col, '(');
+				std::erase(col, ')');
+				csv << std::format(",{0}_avg_ms,{0}_p99_ms,{0}_max_ms", col);
+			}
+			for (const auto name : kCounterNames) {
+				std::string col{ name };
+				std::ranges::replace(col, ' ', '_');
+				std::ranges::replace(col, '-', '_');
+				csv << std::format(",{0}_avg,{0}_p99,{0}_max", col);
+			}
+			csv << '\n';
+		}
 	}
 
 	bool Enabled() noexcept { return Config::analysis.load(std::memory_order_relaxed); }
