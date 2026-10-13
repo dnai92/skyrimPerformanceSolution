@@ -34,26 +34,29 @@ namespace EngineTimers
 			static inline void (*func)(void*) = nullptr;
 		};
 
-		constexpr int  kAbPhases = 8;
+		// 3 Varianten im Wechsel, je 3 Durchgaenge: 0 = aus, 1 = nur Einzel-Objekte, 2 = Einzel-Objekte + Teilbaeume
+		constexpr int  kAbModes = 3;
+		constexpr int  kAbPhases = 9;
 		constexpr auto kAbPhaseLength = std::chrono::seconds(15);
 		struct AbPhase
 		{
-			bool          on = false;
+			int           mode = 0;
 			std::uint64_t frames = 0, ns = 0, calls = 0, culled = 0, kept = 0;
 		};
 		std::array<AbPhase, kAbPhases>        g_abPhases;
 		int                                   g_abPhase = -1;
-		bool                                  g_abOriginal = true;
+		bool                                  g_abOriginal = true, g_abOriginalPrune = true;
 		std::chrono::steady_clock::time_point g_abPhaseStart{};
 		std::atomic<bool>                     g_abStartRequested{ false };
 
 		void AbBeginPhase(int a_phase)
 		{
 			g_abPhase = a_phase;
-			// Abwechselnd, beginnend mit AN (Reihenfolge-Effekte wie Nachladen mitteln sich ueber 4 Paare heraus)
-			const bool on = (a_phase % 2) == 0;
-			Config::skylightingCulling.enabled = on;
-			g_abPhases[a_phase] = AbPhase{ on };
+			// Reihum (Reihenfolge-Effekte wie Nachladen mitteln sich ueber die Durchgaenge heraus)
+			const int mode = a_phase % kAbModes;
+			Config::skylightingCulling.enabled = mode != 0;
+			Config::subtreePruning.precip = mode == 2;
+			g_abPhases[a_phase] = AbPhase{ mode };
 			g_abMaskNs.store(0);
 			g_abMaskCalls.store(0);
 			g_abCulled.store(0);
@@ -69,24 +72,28 @@ namespace EngineTimers
 			p.culled = g_abCulled.load();
 			p.kept = g_abKept.load();
 			const double f = p.frames ? static_cast<double>(p.frames) : 1.0;
+			static constexpr const char* kNames[] = { "off", "objects only", "objects + groups" };
 			logger::info("[Skylight-AB] phase {} culling {}: {} frames | rain/sky map {:.3f} ms/frame ({:.2f} calls/frame) | objects drawn {:.0f}/frame, left out {:.0f}/frame",
-				g_abPhase + 1, p.on ? "ON " : "OFF", p.frames, p.ns / 1e6 / f, p.calls / f, p.kept / f, p.culled / f);
+				g_abPhase + 1, kNames[p.mode], p.frames, p.ns / 1e6 / f, p.calls / f, p.kept / f, p.culled / f);
 		}
 
 		void AbFinish()
 		{
-			double nsOn = 0, nsOff = 0, frOn = 0, frOff = 0, keptOn = 0, keptOff = 0;
+			std::array<double, kAbModes> ns{}, fr{}, kept{};
 			for (const auto& p : g_abPhases) {
-				(p.on ? nsOn : nsOff) += static_cast<double>(p.ns);
-				(p.on ? frOn : frOff) += static_cast<double>(p.frames);
-				(p.on ? keptOn : keptOff) += static_cast<double>(p.kept);
+				ns[p.mode] += static_cast<double>(p.ns);
+				fr[p.mode] += static_cast<double>(p.frames);
+				kept[p.mode] += static_cast<double>(p.kept);
 			}
-			const double msOn = frOn > 0 ? nsOn / 1e6 / frOn : 0.0, msOff = frOff > 0 ? nsOff / 1e6 / frOff : 0.0;
-			const bool   cs = GetModuleHandleW(L"CommunityShaders.dll") != nullptr;
-			logger::info("[Skylight-AB] result: rain/sky map ON {:.3f} ms/frame, OFF {:.3f} ms/frame -> saves {:.3f} ms/frame ({:.0f} %) | objects drawn ON {:.0f}, OFF {:.0f} per frame | Community Shaders {}",
-				msOn, msOff, msOff - msOn, msOff > 0 ? 100.0 * (msOff - msOn) / msOff : 0.0, frOn > 0 ? keptOn / frOn : 0.0, frOff > 0 ? keptOff / frOff : 0.0,
+			const auto ms = [&](int m) { return fr[m] > 0 ? ns[m] / 1e6 / fr[m] : 0.0; };
+			const auto fps = [&](int m) { return fr[m] / (kAbPhases / kAbModes * static_cast<double>(kAbPhaseLength.count())); };
+			const bool cs = GetModuleHandleW(L"CommunityShaders.dll") != nullptr;
+			logger::info("[Skylight-AB] result: rain/sky map off {:.3f} ms ({:.1f} FPS) | objects only {:.3f} ms ({:.1f} FPS) | objects + groups {:.3f} ms ({:.1f} FPS) | "
+						 "objects drawn {:.0f} / {:.0f} / {:.0f} per frame | Community Shaders {}",
+				ms(0), fps(0), ms(1), fps(1), ms(2), fps(2), fr[0] > 0 ? kept[0] / fr[0] : 0.0, fr[1] > 0 ? kept[1] / fr[1] : 0.0, fr[2] > 0 ? kept[2] / fr[2] : 0.0,
 				cs ? "loaded" : "not loaded");
 			Config::skylightingCulling.enabled = g_abOriginal;
+			Config::subtreePruning.precip = g_abOriginalPrune;
 			g_abRunning.store(false);
 			g_abPhase = -1;
 		}
@@ -153,7 +160,9 @@ namespace EngineTimers
 	{
 		if (g_abStartRequested.exchange(false)) {
 			g_abOriginal = Config::skylightingCulling.enabled;
-			logger::info("[Skylight-AB] start: {} phases of {} s, alternating culling on/off (stand still or walk the same route)", kAbPhases, kAbPhaseLength.count());
+			g_abOriginalPrune = Config::subtreePruning.precip;
+			logger::info("[Skylight-AB] start: {} phases of {} s, rotating off / objects only / objects + groups (stand still or walk the same route)", kAbPhases,
+				kAbPhaseLength.count());
 			g_abRunning.store(true);
 			AbBeginPhase(0);
 			return;

@@ -357,13 +357,13 @@ namespace Menu
 				MenuApi::TextWrapped("%s", T("Needs bEngineProbes = true in SPS.ini [General] and a game restart.",
 												"Braucht bEngineProbes = true in SPS.ini [General] und einen Neustart des Spiels."));
 			} else if (EngineTimers::SkylightABRunning()) {
-				MenuApi::TextWrapped("%s", T("Measurement running (2 min) - close the menu and stand still or walk the same route.",
-												"Messung läuft (2 min) - Menü schließen und stehen bleiben oder dieselbe Strecke laufen."));
-			} else if (MenuApi::Button(T("Measure skylighting culling (2 min)##sky", "Himmelslicht-Culling messen (2 min)##sky"))) {
+				MenuApi::TextWrapped("%s", T("Measurement running (2.5 min) - close the menu and stand still or walk the same route.",
+												"Messung läuft (2,5 min) - Menü schließen und stehen bleiben oder dieselbe Strecke laufen."));
+			} else if (MenuApi::Button(T("Measure skylighting culling (2.5 min)##sky", "Himmelslicht-Culling messen (2,5 min)##sky"))) {
 				EngineTimers::StartSkylightAB();
 			}
-			Tip(T("Switches skylighting culling on and off every 15 s and writes the time of the rain/sky map with and without it to SPS.log ([Skylight-AB]).",
-				"Schaltet das Himmelslicht-Culling alle 15 s an und aus und schreibt die Zeit der Regen-/Himmelskarte mit und ohne in SPS.log ([Skylight-AB])."));
+			Tip(T("Rotates every 15 s between off, single objects only and single objects plus whole groups, and writes the time of the rain/sky map for each to SPS.log ([Skylight-AB]).",
+				"Wechselt alle 15 s zwischen aus, nur einzelnen Objekten und einzelnen Objekten plus ganzen Gruppen und schreibt die Zeit der Regen-/Himmelskarte je Variante in SPS.log ([Skylight-AB])."));
 
 			MenuApi::SeparatorText(T("Hiding occluded objects (diagnostics)", "Verdeckte Objekte weglassen (Diagnose)"));
 			AtomicToggle(T("Measure hidden objects##occ", "Verdeckte Objekte messen##occ"), Config::occlusionProbe,

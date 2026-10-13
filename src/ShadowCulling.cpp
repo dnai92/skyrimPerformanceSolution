@@ -1089,9 +1089,10 @@ namespace ShadowCulling
 			return sky && sky->precip ? sky->precip->occlusionData.camera.get() : nullptr;
 		}
 
-		// true = Knoten samt Inhalt ueberspringen
-		bool ShouldPrune(RE::BSCullingProcess* a_this, RE::NiAVObject* a_obj, bool a_parabolic) noexcept
+		// true = Knoten samt Inhalt ueberspringen; a_sun = Sonnen-Durchlauf (dort gelten Figuren-/Skinning-Ausnahmen)
+		bool ShouldPrune(RE::BSCullingProcess* a_this, RE::NiAVObject* a_obj, bool a_parabolic, bool& a_sun) noexcept
 		{
+			a_sun = false;
 			if (!a_obj || !Config::subtreePruning.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
 				return false;
 			}
@@ -1127,11 +1128,13 @@ namespace ShadowCulling
 				}
 				if (ShadowOutsideView(bound)) {
 					Stats::Count(Stats::Counter::PrunedSunView);
+					a_sun = true;
 					return true;
 				}
 				if (sp.sun && g_sunCullAllowed.load(std::memory_order_relaxed) &&
 					ShouldCullBound(Config::shadowCulling, bound, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
 					Stats::Count(Stats::Counter::PrunedSun);
+					a_sun = true;
 					return true;
 				}
 				return false;
@@ -1189,7 +1192,10 @@ namespace ShadowCulling
 		{
 			static void thunk(RE::BSCullingProcess* a_this, RE::NiAVObject* a_obj, std::uint32_t a_arg)
 			{
-				if (ShouldPrune(a_this, a_obj, Parabolic) && !BelongsToActorNode(a_obj) && !ContainsSkinnedOrActor(a_obj)) {
+				// Teilbaum-Pruefung nur im Sonnen-Durchlauf: die Einzel-Regeln fuer Regen/Himmel und Punktlicht kennen keine
+				// Skinning-Ausnahme, und die Pruefung kostete im Regen-/Himmels-Durchlauf messbar Zeit (A/B 1.0.56)
+				bool sun = false;
+				if (ShouldPrune(a_this, a_obj, Parabolic, sun) && !BelongsToActorNode(a_obj) && !(sun && ContainsSkinnedOrActor(a_obj))) {
 					return;
 				}
 				func(a_this, a_obj, a_arg);
