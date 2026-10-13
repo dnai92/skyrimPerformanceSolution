@@ -1308,7 +1308,10 @@ namespace TextureStream
 			// Budget-Modus: nur so viel gleichzeitig neu laden, wie bis zum Puffer passt (laufende und gerade fertige
 			// Auftraege mitgezaehlt). 1.0.50: Obergrenze 1K -> unbegrenzt lud 817 Texturen (8,4 GB) in einer Minute,
 			// VRAM 104 %, 1,8 GB ausgelagert. Bis 128 MB laufen immer, damit nahe Texturen auch bei Knappheit nachkommen.
-			if (Active() && Config::textureStream.budgetMode && g_inflightUp >= 128ull * 1048576 && a_priority < 4.0f) {
+			// Sehr nahe (Bedarf >= 4x aktuell) duerfen bis 256 MB statt 128 MB gleichzeitig laufen - nicht unbegrenzt: nach Ladebildschirmen
+			// sind viele nahe Texturen verkleinert, 1.0.56 lud dann 3,9 GB in einer Minute bei 93 % VRAM (ausgelagert stieg)
+			const std::uint64_t cap = (a_priority >= 4.0f ? 256ull : 128ull) * 1048576;
+			if (Active() && Config::textureStream.budgetMode && g_inflightUp >= cap) {
 				if (const double freeMB = FreeMB(); freeMB >= 0.0 &&
 					(freeMB - Config::textureStream.reserveMB) * 1048576.0 - static_cast<double>(g_inflightUp) < static_cast<double>(job.extraBytes)) {
 					return;
