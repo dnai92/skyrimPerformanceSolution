@@ -37,6 +37,9 @@ namespace TextureStream
 	// Welt wird abgebaut (Hauptmenue, Spielstand laden, neues Spiel): alle eigenen Verweise auf Szenenknoten und
 	// Texturen sofort freigeben. Sonst wurden sie erst nach dem neuen Laden freigegeben und zerstoerten sich gegen die
 	// bereits abgebaute Textur-Verwaltung -> Heap-Beschaedigung (Absturz 0.19.0 beim Laden aus dem Hauptmenue). Main-Thread.
+	// Ladebildschirm geschlossen: gehaltene Texturverweise freigeben (laufende Auftraege ausgenommen)
+	void ReleaseHolds();
+
 	void Reset(const char* a_reason);
 
 	// Diagnose: Texturen der Objekte unter dem Fadenkreuz beim naechsten Frame ins Log schreiben

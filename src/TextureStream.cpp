@@ -2096,6 +2096,25 @@ namespace TextureStream
 			if (!ui) {
 				return;
 			}
+			// Ladebildschirm: das 3D-Modell (MistMenu) teilt Texturdateien mit Figuren/Objekten der Welt - verkleinert wegen
+			// eines fernen Objekts zeigte es z. B. fast schwarze Baerte (Test 13.10.). Wie im Inventar: alle seine Texturen voll.
+			if (ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME)) {
+				if (const auto mist = ui->GetMenu<RE::MistMenu>()) {
+					if (const auto& model = mist->GetRuntimeData().loadScreenModel) {
+						std::vector<RE::NiPointer<RE::NiAVObject>> stack;
+						stack.emplace_back(model.get());
+						std::uint32_t guard = 0;
+						while (!stack.empty() && ++guard < 20000) {
+							const auto obj = std::move(stack.back());
+							stack.pop_back();
+							if (obj) {
+								Visit(obj.get(), stack, 1.0e6f);
+							}
+						}
+					}
+				}
+				return;
+			}
 			static constexpr std::array kPreviewMenus{ RE::InventoryMenu::MENU_NAME, RE::ContainerMenu::MENU_NAME, RE::BarterMenu::MENU_NAME,
 				RE::GiftMenu::MENU_NAME, RE::CraftingMenu::MENU_NAME, RE::MagicMenu::MENU_NAME };
 			if (std::ranges::none_of(kPreviewMenus, [&](const auto& a_name) { return ui->IsMenuOpen(a_name); })) {
@@ -2319,6 +2338,17 @@ namespace TextureStream
 				g_missSamples.clear();
 			}
 			g_stats = {};
+		}
+	}
+
+	void ReleaseHolds()
+	{
+		// Nach dem Ladebildschirm: Verweise aus der Ladebildschirm-Vorschau nicht bis zum naechsten Durchlauf halten
+		std::scoped_lock state(g_stateLock);
+		for (auto& [r, st] : g_tex) {
+			if (st.hold && !st.busy) {
+				st.hold.reset();
+			}
 		}
 	}
 

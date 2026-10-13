@@ -179,6 +179,9 @@ namespace Hooks
 					LightShadowCache::Reset();
 					Occlusion::Reset();
 				}
+				if (a_event && !a_event->opening && a_event->menuName == RE::LoadingMenu::MENU_NAME) {
+					TextureStream::ReleaseHolds();
+				}
 				if (TracyIsConnected && a_event) {
 					const auto msg = std::format("Menue {}: {}", a_event->opening ? "auf" : "zu", a_event->menuName.c_str());
 					TracyMessage(msg.data(), msg.size());
