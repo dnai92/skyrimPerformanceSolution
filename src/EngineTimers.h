@@ -18,5 +18,6 @@ namespace EngineTimers
 	// A/B-Messung der Beta-Funktionen (Debug-Seite, ohne Entwickler-Schalter): 12 Abschnitte a 15 s reihum
 	// aus / nur Verdeckung / nur Schatten-Cache / beide, je Abschnitt Frame-Zeit und NPC-Updates
 	void StartBetaAB() noexcept;
+	void StartFarAB() noexcept;  // 8 Abschnitte a 15 s: Cache der fernen Kaskade aus / an
 	bool BetaABRunning() noexcept;
 }

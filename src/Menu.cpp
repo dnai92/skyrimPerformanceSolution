@@ -297,6 +297,9 @@ namespace Menu
 			Toggle(T("Calmer far shadows (BETA)", "Ruhigere ferne Schatten (BETA)"), Config::stableCascade.enabled,
 				T("Holds the far sun shadow cascade still instead of realigning it every frame, so far shadows shimmer less when you move. They follow the sun in tiny steps. No performance gain.",
 					"Hält die ferne Sonnenschatten-Kaskade ruhig, statt sie jedes Frame neu auszurichten, ferne Schatten flimmern beim Bewegen weniger. Sie folgen der Sonne in kleinen Schritten. Kein Leistungsgewinn."));
+			Toggle(T("Far shadow cache (BETA)", "Ferne Sonnenschatten zwischenspeichern (BETA)"), Config::farShadowCache.enabled,
+				T("The far sun shadow cascade is held still and its static objects (houses, rocks, trees) are drawn only when the sun or the cascade moves on; in between only characters and moving things are drawn. Saves CPU time outdoors. Switch off if far shadows flicker or are missing.",
+					"Die ferne Sonnenschatten-Kaskade wird ruhig gehalten und ihre unbeweglichen Objekte (Häuser, Felsen, Bäume) werden nur gezeichnet, wenn Sonne oder Kaskade weiterwandern; dazwischen nur Figuren und Bewegliches. Spart draußen Hauptthread-Zeit. Ausschalten, falls ferne Schatten flackern oder fehlen."));
 			AtomicToggle(T("Hide occluded objects (BETA)", "Verdeckte Objekte weglassen (BETA)"), Config::occlusionCull,
 				T("Objects completely hidden behind walls, houses or terrain are not drawn. Fine-tuning on the page Beta.", "Objekte, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Feineinstellung auf der Seite Beta."));
 
@@ -372,6 +375,12 @@ namespace Menu
 			}
 			Tip(T("Rotates every 15 s between both off, only hide occluded objects, only shadow cache and both, and writes frame time and FPS of each to SPS.log ([Beta-AB]). Your settings are restored afterwards.",
 				"Wechselt alle 15 s zwischen beide aus, nur Verdeckung, nur Schatten-Cache und beide und schreibt Frame-Zeit und FPS je Variante in SPS.log ([Beta-AB]). Deine Einstellungen werden danach wiederhergestellt."));
+
+			if (!EngineTimers::BetaABRunning() && MenuApi::Button(T("Measure far shadow cache (2 min)##far", "Fernen Schatten-Cache messen (2 min)##far"))) {
+				EngineTimers::StartFarAB();
+			}
+			Tip(T("Switches the far shadow cache off and on every 15 s and writes frame time and FPS of both to SPS.log ([Beta-AB]). Stand still outdoors in daylight. Your setting is restored afterwards.",
+				"Schaltet den fernen Schatten-Cache alle 15 s aus und an und schreibt Frame-Zeit und FPS beider Varianten in SPS.log ([Beta-AB]). Draußen bei Tageslicht stehen bleiben. Deine Einstellung wird danach wiederhergestellt."));
 
 			MenuApi::SeparatorText(T("Skylighting culling (measurement)", "Himmelslicht-Culling (Messung)"));
 			if (!EngineTimers::PrecipTimerInstalled()) {

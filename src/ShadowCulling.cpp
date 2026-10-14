@@ -5,6 +5,7 @@
 #include "TextureStream.h"
 #include "DetourHelper.h"
 #include "EngineTimers.h"
+#include "FarShadowGpu.h"
 #include "GpuTimer.h"
 #include "LightShadowCache.h"
 #include "Occlusion.h"
@@ -388,6 +389,21 @@ namespace ShadowCulling
 
 		// Kaskaden-Cache (nur Main-Thread schreibt; Culling-Jobs lesen g_cacheSkip)
 		std::atomic<bool> g_cacheSkip{ false };  // dieser Frame: ferne Kaskade(n) nicht neu zeichnen
+
+		// Cache der fernen Kaskade (FarShadowCache). Modus je Frame (Main-Thread setzt in UpdateCamera, Culling-Jobs lesen):
+		// kWait = normal zeichnen, danach vollstaendige Ebene sichern | kBuild = nur Unbewegliche zeichnen, als Cache sichern,
+		// vollstaendige Ebene des Vorframes zuruecklegen | kCached = nur Bewegliche zeichnen, Cache per Tiefentest darueber
+		enum class FarMode : int
+		{
+			kNormal,
+			kWait,
+			kBuild,
+			kCached
+		};
+		constexpr std::uint32_t    kFarCascade = 1;
+		std::atomic<int>           g_farMode{ 0 };
+		std::atomic<std::uint64_t> g_farSkippedStatic{ 0 }, g_farSkippedDynamic{ 0 }, g_farPruned{ 0 };
+		bool                       FarDynamic(const RE::BSGeometry& a_geom) noexcept;  // Figuren, Angehaengtes, Effekte (weiter unten)
 		std::uint32_t     g_cacheCounter = 0;
 		struct CachedCascade
 		{
@@ -914,6 +930,20 @@ namespace ShadowCulling
 						Stats::Count(Stats::Counter::CascadeSkipped);
 						return;  // Kaskade kommt diesen Frame aus dem Cache
 					}
+					if (cascade >= kFarCascade) {
+						const auto fm = static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed));
+						if (fm == FarMode::kBuild || fm == FarMode::kCached) {
+							const bool dyn = FarDynamic(a_visible);
+							if (fm == FarMode::kCached && !dyn) {
+								g_farSkippedStatic.fetch_add(1, std::memory_order_relaxed);
+								return;  // steckt im Cache
+							}
+							if (fm == FarMode::kBuild && dyn) {
+								g_farSkippedDynamic.fetch_add(1, std::memory_order_relaxed);
+								return;  // Cache nur mit Unbeweglichem
+							}
+						}
+					}
 					if (!a_visible.GetGeometryRuntimeData().skinInstance && ShadowOutsideView(a_visible.worldBound)) {
 						Stats::Count(Stats::Counter::SunViewCulled);
 						return;
@@ -1263,6 +1293,12 @@ namespace ShadowCulling
 				if (g_cacheSkip.load(std::memory_order_relaxed) && Config::cascadeCache.skipDraws && cascade >= Config::cascadeCache.cascade) {
 					return false;  // Kaskaden-Cache entscheidet selbst
 				}
+				// Ferne Kaskade aus dem Cache: ganze Gruppen ohne Figuren ueberspringen (Pruefung im Aufrufer)
+				if (cascade >= kFarCascade && static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed)) == FarMode::kCached) {
+					g_farPruned.fetch_add(1, std::memory_order_relaxed);
+					a_sun = true;
+					return true;
+				}
 				if (ShadowOutsideView(bound)) {
 					Stats::Count(Stats::Counter::PrunedSunView);
 					a_sun = true;
@@ -1352,6 +1388,41 @@ namespace ShadowCulling
 				}
 				e = { frame == 0 ? 1u : frame, children, ContainsSkinnedOrActor(a_obj) };
 				return e.result;
+			} catch (...) {
+				return true;
+			}
+		}
+
+		// Bewegliches fuer den Cache der fernen Kaskade: geskinnt, Effekt oder Teil einer Figur. Zugehoerigkeit zu einer Figur
+		// je Mesh zwischengespeichert (Elternkette bis 32 Ebenen, ~1600 Meshes je Frame in der fernen Kaskade)
+		bool FarDynamic(const RE::BSGeometry& a_geom) noexcept
+		{
+			auto& data = const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData();
+			if (data.skinInstance) {
+				return true;
+			}
+			if (const auto prop = data.shaderProperty.get(); prop && netimmerse_cast<RE::BSEffectShaderProperty*>(prop)) {
+				return true;
+			}
+			struct Entry
+			{
+				std::uint32_t frame;
+				bool          actor;
+			};
+			thread_local std::unordered_map<const RE::BSGeometry*, Entry> cache;
+			thread_local std::uint32_t                                   lastClear = 0;
+			const auto                                                   frame = g_pruneFrame.load(std::memory_order_relaxed);
+			if (frame - lastClear > 1200) {
+				cache.clear();
+				lastClear = frame;
+			}
+			try {
+				auto& e = cache[&a_geom];
+				if (e.frame != 0 && frame - e.frame < 120) {
+					return e.actor;
+				}
+				e = { frame == 0 ? 1u : frame, BelongsToActorNode(&a_geom) };
+				return e.actor;
 			} catch (...) {
 				return true;
 			}
@@ -1465,7 +1536,8 @@ namespace ShadowCulling
 		void StabilizeFarCascade(RE::BSShadowDirectionalLight* a_light) noexcept
 		{
 			const auto& cfg = Config::stableCascade;
-			if (!cfg.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+			// Der Cache der fernen Kaskade braucht die ruhige Projektion (auch wenn "Ruhigere ferne Schatten" aus ist)
+			if (!(cfg.enabled || Config::farShadowCache.enabled) || !Config::masterEnabled.load(std::memory_order_relaxed)) {
 				g_stable.valid = false;
 				return;
 			}
@@ -1587,7 +1659,7 @@ namespace ShadowCulling
 			// Mit Kaskaden-Cache: Schattenwerfer fuer den GANZEN gehaltenen Ausschnitt sammeln. Die Engine cullt sonst mit
 			// einer engen Huelle um den aktuellen Sichtbereich (customCullPlanes) - beim Drehen fehlten im wiederverwendeten
 			// Frame Schatten am Rand. Ohne die Huelle gelten die Ebenen der Kamera, also unser Ausschnitt.
-			if (Config::cascadeCache.enabled && desc.cullingProcess) {
+			if ((Config::cascadeCache.enabled || Config::farShadowCache.enabled) && desc.cullingProcess) {
 				desc.cullingProcess->doCustomCullPlanes = false;
 			}
 
@@ -1601,12 +1673,185 @@ namespace ShadowCulling
 		}
 	}
 
+	namespace
+	{
+		// ---------------- Cache der fernen Kaskade ----------------
+		struct FarState
+		{
+			bool                                  valid = false;     // Cache passt zur Projektion "build"
+			bool                                  prebuilt = false;  // vollstaendige Ebene des Vorframes gesichert
+			bool                                  gpuInit = false, gpuFailed = false;
+			Projection                            build{}, wait{};
+			RE::RENDER_TARGET_DEPTHSTENCIL        target{};
+			std::uint32_t                         slice = 0;
+			std::uint32_t                         lastFrame = 0;
+			FarMode                               last = FarMode::kNormal;
+			std::uint64_t                         frames = 0, cached = 0, builds = 0, waits = 0, normal = 0, mergeFail = 0;
+			std::chrono::steady_clock::time_point lastLog = std::chrono::steady_clock::now();
+		};
+		FarState g_far{};
+
+		bool SameProjection(const Projection& a_a, const Projection& a_b) noexcept
+		{
+			return MaxAbsDiff(&a_a.worldToCam[0][0], &a_b.worldToCam[0][0], 16) <= 1e-4f && MaxAbsDiff(&a_a.frustum.fLeft, &a_b.frustum.fLeft, 6) <= 1e-4f;
+		}
+
+		void FarDecide(RE::BSShadowDirectionalLight* a_light) noexcept
+		{
+			auto&       f = g_far;
+			const auto  frame = g_pruneFrame.load(std::memory_order_relaxed);
+			FarMode     mode = FarMode::kNormal;
+			const auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
+			const bool  on = Config::farShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && g_stable.valid && kFarCascade < descs.size();
+			if (on && !f.gpuInit) {
+				f.gpuInit = true;
+				char       err[256]{};
+				const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
+				if (!renderer || !FarShadowGpu::Init(renderer->GetRuntimeData().forwarder, err, sizeof(err))) {
+					f.gpuFailed = true;
+					logger::warn("[FarShadowCache] could not be started: {} - switched off", err);
+				} else {
+					logger::info("[FarShadowCache] ready");
+				}
+			}
+			const auto cam = on ? descs[kFarCascade].camera.get() : nullptr;
+			if (on && !f.gpuFailed && cam) {
+				const auto& d = descs[kFarCascade];
+				Projection  cur{};
+				std::memcpy(cur.worldToCam, cam->GetRuntimeData().worldToCam, sizeof(cur.worldToCam));
+				cur.frustum = cam->GetRuntimeData2().viewFrustum;
+				// Luecke (Innenraum, Menue, Ladebildschirm) oder anderes Ziel: Inhalt unbrauchbar
+				if (frame - f.lastFrame > 2 || d.renderTarget != f.target || d.shadowmapIndex != f.slice) {
+					f.valid = false;
+					f.prebuilt = false;
+				}
+				f.target = d.renderTarget;
+				f.slice = d.shadowmapIndex;
+				if (f.valid && SameProjection(cur, f.build)) {
+					mode = FarMode::kCached;
+				} else {
+					f.valid = false;
+					if (f.last == FarMode::kWait && f.prebuilt && SameProjection(cur, f.wait)) {
+						mode = FarMode::kBuild;
+						f.build = cur;
+					} else {
+						mode = FarMode::kWait;
+						f.wait = cur;
+						f.prebuilt = false;
+					}
+				}
+			} else {
+				f.valid = false;
+				f.prebuilt = false;
+			}
+			f.lastFrame = frame;
+			f.last = mode;
+			g_farMode.store(static_cast<int>(mode), std::memory_order_relaxed);
+		}
+
+		void FarLog() noexcept
+		{
+			auto& f = g_far;
+			if (std::chrono::steady_clock::now() - f.lastLog < std::chrono::seconds(60) || f.frames == 0) {
+				return;
+			}
+			f.lastLog = std::chrono::steady_clock::now();
+			const double n = static_cast<double>(f.frames);
+			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
+			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: static skipped {:.0f}, groups skipped {:.0f} | merge failed {} | depth test {}",
+				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
+				static_cast<double>(g_farPruned.exchange(0)) / c, f.mergeFail, FarShadowGpu::DepthFuncKnown() ? "learned" : "default");
+			g_farSkippedDynamic.store(0);
+			f.frames = f.cached = f.builds = f.waits = f.normal = f.mergeFail = 0;
+		}
+
+		void FarAfterRender() noexcept
+		{
+			if (!Config::farShadowCache.enabled) {
+				return;
+			}
+			auto&      f = g_far;
+			const auto mode = static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed));
+			++f.frames;
+			const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
+			const auto ctx = renderer ? renderer->GetRuntimeData().context : nullptr;
+			if (mode == FarMode::kNormal || !ctx) {
+				++f.normal;
+				FarLog();
+				return;
+			}
+			auto&               depth = renderer->GetDepthStencilData().depthStencils;
+			const std::uint32_t idx[2]{ static_cast<std::uint32_t>(f.target), static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kVOLUMETRIC_LIGHTING_SHADOWMAPS_ESRAM) };
+			bool                mainOk = false;
+			for (std::uint32_t t = 0; t < 2; ++t) {
+				if (idx[t] >= static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kTOTAL)) {
+					continue;
+				}
+				auto&      ds = depth[idx[t]];
+				const auto tex = ds.texture;
+				if (!tex) {
+					continue;
+				}
+				REX::W32::D3D11_TEXTURE2D_DESC desc{};
+				tex->GetDesc(&desc);
+				if (f.slice >= desc.arraySize) {
+					continue;
+				}
+				bool recreated = false;
+				if (!FarShadowGpu::Ensure(t, tex, recreated)) {
+					continue;
+				}
+				if (recreated && mode != FarMode::kWait) {
+					f.valid = f.prebuilt = false;  // neue Kopie ist leer
+					continue;
+				}
+				switch (mode) {
+				case FarMode::kWait:
+					FarShadowGpu::Save(ctx, t, FarShadowGpu::kPrev, tex, f.slice);
+					break;
+				case FarMode::kBuild:
+					FarShadowGpu::Save(ctx, t, FarShadowGpu::kStatic, tex, f.slice);
+					FarShadowGpu::Restore(ctx, t, FarShadowGpu::kPrev, tex, f.slice);  // sichtbar: vollstaendige Ebene des Vorframes
+					break;
+				case FarMode::kCached:
+					if (f.slice >= 8 || !ds.views[f.slice] || !FarShadowGpu::Merge(ctx, t, FarShadowGpu::kStatic, ds.views[f.slice])) {
+						FarShadowGpu::Restore(ctx, t, FarShadowGpu::kStatic, tex, f.slice);  // ohne Ebenen-Sicht: wenigstens das Unbewegliche
+						++f.mergeFail;
+					}
+					break;
+				default:
+					break;
+				}
+				if (t == 0) {
+					mainOk = true;
+				}
+			}
+			switch (mode) {
+			case FarMode::kWait:
+				f.prebuilt = mainOk;
+				++f.waits;
+				break;
+			case FarMode::kBuild:
+				f.valid = mainOk;
+				++f.builds;
+				break;
+			case FarMode::kCached:
+				++f.cached;
+				break;
+			default:
+				break;
+			}
+			FarLog();
+		}
+	}
+
 	void AfterSunUpdateCamera(RE::BSShadowDirectionalLight* a_light) noexcept
 	{
 		if (!a_light) {
 			return;
 		}
 		StabilizeFarCascade(a_light);
+		FarDecide(a_light);
 		const auto& cfg = Config::cascadeCache;
 		auto&       descs = a_light->GetRuntimeData().shadowmapDescriptors;
 		bool        same = g_projReferenceValid;
@@ -1641,6 +1886,7 @@ namespace ShadowCulling
 	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept
 	{
 		UpdateViewPlanes(a_light);
+		g_farMode.store(static_cast<int>(FarMode::kNormal), std::memory_order_relaxed);  // UpdateCamera entscheidet neu
 		const auto& cfg = Config::cascadeCache;
 		// Kamera-Stand der Engine aus dem letzten Cache-Frame zuruecklegen (auch wenn der Cache inzwischen aus ist)
 		if (a_light) {
@@ -1660,7 +1906,7 @@ namespace ShadowCulling
 			}
 		}
 		bool        skip = false;
-		if (cfg.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && cfg.interval > 1 && a_light) {
+		if (cfg.enabled && !Config::farShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && cfg.interval > 1 && a_light) {
 			const auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
 			skip = (++g_cacheCounter % cfg.interval) != 0 && cfg.cascade < descs.size();
 			// Nur ueberspringen, wenn eine Sicherung und fuer alle betroffenen Kaskaden ein gueltiger Stand vorliegt
@@ -1754,6 +2000,7 @@ namespace ShadowCulling
 		if (g_cacheLight && g_cascadeDump.load(std::memory_order_relaxed) > 0) {
 			DumpCascades(g_cacheLight);
 		}
+		FarAfterRender();
 		const auto& cfg = Config::cascadeCache;
 		// clearRenderTarget der Engine zuruecksetzen (auch wenn der Cache inzwischen abgeschaltet wurde)
 		if (g_cacheLight) {

@@ -1,0 +1,41 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+
+// Cache der fernen Sonnenkaskade, GPU-Teil (eigene Uebersetzungseinheit ohne CommonLib-PCH, da <d3d11.h>).
+// Je Schattenkarten-Ziel (Sonne, Volumetric Lighting von Community Shaders) zwei eigene Kopien einer Ebene:
+// "prev" = vollstaendige Karte des Vorframes (Aufbau ohne Blinken), "static" = nur unbewegliche Schattenwerfer.
+// Im Cache-Frame zeichnet die Engine nur Bewegliches; danach wird "static" per Tiefentest darueber gelegt
+// (naeherer Wert gewinnt - wie beim normalen Zeichnen in die Schattenkarte).
+namespace FarShadowGpu
+{
+	enum Slot : std::uint32_t
+	{
+		kPrev = 0,
+		kStatic = 1
+	};
+
+	// Einmalig (Main-Thread). false + Fehlertext bei Problemen.
+	bool Init(void* a_device, char* a_error, std::size_t a_errorSize) noexcept;
+	bool Ready() noexcept;
+
+	// Eigene Kopien fuer Ziel a_target (0 = Sonne, 1 = Volumetric) passend zu a_texture anlegen. true = vorhanden;
+	// a_recreated = neu angelegt (Inhalt ungueltig).
+	bool Ensure(std::uint32_t a_target, void* a_texture, bool& a_recreated) noexcept;
+
+	// Ebene a_slice (Mip 0) von a_texture in Kopie a_slot sichern bzw. aus ihr zuruecklegen (ganze Ebene).
+	void Save(void* a_context, std::uint32_t a_target, std::uint32_t a_slot, void* a_texture, std::uint32_t a_slice) noexcept;
+	void Restore(void* a_context, std::uint32_t a_target, std::uint32_t a_slot, void* a_texture, std::uint32_t a_slice) noexcept;
+
+	// Kopie a_slot per Tiefentest in die Ebene (Depth-Stencil-View a_dsv) zeichnen. Stellt den Zustand wieder her.
+	bool Merge(void* a_context, std::uint32_t a_target, std::uint32_t a_slot, void* a_dsv) noexcept;
+
+	// Vergleichsfunktion der Engine fuer Schattenkarten aus dem gerade gesetzten Tiefenzustand lernen (einmalig,
+	// waehrend des Sonnen-Zeichnens). Unbekannt = LESS_EQUAL (Standard-Tiefe).
+	bool DepthFuncKnown() noexcept;
+	void NoteDepthState(void* a_context) noexcept;
+
+	// Alles freigeben (Ladebildschirm / Funktion aus)
+	void Reset() noexcept;
+}

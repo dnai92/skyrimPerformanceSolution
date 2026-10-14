@@ -97,6 +97,7 @@ namespace Config
 			f("TextureStream", "fMaxEdge", textureStream.maxEdge);
 			b("TextureStream", "bStreamClothing", textureStream.streamClothing);
 			b("LightShadowCache", "bEnabled", lightShadowCache.enabled);
+			b("FarShadowCache", "bEnabled", farShadowCache.enabled);
 			b("Occlusion", "bCull", occlusionCull.load());
 			f("Occlusion", "fPauseTurnDeg", occlTurnDeg.load());
 			f("Occlusion", "fPauseMove", occlMoveUnits.load());
@@ -365,7 +366,9 @@ namespace Config
 
 		lightShadowCache.enabled = ini.GetBoolValue("LightShadowCache", "bEnabled", lightShadowCache.enabled);
 		lightShadowCache.debugMode = static_cast<float>(ini.GetDoubleValue("LightShadowCache", "iDebugMode", lightShadowCache.debugMode));
-		logger::info("LightShadowCache (test): {}", lightShadowCache.enabled ? "ON" : "OFF");
+		logger::info("LightShadowCache: {}", lightShadowCache.enabled ? "ON" : "OFF");
+		farShadowCache.enabled = ini.GetBoolValue("FarShadowCache", "bEnabled", farShadowCache.enabled);
+		logger::info("FarShadowCache (beta): {}", farShadowCache.enabled ? "ON" : "OFF");
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);

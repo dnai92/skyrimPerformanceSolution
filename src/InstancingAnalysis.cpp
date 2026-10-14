@@ -3,6 +3,7 @@
 
 #include "Config.h"
 #include "DetourHelper.h"
+#include "FarShadowGpu.h"
 #include "GpuTimer.h"
 #include "InstancedDraw.h"
 #include "LightShadowCache.h"
@@ -614,6 +615,10 @@ namespace InstancingAnalysis
 				t_callSite = Site;
 				func(a_pass, a_technique, a_alphaTest, a_renderFlags);
 				t_callSite = prev;
+				// Tiefentest der Sonnen-Schattenkarten einmal lernen (Cache der fernen Kaskade legt seinen Stand damit darueber)
+				if (Config::farShadowCache.enabled && !FarShadowGpu::DepthFuncKnown() && g_inSunShadows.load(std::memory_order_relaxed)) {
+					FarShadowGpu::NoteDepthState(D3DContext());
+				}
 				if (first) {
 					// Zustand des ersten normal gezeichneten Meshes merken (Pixel-Shader, Kamera, Raster-/Tiefenzustand)
 					InstancedDraw::CaptureState(D3DContext());

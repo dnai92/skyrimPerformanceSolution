@@ -191,6 +191,10 @@ namespace EngineTimers
 	{
 		constexpr int  kBetaModes = 4;
 		constexpr int  kBetaPhases = 12;
+		int            g_betaSet = 0;  // 0 = Verdeckung/Schatten-Cache, 1 = Cache der fernen Kaskade
+		bool           g_betaOrigFar = false;
+		int            Modes() noexcept { return g_betaSet == 1 ? 2 : kBetaModes; }
+		int            Phases() noexcept { return g_betaSet == 1 ? 8 : kBetaPhases; }
 		constexpr auto kBetaPhaseLength = std::chrono::seconds(15);
 		struct BetaPhase
 		{
@@ -204,13 +208,19 @@ namespace EngineTimers
 		std::atomic<bool>                       g_betaStart{ false }, g_betaRunning{ false };
 		std::chrono::steady_clock::time_point   g_betaPhaseStart{}, g_betaLastFrame{};
 		constexpr const char*                   kBetaNames[] = { "betas off", "occlusion only", "shadow cache only", "both" };
+		constexpr const char*                   kFarNames[] = { "far cache off", "far cache on" };
+		const char*                             ModeName(int a_mode) noexcept { return g_betaSet == 1 ? kFarNames[a_mode] : kBetaNames[a_mode]; }
 
 		void BetaBegin(int a_phase)
 		{
 			g_betaPhase = a_phase;
-			const int mode = a_phase % kBetaModes;
-			Config::occlusionCull.store(mode == 1 || mode == 3);
-			Config::lightShadowCache.enabled = mode == 2 || mode == 3;
+			const int mode = a_phase % Modes();
+			if (g_betaSet == 1) {
+				Config::farShadowCache.enabled = mode == 1;
+			} else {
+				Config::occlusionCull.store(mode == 1 || mode == 3);
+				Config::lightShadowCache.enabled = mode == 2 || mode == 3;
+			}
 			g_betaPhases[a_phase] = BetaPhase{ mode };
 			g_betaPhaseStart = std::chrono::steady_clock::now();
 		}
@@ -219,26 +229,28 @@ namespace EngineTimers
 		{
 			const auto& p = g_betaPhases[g_betaPhase];
 			const double f = p.frames ? static_cast<double>(p.frames) : 1.0;
-			logger::info("[Beta-AB] phase {} {}: {} frames | frame avg {:.2f} ms ({:.1f} FPS) | NPC updates/frame {:.1f}", g_betaPhase + 1, kBetaNames[p.mode], p.frames,
+			logger::info("[Beta-AB] phase {} {}: {} frames | frame avg {:.2f} ms ({:.1f} FPS) | NPC updates/frame {:.1f}", g_betaPhase + 1, ModeName(p.mode), p.frames,
 				p.ms / f, p.ms > 0 ? 1000.0 * f / p.ms : 0.0, p.npc / f);
 		}
 
 		void BetaFinish()
 		{
 			std::array<double, kBetaModes> ms{}, fr{}, npc{};
-			for (const auto& p : g_betaPhases) {
+			for (int i = 0; i < Phases(); ++i) {
+				const auto& p = g_betaPhases[i];
 				ms[p.mode] += p.ms;
 				fr[p.mode] += static_cast<double>(p.frames);
 				npc[p.mode] += p.npc;
 			}
 			std::string line;
-			for (int m = 0; m < kBetaModes; ++m) {
-				line += std::format("{}{} {:.2f} ms ({:.1f} FPS, NPC {:.1f})", m ? " | " : "", kBetaNames[m], fr[m] > 0 ? ms[m] / fr[m] : 0.0, ms[m] > 0 ? 1000.0 * fr[m] / ms[m] : 0.0,
+			for (int m = 0; m < Modes(); ++m) {
+				line += std::format("{}{} {:.2f} ms ({:.1f} FPS, NPC {:.1f})", m ? " | " : "", ModeName(m), fr[m] > 0 ? ms[m] / fr[m] : 0.0, ms[m] > 0 ? 1000.0 * fr[m] / ms[m] : 0.0,
 					fr[m] > 0 ? npc[m] / fr[m] : 0.0);
 			}
 			logger::info("[Beta-AB] result: {}", line);
 			Config::occlusionCull.store(g_betaOrigOcc);
 			Config::lightShadowCache.enabled = g_betaOrigCache;
+			Config::farShadowCache.enabled = g_betaOrigFar;
 			g_betaRunning.store(false);
 			g_betaPhase = -1;
 		}
@@ -249,8 +261,9 @@ namespace EngineTimers
 			if (g_betaStart.exchange(false)) {
 				g_betaOrigOcc = Config::occlusionCull.load();
 				g_betaOrigCache = Config::lightShadowCache.enabled;
-				logger::info("[Beta-AB] start: {} phases of {} s, rotating betas off / occlusion only / shadow cache only / both (stand still or walk the same route)",
-					kBetaPhases, kBetaPhaseLength.count());
+				g_betaOrigFar = Config::farShadowCache.enabled;
+				logger::info("[Beta-AB] start: {} phases of {} s, rotating {} (stand still or walk the same route)", Phases(), kBetaPhaseLength.count(),
+					g_betaSet == 1 ? "far cache off / on" : "betas off / occlusion only / shadow cache only / both");
 				g_betaRunning.store(true);
 				BetaBegin(0);
 				g_betaLastFrame = now;
@@ -270,7 +283,7 @@ namespace EngineTimers
 			}
 			if (now - g_betaPhaseStart >= kBetaPhaseLength) {
 				BetaEnd();
-				if (g_betaPhase + 1 < kBetaPhases) {
+				if (g_betaPhase + 1 < Phases()) {
 					BetaBegin(g_betaPhase + 1);
 				} else {
 					BetaFinish();
@@ -282,6 +295,15 @@ namespace EngineTimers
 	void StartBetaAB() noexcept
 	{
 		if (!BetaABRunning()) {
+			g_betaSet = 0;
+			g_betaStart.store(true);
+		}
+	}
+
+	void StartFarAB() noexcept
+	{
+		if (!BetaABRunning()) {
+			g_betaSet = 1;
 			g_betaStart.store(true);
 		}
 	}

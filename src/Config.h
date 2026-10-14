@@ -102,6 +102,14 @@ namespace Config
 	};
 	inline StableCascade stableCascade;  // [ShadowStableCascade]
 
+	// Cache der fernen Sonnenkaskade (Beta): ruhige Projektion (wie stableCascade), unbewegliche Schattenwerfer der
+	// fernen Kaskade einmal je Ausrichtung zeichnen und zwischenspeichern, sonst nur Figuren/Bewegliches
+	struct FarShadowCache
+	{
+		bool enabled = false;  // Standard AUS (BETA)
+	};
+	inline FarShadowCache farShadowCache;  // [FarShadowCache]
+
 	// Instancing der Sonnenschatten (Schritt 2): gleiche einfache Meshes eines Batches in einem Draw Call
 	struct ShadowInstancing
 	{
