@@ -272,9 +272,6 @@ namespace Menu
 				T("Small, far objects do not cast shadows from torches and fires.", "Kleine, ferne Objekte werfen keinen Schatten von Fackeln und Feuern."));
 			Toggle(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"), Config::actorShadowCulling.enabled,
 				T("Characters far away do not cast shadows.", "Weit entfernte Figuren werfen keinen Schatten."));
-			Toggle(T("Small character parts cast no shadow (BETA)", "Kleine Figurenteile ohne Schatten (BETA)"), Config::actorPartShadowCulling.enabled,
-				T("Rings, earrings, eyes, teeth and small armor parts of characters a few meters away cast no shadow (invisible at that distance). Saves draw calls in crowded places. Anniversary Edition only.",
-					"Ringe, Ohrringe, Augen, Zähne und kleine Rüstungsteile von Figuren werfen ab wenigen Metern keinen Schatten (dort nicht zu sehen). Spart Draw Calls an vollen Orten. Nur Anniversary Edition."));
 			Toggle(T("Skylighting culling (Community Shaders)", "Himmelslicht: kleine Objekte weglassen (Community Shaders)"), Config::skylightingCulling.enabled,
 				T("Small objects are left out of the skylighting occlusion map.", "Kleine Objekte werden in der Himmelslicht-Karte weggelassen."));
 			Toggle(T("Decal culling", "Ferne Bodendetails weglassen"), Config::decalCulling.enabled,
@@ -296,6 +293,9 @@ namespace Menu
 			MenuApi::TextWrapped("%s", T("These work, but not perfectly on every setup yet. Switch off again if something looks wrong.", "Diese funktionieren, aber noch nicht auf jedem System perfekt. Bei Bildfehlern wieder ausschalten."));
 			Toggle(T("Shadow instancing (BETA)", "Gleiche Schatten bündeln (BETA)"), Config::shadowInstancing.enabled,
 				T("Draws identical simple meshes in sun shadows with one draw call. Small gain. Takes effect after restarting the game. Switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn. Wirkt erst nach einem Neustart des Spiels. Bei flackernden Schatten oder Objekten wieder ausschalten."));
+			Toggle(T("Small character parts cast no shadow (BETA)", "Kleine Figurenteile ohne Schatten (BETA)"), Config::actorPartShadowCulling.enabled,
+				T("Rings, earrings, eyes, teeth and small armor parts of characters a few meters away cast no shadow (invisible at that distance). Saves draw calls in crowded places. Anniversary Edition only.",
+					"Ringe, Ohrringe, Augen, Zähne und kleine Rüstungsteile von Figuren werfen ab wenigen Metern keinen Schatten (dort nicht zu sehen). Spart Draw Calls an vollen Orten. Nur Anniversary Edition."));
 			Toggle(T("Main view micro culling (BETA)", "Winzige Objekte im Bild weglassen (BETA)"), Config::mainViewCulling.enabled,
 				T("Tiny far objects are not drawn at all. They can pop in.", "Winzige ferne Objekte werden gar nicht gezeichnet. Sie können aufploppen."));
 			Toggle(T("Far shadow cache (BETA)", "Ferne Sonnenschatten zwischenspeichern (BETA)"), Config::farShadowCache.enabled,
