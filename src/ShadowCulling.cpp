@@ -1681,6 +1681,7 @@ namespace ShadowCulling
 			bool                                  valid = false;     // Cache passt zur Projektion "build"
 			bool                                  prebuilt = false;  // vollstaendige Ebene des Vorframes gesichert
 			bool                                  gpuInit = false, gpuFailed = false;
+			bool                                  decided = false;   // fuer lastFrame schon entschieden
 			Projection                            build{}, wait{};
 			RE::RENDER_TARGET_DEPTHSTENCIL        target{};
 			std::uint32_t                         slice = 0;
@@ -1700,6 +1701,10 @@ namespace ShadowCulling
 		{
 			auto&       f = g_far;
 			const auto  frame = g_pruneFrame.load(std::memory_order_relaxed);
+			if (frame == f.lastFrame && f.decided) {
+				return;  // je Frame nur einmal entscheiden (falls UpdateCamera mehrfach laeuft)
+			}
+			f.decided = true;
 			FarMode     mode = FarMode::kNormal;
 			const auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
 			const bool  on = Config::farShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && g_stable.valid && kFarCascade < descs.size();
@@ -1747,6 +1752,15 @@ namespace ShadowCulling
 			f.lastFrame = frame;
 			f.last = mode;
 			g_farMode.store(static_cast<int>(mode), std::memory_order_relaxed);
+		}
+
+		// UpdateCamera (Entscheidung) laeuft VOR Accumulate. Lief sie in diesem Frame nicht, gilt nichts vom Vorframe
+		// (1.0.59-Test: hier wurde der Modus jedes Frame zurueckgesetzt -> Cache nie aktiv)
+		void FarBeforeAccumulate() noexcept
+		{
+			if (g_far.lastFrame != g_pruneFrame.load(std::memory_order_relaxed)) {
+				g_farMode.store(static_cast<int>(FarMode::kNormal), std::memory_order_relaxed);
+			}
 		}
 
 		void FarLog() noexcept
@@ -1886,7 +1900,7 @@ namespace ShadowCulling
 	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept
 	{
 		UpdateViewPlanes(a_light);
-		g_farMode.store(static_cast<int>(FarMode::kNormal), std::memory_order_relaxed);  // UpdateCamera entscheidet neu
+		FarBeforeAccumulate();
 		const auto& cfg = Config::cascadeCache;
 		// Kamera-Stand der Engine aus dem letzten Cache-Frame zuruecklegen (auch wenn der Cache inzwischen aus ist)
 		if (a_light) {
