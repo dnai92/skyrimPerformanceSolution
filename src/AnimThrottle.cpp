@@ -1,6 +1,7 @@
 #include "AnimThrottle.h"
 
 #include "Config.h"
+#include "Features.h"
 
 namespace AnimThrottle
 {
@@ -142,18 +143,22 @@ namespace AnimThrottle
 			return 1;
 		}
 
-		struct UpdateAnimation
+		// Animationsschritt einer Referenz (AE ID 20123: Graph-Update mit Frame-Zeit). Einziger Aufrufer ist der Job je
+		// Referenz (ID 41453), den die Engine fuer NPCs parallel abarbeitet (Job-Liste, Warten in Main::Update). Die
+		// virtuelle UpdateAnimation (0x7D) nutzt nur der Spieler - dort kam bei NPCs nichts an (Test 1.0.60).
+		struct AnimationStep
 		{
-			static void thunk(RE::Character* a_this, float a_delta)
+			static void thunk(RE::TESObjectREFR* a_ref, float a_delta)
 			{
-				if (!Config::animThrottle.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || !a_this) {
-					func(a_this, a_delta);
+				const auto actor = a_ref && a_ref->GetFormType() == RE::FormType::ActorCharacter ? static_cast<RE::Actor*>(a_ref) : nullptr;
+				if (!Config::animThrottle.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || !actor || actor->IsPlayerRef()) {
+					func(a_ref, a_delta);
 					return;
 				}
-				const auto interval = Interval(a_this);
-				Slot*      s = SlotOf(a_this);
+				const auto interval = Interval(actor);
+				Slot*      s = SlotOf(actor);
 				if (!s) {
-					func(a_this, a_delta);
+					func(a_ref, a_delta);
 					g_updated.fetch_add(1, std::memory_order_relaxed);
 					return;
 				}
@@ -164,7 +169,7 @@ namespace AnimThrottle
 				}
 				const float delta = s->collected;
 				s->collected = 0.0f;
-				func(a_this, delta);
+				func(a_ref, delta);
 				g_updated.fetch_add(1, std::memory_order_relaxed);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -173,9 +178,17 @@ namespace AnimThrottle
 
 	void Install()
 	{
-		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_Character[0] };
-		UpdateAnimation::func = vtbl.write_vfunc(0x7D, UpdateAnimation::thunk);
-		logger::info("Hook installed: Character::UpdateAnimation (vfunc 0x7D) - animation throttle (developer test)");
+		if (!REL::Module::IsAE()) {
+			return;  // Aufrufstelle nur fuer AE ermittelt
+		}
+		const REL::Relocation<std::uintptr_t> site{ REL::ID(41453), 0x74 };
+		const REL::Relocation<std::uintptr_t> target{ REL::ID(20123) };
+		if (!Features::IsCall(site.address(), target.address())) {
+			logger::warn("Animation throttle: call site ID 41453+0x74 differs - not installed");
+			return;
+		}
+		AnimationStep::func = SKSE::GetTrampoline().write_call<5>(site.address(), AnimationStep::thunk);
+		logger::info("Hook installed: animation step of the per-reference animation job (ID 41453+0x74) - animation throttle (developer test)");
 	}
 
 	void OnFrame() noexcept
