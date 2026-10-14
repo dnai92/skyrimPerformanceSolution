@@ -1701,6 +1701,8 @@ namespace TextureStream
 		std::vector<RE::NiPointer<RE::NiAVObject>> g_stack;
 		bool                                       g_passActive = false;
 		Clock::time_point                          g_passStart{};
+		Clock::time_point                          g_passEnd{};
+		Clock::duration                            g_lastPassDuration{};
 		std::uint32_t                              g_passFrames = 0, g_passNodes = 0;
 		double                                     g_passMs = 0;
 		float                                      g_camX = 0, g_camY = 0, g_camZ = 0;
@@ -2661,7 +2663,9 @@ namespace TextureStream
 			}
 			// Budget-Modus mit genug VRAM und nichts verkleinert: nur alle 5 s (Groessen lernen), sonst alle 0,5 s
 			const bool idle = cfg.budgetMode && !Pressure() && g_reducedCount == 0;
-			if (now - g_passStart < (idle ? 5000ms : 500ms)) {
+			// Danach mindestens so lange Pause, wie der letzte Durchlauf dauerte: bei grossen Szenen reihte sich bis 1.0.58
+			// Durchlauf an Durchlauf, das Zeitbudget (0,4 ms) lief jedes Frame (Tracy Markt 14.10.) - jetzt hoechstens jedes zweite
+			if (now - g_passStart < (idle ? 5000ms : 500ms) || now - g_passEnd < g_lastPassDuration) {
 				return;
 			}
 			const auto root = RE::Main::WorldRootNode();
@@ -2697,6 +2701,8 @@ namespace TextureStream
 		g_passMs += std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 		if (g_stack.empty()) {
 			g_passActive = false;
+			g_passEnd = Clock::now();
+			g_lastPassDuration = std::min<Clock::duration>(g_passEnd - g_passStart, 5s);
 			++g_stats.passes;
 			g_stats.passFrames += g_passFrames;
 			g_stats.passNodes += g_passNodes;

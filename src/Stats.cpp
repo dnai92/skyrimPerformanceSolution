@@ -246,6 +246,7 @@ namespace Stats
 	}
 
 	void CountNpcUpdate() noexcept { g_frameNpcCount.fetch_add(1, std::memory_order_relaxed); }
+	std::uint32_t FrameNpcUpdates() noexcept { return g_frameNpcCount.load(std::memory_order_relaxed); }
 	void OnOverstressed() noexcept { g_overstressed.fetch_add(1, std::memory_order_relaxed); }
 	void OnCellLoaded() noexcept
 	{

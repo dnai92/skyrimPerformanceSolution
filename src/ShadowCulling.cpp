@@ -1324,6 +1324,39 @@ namespace ShadowCulling
 			return false;
 		}
 
+		// Ergebnis je Knoten zwischenspeichern (je Culling-Thread, ohne Sperre): die Pruefung durchlaeuft den Teilbaum und
+		// kostete im Sonnen-Durchlauf jedes Frame fast so viel, wie das Ueberspringen spart (Tracy Markt 14.10.).
+		// Knoten-Inhalt aendert sich selten -> 2 s gueltig, Kinderzahl als Plausibilitaet gegen wiederverwendete Adressen.
+		std::atomic<std::uint32_t> g_pruneFrame{ 0 };
+		bool ContainsSkinnedOrActorCached(RE::NiAVObject* a_obj) noexcept
+		{
+			struct Entry
+			{
+				std::uint32_t frame;
+				std::uint32_t children;
+				bool          result;
+			};
+			thread_local std::unordered_map<const RE::NiAVObject*, Entry> cache;
+			thread_local std::uint32_t                                   lastClear = 0;
+			const auto                                                   frame = g_pruneFrame.load(std::memory_order_relaxed);
+			if (frame - lastClear > 1200) {  // gelegentlich ganz leeren (entladene Zellen)
+				cache.clear();
+				lastClear = frame;
+			}
+			const auto           node = a_obj ? a_obj->AsNode() : nullptr;
+			const std::uint32_t children = node ? static_cast<std::uint32_t>(node->GetChildren().size()) : 0;
+			try {
+				auto& e = cache[a_obj];
+				if (e.frame != 0 && frame - e.frame < 120 && e.children == children) {
+					return e.result;
+				}
+				e = { frame == 0 ? 1u : frame, children, ContainsSkinnedOrActor(a_obj) };
+				return e.result;
+			} catch (...) {
+				return true;
+			}
+		}
+
 		template <int N, bool Parabolic>
 		struct Process
 		{
@@ -1332,7 +1365,7 @@ namespace ShadowCulling
 				// Teilbaum-Pruefung nur im Sonnen-Durchlauf: die Einzel-Regeln fuer Regen/Himmel und Punktlicht kennen keine
 				// Skinning-Ausnahme, und die Pruefung kostete im Regen-/Himmels-Durchlauf messbar Zeit (A/B 1.0.56)
 				bool sun = false;
-				if (ShouldPrune(a_this, a_obj, Parabolic, sun) && !BelongsToActorNode(a_obj) && !(sun && ContainsSkinnedOrActor(a_obj))) {
+				if (ShouldPrune(a_this, a_obj, Parabolic, sun) && !BelongsToActorNode(a_obj) && !(sun && ContainsSkinnedOrActorCached(a_obj))) {
 					return;
 				}
 				func(a_this, a_obj, a_arg);
@@ -1894,6 +1927,7 @@ namespace ShadowCulling
 #endif
 
 		UpdateMainWorldAccumulator();
+		g_pruneFrame.fetch_add(1, std::memory_order_relaxed);
 		if (const auto left = g_microListFrames.load(std::memory_order_relaxed); left > 0 && g_microListFrames.fetch_sub(1, std::memory_order_relaxed) == 1) {
 			FinishMicroCullList();
 		}

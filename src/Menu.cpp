@@ -363,6 +363,16 @@ namespace Menu
 			Tip(T("Writes all objects that micro culling and far decal culling leave out in the main view over the next 30 frames to SPS_MicroCulled_N.csv next to SPS.log (name, reference, parent nodes, size, distance).",
 				"Schreibt alle Objekte, die Mikro-Culling und ferne Decals in den nächsten 30 Frames im Hauptbild weglassen, nach SPS_MicroCulled_N.csv neben SPS.log (Name, Referenz, übergeordnete Knoten, Größe, Abstand)."));
 
+			MenuApi::SeparatorText(T("Beta features (measurement)", "Beta-Funktionen (Messung)"));
+			if (EngineTimers::BetaABRunning()) {
+				MenuApi::TextWrapped("%s", T("Measurement running (3 min) - close the menu and stand still or walk the same route.",
+												"Messung läuft (3 min) - Menü schließen und stehen bleiben oder dieselbe Strecke laufen."));
+			} else if (MenuApi::Button(T("Measure hide occluded objects and shadow cache (3 min)##beta", "Verdeckung und Schatten-Cache messen (3 min)##beta"))) {
+				EngineTimers::StartBetaAB();
+			}
+			Tip(T("Rotates every 15 s between both off, only hide occluded objects, only shadow cache and both, and writes frame time and FPS of each to SPS.log ([Beta-AB]). Your settings are restored afterwards.",
+				"Wechselt alle 15 s zwischen beide aus, nur Verdeckung, nur Schatten-Cache und beide und schreibt Frame-Zeit und FPS je Variante in SPS.log ([Beta-AB]). Deine Einstellungen werden danach wiederhergestellt."));
+
 			MenuApi::SeparatorText(T("Skylighting culling (measurement)", "Himmelslicht-Culling (Messung)"));
 			if (!EngineTimers::PrecipTimerInstalled()) {
 				MenuApi::TextWrapped("%s", T("Needs bEngineProbes = true in SPS.ini [General] and a game restart.",

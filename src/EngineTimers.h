@@ -14,4 +14,9 @@ namespace EngineTimers
 	bool SkylightABRunning() noexcept;
 	void CountSkylight(bool a_culled) noexcept;  // aus dem Skylighting-Hook, nur waehrend der Messung
 	void OnFrame();                              // Main-Thread, je Frame im Spiel
+
+	// A/B-Messung der Beta-Funktionen (Debug-Seite, ohne Entwickler-Schalter): 12 Abschnitte a 15 s reihum
+	// aus / nur Verdeckung / nur Schatten-Cache / beide, je Abschnitt Frame-Zeit und NPC-Updates
+	void StartBetaAB() noexcept;
+	bool BetaABRunning() noexcept;
 }

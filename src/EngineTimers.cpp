@@ -156,8 +156,14 @@ namespace EngineTimers
 		(a_culled ? g_abCulled : g_abKept).fetch_add(1, std::memory_order_relaxed);
 	}
 
+	namespace
+	{
+		void BetaOnFrame();
+	}
+
 	void OnFrame()
 	{
+		BetaOnFrame();
 		if (g_abStartRequested.exchange(false)) {
 			g_abOriginal = Config::skylightingCulling.enabled;
 			g_abOriginalPrune = Config::subtreePruning.precip;
@@ -180,4 +186,105 @@ namespace EngineTimers
 			}
 		}
 	}
+
+	namespace
+	{
+		constexpr int  kBetaModes = 4;
+		constexpr int  kBetaPhases = 12;
+		constexpr auto kBetaPhaseLength = std::chrono::seconds(15);
+		struct BetaPhase
+		{
+			int           mode = 0;
+			std::uint64_t frames = 0;
+			double        ms = 0, npc = 0;
+		};
+		std::array<BetaPhase, kBetaPhases>      g_betaPhases;
+		int                                     g_betaPhase = -1;
+		bool                                    g_betaOrigOcc = false, g_betaOrigCache = false;
+		std::atomic<bool>                       g_betaStart{ false }, g_betaRunning{ false };
+		std::chrono::steady_clock::time_point   g_betaPhaseStart{}, g_betaLastFrame{};
+		constexpr const char*                   kBetaNames[] = { "betas off", "occlusion only", "shadow cache only", "both" };
+
+		void BetaBegin(int a_phase)
+		{
+			g_betaPhase = a_phase;
+			const int mode = a_phase % kBetaModes;
+			Config::occlusionCull.store(mode == 1 || mode == 3);
+			Config::lightShadowCache.enabled = mode == 2 || mode == 3;
+			g_betaPhases[a_phase] = BetaPhase{ mode };
+			g_betaPhaseStart = std::chrono::steady_clock::now();
+		}
+
+		void BetaEnd()
+		{
+			const auto& p = g_betaPhases[g_betaPhase];
+			const double f = p.frames ? static_cast<double>(p.frames) : 1.0;
+			logger::info("[Beta-AB] phase {} {}: {} frames | frame avg {:.2f} ms ({:.1f} FPS) | NPC updates/frame {:.1f}", g_betaPhase + 1, kBetaNames[p.mode], p.frames,
+				p.ms / f, p.ms > 0 ? 1000.0 * f / p.ms : 0.0, p.npc / f);
+		}
+
+		void BetaFinish()
+		{
+			std::array<double, kBetaModes> ms{}, fr{}, npc{};
+			for (const auto& p : g_betaPhases) {
+				ms[p.mode] += p.ms;
+				fr[p.mode] += static_cast<double>(p.frames);
+				npc[p.mode] += p.npc;
+			}
+			std::string line;
+			for (int m = 0; m < kBetaModes; ++m) {
+				line += std::format("{}{} {:.2f} ms ({:.1f} FPS, NPC {:.1f})", m ? " | " : "", kBetaNames[m], fr[m] > 0 ? ms[m] / fr[m] : 0.0, ms[m] > 0 ? 1000.0 * fr[m] / ms[m] : 0.0,
+					fr[m] > 0 ? npc[m] / fr[m] : 0.0);
+			}
+			logger::info("[Beta-AB] result: {}", line);
+			Config::occlusionCull.store(g_betaOrigOcc);
+			Config::lightShadowCache.enabled = g_betaOrigCache;
+			g_betaRunning.store(false);
+			g_betaPhase = -1;
+		}
+
+		void BetaOnFrame()
+		{
+			const auto now = std::chrono::steady_clock::now();
+			if (g_betaStart.exchange(false)) {
+				g_betaOrigOcc = Config::occlusionCull.load();
+				g_betaOrigCache = Config::lightShadowCache.enabled;
+				logger::info("[Beta-AB] start: {} phases of {} s, rotating betas off / occlusion only / shadow cache only / both (stand still or walk the same route)",
+					kBetaPhases, kBetaPhaseLength.count());
+				g_betaRunning.store(true);
+				BetaBegin(0);
+				g_betaLastFrame = now;
+				return;
+			}
+			if (!g_betaRunning.load(std::memory_order_relaxed)) {
+				return;
+			}
+			const double dt = std::chrono::duration<double, std::milli>(now - g_betaLastFrame).count();
+			g_betaLastFrame = now;
+			// Pausen (Menue) und Ruckler ueber 250 ms nicht mitzaehlen
+			if (dt > 0.0 && dt < 250.0) {
+				auto& p = g_betaPhases[g_betaPhase];
+				++p.frames;
+				p.ms += dt;
+				p.npc += Stats::FrameNpcUpdates();
+			}
+			if (now - g_betaPhaseStart >= kBetaPhaseLength) {
+				BetaEnd();
+				if (g_betaPhase + 1 < kBetaPhases) {
+					BetaBegin(g_betaPhase + 1);
+				} else {
+					BetaFinish();
+				}
+			}
+		}
+	}
+
+	void StartBetaAB() noexcept
+	{
+		if (!BetaABRunning()) {
+			g_betaStart.store(true);
+		}
+	}
+
+	bool BetaABRunning() noexcept { return g_betaRunning.load(std::memory_order_relaxed) || g_betaStart.load(std::memory_order_relaxed); }
 }
