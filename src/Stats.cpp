@@ -24,6 +24,7 @@ namespace Stats
 		std::array<std::atomic<std::int64_t>, kZoneCount> g_frameNs{};
 		std::array<std::atomic<std::uint32_t>, kCounterCount> g_frameCounters{};
 		std::atomic<std::uint32_t>                        g_frameNpcCount{ 0 };
+		std::atomic<std::uint32_t>                        g_lastFrameNpc{ 0 };  // abgeschlossener Frame (A/B-Messungen)
 		std::atomic<std::uint32_t>                        g_overstressed{ 0 };
 		std::atomic<std::uint32_t>                        g_cellLoads{ 0 };
 		std::atomic<bool>                                 g_cellLoadedInFrame{ false };
@@ -110,7 +111,7 @@ namespace Stats
 			for (auto& c : g_frameCounters) {
 				c.store(0, std::memory_order_relaxed);
 			}
-			g_frameNpcCount.store(0, std::memory_order_relaxed);
+			g_lastFrameNpc.store(g_frameNpcCount.exchange(0, std::memory_order_relaxed), std::memory_order_relaxed);
 		}
 
 		void WriteReport(clock::time_point a_now)
@@ -246,7 +247,7 @@ namespace Stats
 	}
 
 	void CountNpcUpdate() noexcept { g_frameNpcCount.fetch_add(1, std::memory_order_relaxed); }
-	std::uint32_t FrameNpcUpdates() noexcept { return g_frameNpcCount.load(std::memory_order_relaxed); }
+	std::uint32_t FrameNpcUpdates() noexcept { return g_lastFrameNpc.load(std::memory_order_relaxed); }
 	void OnOverstressed() noexcept { g_overstressed.fetch_add(1, std::memory_order_relaxed); }
 	void OnCellLoaded() noexcept
 	{

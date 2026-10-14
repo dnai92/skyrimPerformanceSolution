@@ -129,7 +129,7 @@ namespace Stats
 	bool Enabled() noexcept;  // Analyse-Protokoll an (Zeitmessung der Bereiche)
 	void Count(Counter a_counter) noexcept;
 	void CountNpcUpdate() noexcept;
-	std::uint32_t FrameNpcUpdates() noexcept;  // NPC-Updates im laufenden Frame (A/B-Messungen)
+	std::uint32_t FrameNpcUpdates() noexcept;  // NPC-Updates des letzten abgeschlossenen Frames (A/B-Messungen)
 	void OnOverstressed() noexcept;
 	void OnCellLoaded() noexcept;
 	void OnMenuEvent() noexcept;  // Menue geoeffnet/geschlossen (Ruckler-Protokoll: Pause statt Ruckler)
