@@ -1689,6 +1689,16 @@ namespace ShadowCulling
 			FarMode                               last = FarMode::kNormal;
 			std::uint64_t                         frames = 0, cached = 0, builds = 0, waits = 0, normal = 0, mergeFail = 0;
 			std::uint64_t                         waitProjChanged = 0, waitNotSaved = 0, cacheProjChanged = 0;  // Diagnose: warum kein Aufbau
+			// Kamera der fernen Kaskade NACH Accumulate im voll gezeichneten Frame (Wait). Die Engine passt Tiefenbereich und
+			// Ausschnitt nach dem Sammeln an die gesammelten Schattenwerfer an - im Cache-Frame (nur Bewegliches) kaeme eine
+			// andere Abtast-Matrix heraus, die festen Schatten verschwanden (1.0.59-Test, Karte selbst war vollstaendig).
+			bool                                  camValid = false;
+			RE::NiTransform                       camWorld{};
+			float                                 camW2C[4][4]{};
+			RE::NiCamera::RUNTIME_DATA2           camData2{};
+			RE::NiFrustumPlanes                   camClip{};
+			std::uint64_t                         camForced = 0, camDiffered = 0;
+			float                                 camDiffMax = 0.0f;
 			std::chrono::steady_clock::time_point lastLog = std::chrono::steady_clock::now();
 		};
 		FarState g_far{};
@@ -1761,6 +1771,52 @@ namespace ShadowCulling
 			g_farMode.store(static_cast<int>(mode), std::memory_order_relaxed);
 		}
 
+		// Nach Accumulate: im Wait-Frame Kamera-Stand merken, in Aufbau-/Cache-Frames einsetzen (vor Render, das daraus
+		// die Matrizen fuer Zeichnen und Abtasten bildet)
+		void FarAfterAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept
+		{
+			auto& f = g_far;
+			if (!a_light || !Config::farShadowCache.enabled) {
+				f.camValid = false;
+				return;
+			}
+			auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
+			if (kFarCascade >= descs.size()) {
+				return;
+			}
+			auto&      d = descs[kFarCascade];
+			const auto cam = d.camera.get();
+			const auto mode = static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed));
+			if (!cam || mode == FarMode::kNormal) {
+				f.camValid = false;
+				return;
+			}
+			if (mode == FarMode::kWait) {
+				f.camWorld = cam->world;
+				std::memcpy(f.camW2C, cam->GetRuntimeData().worldToCam, sizeof(f.camW2C));
+				f.camData2 = cam->GetRuntimeData2();
+				f.camClip = d.clipPlanes;
+				f.camValid = true;
+				return;
+			}
+			if (!f.camValid) {
+				return;
+			}
+			// Diagnose: wie weit weicht die Engine (nur Bewegliches gesammelt) ab?
+			const auto& ef = cam->GetRuntimeData2().viewFrustum;
+			const auto& sf = f.camData2.viewFrustum;
+			const float diff = std::max({ MaxAbsDiff(&ef.fLeft, &sf.fLeft, 6), MaxAbsDiff(&cam->GetRuntimeData().worldToCam[0][0], &f.camW2C[0][0], 16) });
+			if (diff > 1e-3f) {
+				++f.camDiffered;
+				f.camDiffMax = std::max(f.camDiffMax, diff);
+			}
+			cam->world = f.camWorld;
+			std::memcpy(cam->GetRuntimeData().worldToCam, f.camW2C, sizeof(f.camW2C));
+			cam->GetRuntimeData2() = f.camData2;
+			d.clipPlanes = f.camClip;
+			++f.camForced;
+		}
+
 		// UpdateCamera (Entscheidung) laeuft VOR Accumulate. Lief sie in diesem Frame nicht, gilt nichts vom Vorframe
 		// (1.0.59-Test: hier wurde der Modus jedes Frame zurueckgesetzt -> Cache nie aktiv)
 		void FarBeforeAccumulate() noexcept
@@ -1780,9 +1836,12 @@ namespace ShadowCulling
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
 			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: static skipped {:.0f}, groups skipped {:.0f} | merge failed {} | depth test {} | "
-						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {}",
+						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | camera held {} (engine differed {}, max {:.3f})",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
-				static_cast<double>(g_farPruned.exchange(0)) / c, f.mergeFail, FarShadowGpu::DepthFuncKnown() ? "learned" : "default", f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged);
+				static_cast<double>(g_farPruned.exchange(0)) / c, f.mergeFail, FarShadowGpu::DepthFuncKnown() ? "learned" : "default", f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged,
+				f.camForced, f.camDiffered, f.camDiffMax);
+			f.camForced = f.camDiffered = 0;
+			f.camDiffMax = 0.0f;
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 			g_farSkippedDynamic.store(0);
 			f.frames = f.cached = f.builds = f.waits = f.normal = f.mergeFail = 0;
@@ -1870,7 +1929,7 @@ namespace ShadowCulling
 				using PR = FarShadowGpu::ProbeResult;
 				static std::chrono::steady_clock::time_point probeAt[4]{};
 				const auto  now = std::chrono::steady_clock::now();
-				const bool  probe = t == 0 && now - probeAt[static_cast<int>(mode)] >= std::chrono::seconds(3);
+				const bool  probe = t == 0 && now - probeAt[static_cast<int>(mode)] >= std::chrono::seconds(30);
 				const auto  fmt = [](const PR& a_p) {
                     return a_p.ok ? std::format("covered {} zero {} full {} range {}-{}", a_p.covered, a_p.zero, a_p.full, a_p.minV, a_p.maxV) : std::string("n/a");
 				};
@@ -2177,6 +2236,7 @@ namespace ShadowCulling
 		if (!a_light) {
 			return;
 		}
+		FarAfterAccumulate(a_light);
 		const auto& cfg = Config::cascadeCache;
 		const bool  skip = g_cacheSkip.load(std::memory_order_relaxed);
 		auto&       descs = a_light->GetRuntimeData().shadowmapDescriptors;
