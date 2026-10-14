@@ -693,6 +693,25 @@ namespace ShadowCulling
 			return false;
 		}
 
+		// Figur zu einem Mesh (erster Vorfahr mit Referenz), sonst nullptr
+		const RE::TESObjectREFR* OwningActor(const RE::BSGeometry& a_geom) noexcept
+		{
+			const RE::NiAVObject* obj = &a_geom;
+			for (int depth = 0; obj && depth < 32; ++depth, obj = obj->parent) {
+				if (const auto ref = SceneUtil::OwnUserData(obj)) {
+					return ref->GetFormType() == RE::FormType::ActorCharacter ? ref : nullptr;
+				}
+			}
+			return nullptr;
+		}
+
+		// Letzte Entscheidung je Figur (Hysterese). Kleine Tabelle mit atomaren Eintraegen (Zeiger | weggelassen-Bit), da
+		// die Culling-Jobs parallel laufen; Kollisionen kosten nur die Hysterese, nie die Korrektheit.
+		std::array<std::atomic<std::uintptr_t>, 512> g_actorShadowState{};
+
+		// Bis 1.0.59 je Mesh mit dessen eigener Entfernung entschieden: an der Grenze fielen einzelne Koerperteile weg,
+		// durch Animation pendelten sie hin und her (fernes NPC-Schatten-Flackern). Jetzt je Figur (Position der Figur)
+		// und mit Hysterese: weg ab minDistance, zurueck erst unter 90 % davon.
 		bool CullActorShadow(const RE::BSGeometry& a_geom, bool a_pointLight) noexcept
 		{
 			const auto& cfg = Config::actorShadowCulling;
@@ -700,12 +719,31 @@ namespace ShadowCulling
 				!const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData().skinInstance) {
 				return false;
 			}
-			if (DistanceToCamera(a_geom.worldBound) > cfg.minDistance && BelongsToActor(a_geom)) {
-				Stats::Count(Stats::Counter::ActorShadowCulled);
-				return true;
+			// Schnell raus: Mesh deutlich naeher als die Rueckkehr-Grenze -> sicher behalten (keine Suche nach der Figur)
+			const float meshDist = DistanceToCamera(a_geom.worldBound);
+			const float backDist = 0.9f * cfg.minDistance;
+			if (meshDist + 2.0f * a_geom.worldBound.radius < backDist - 200.0f) {
+				Stats::Count(Stats::Counter::ActorShadowKept);
+				return false;
 			}
-			Stats::Count(Stats::Counter::ActorShadowKept);
-			return false;
+			const auto actor = OwningActor(a_geom);
+			if (!actor) {
+				Stats::Count(Stats::Counter::ActorShadowKept);
+				return false;
+			}
+			const auto  pos = actor->GetPosition();
+			const float dx = pos.x - g_camX.load(std::memory_order_relaxed);
+			const float dy = pos.y - g_camY.load(std::memory_order_relaxed);
+			const float dz = pos.z - g_camZ.load(std::memory_order_relaxed);
+			const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+			const auto  key = reinterpret_cast<std::uintptr_t>(actor) & ~std::uintptr_t{ 1 };
+			auto&       slot = g_actorShadowState[(key >> 4) % g_actorShadowState.size()];
+			const auto  prev = slot.load(std::memory_order_relaxed);
+			const bool  wasCulled = (prev & ~std::uintptr_t{ 1 }) == key && (prev & 1) != 0;
+			const bool  cull = dist > (wasCulled ? backDist : cfg.minDistance);
+			slot.store(key | (cull ? 1 : 0), std::memory_order_relaxed);
+			Stats::Count(cull ? Stats::Counter::ActorShadowCulled : Stats::Counter::ActorShadowKept);
+			return cull;
 		}
 
 		// Diagnose: Verteilung der Decals nach Entfernung (Zeilen) und Radius (Spalten)
