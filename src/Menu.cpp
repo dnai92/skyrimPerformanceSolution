@@ -294,12 +294,9 @@ namespace Menu
 				T("Draws identical simple meshes in sun shadows with one draw call. Small gain. Takes effect after restarting the game. Switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn. Wirkt erst nach einem Neustart des Spiels. Bei flackernden Schatten oder Objekten wieder ausschalten."));
 			Toggle(T("Main view micro culling (BETA)", "Winzige Objekte im Bild weglassen (BETA)"), Config::mainViewCulling.enabled,
 				T("Tiny far objects are not drawn at all. They can pop in.", "Winzige ferne Objekte werden gar nicht gezeichnet. Sie können aufploppen."));
-			Toggle(T("Calmer far shadows (BETA)", "Ruhigere ferne Schatten (BETA)"), Config::stableCascade.enabled,
-				T("Holds the far sun shadow cascade still instead of realigning it every frame, so far shadows shimmer less when you move. They follow the sun in tiny steps. No performance gain.",
-					"Hält die ferne Sonnenschatten-Kaskade ruhig, statt sie jedes Frame neu auszurichten, ferne Schatten flimmern beim Bewegen weniger. Sie folgen der Sonne in kleinen Schritten. Kein Leistungsgewinn."));
 			Toggle(T("Far shadow cache (BETA)", "Ferne Sonnenschatten zwischenspeichern (BETA)"), Config::farShadowCache.enabled,
-				T("The far sun shadow cascade is held still and its static objects (houses, rocks, trees) are drawn only when the sun or the cascade moves on; in between only characters and moving things are drawn. Saves CPU time outdoors. Switch off if far shadows flicker or are missing.",
-					"Die ferne Sonnenschatten-Kaskade wird ruhig gehalten und ihre unbeweglichen Objekte (Häuser, Felsen, Bäume) werden nur gezeichnet, wenn Sonne oder Kaskade weiterwandern; dazwischen nur Figuren und Bewegliches. Spart draußen Hauptthread-Zeit. Ausschalten, falls ferne Schatten flackern oder fehlen."));
+				T("Static objects (houses, rocks, trees) are drawn into the far sun shadows only when the sun or the view moves on; in between only characters and moving things are drawn. Outdoors this saves around 1,000 to 1,500 draw calls per frame and helps most on systems limited by draw calls. Far shadows shimmer less and follow the sun in small steps. Anniversary Edition only. Switch off if far shadows flicker or are missing.",
+					"Unbewegliche Objekte (Häuser, Felsen, Bäume) werden nur dann in die fernen Sonnenschatten gezeichnet, wenn Sonne oder Blick weiterwandern; dazwischen nur Figuren und Bewegliches. Spart draußen etwa 1.000 bis 1.500 Draw Calls pro Frame und hilft vor allem Systemen, die an Draw Calls hängen. Ferne Schatten flimmern weniger und folgen der Sonne in kleinen Schritten. Nur Anniversary Edition. Ausschalten, falls ferne Schatten flackern oder fehlen."));
 			AtomicToggle(T("Hide occluded objects (BETA)", "Verdeckte Objekte weglassen (BETA)"), Config::occlusionCull,
 				T("Objects completely hidden behind walls, houses or terrain are not drawn. Fine-tuning on the page Beta.", "Objekte, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Feineinstellung auf der Seite Beta."));
 
@@ -716,7 +713,7 @@ namespace Menu
 			HelpEntry(T("Sun shadows or objects flicker", "Sonnenschatten oder Objekte flackern"),
 				T("Shadows > Shadow instancing", "Schatten > Gleiche Schatten bündeln"));
 			HelpEntry(T("Far shadows follow the sun in small steps", "Ferne Schatten folgen der Sonne in kleinen Schritten"),
-				T("Overview > Calmer far shadows", "Übersicht > Ruhigere ferne Schatten"));
+				T("Overview > Far shadow cache", "Übersicht > Ferne Sonnenschatten zwischenspeichern"));
 
 			MenuApi::SeparatorText(T("Textures", "Texturen"));
 			HelpEntry(T("Textures are blurry up close or get sharp only after a moment", "Texturen sind aus der Nähe unscharf oder werden erst nach einem Moment scharf"),
