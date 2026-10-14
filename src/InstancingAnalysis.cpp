@@ -544,7 +544,6 @@ namespace InstancingAnalysis
 				g_inSunShadows.store(true, std::memory_order_relaxed);
 				const auto start = std::chrono::steady_clock::now();
 				GpuTimer::Begin(GpuTimer::kSunShadows);
-				ShadowCulling::BeforeSunRender(a_this);
 				func(a_this, a_index);
 				GpuTimer::End(GpuTimer::kSunShadows);
 				g_sunRenderNs += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();

@@ -1698,10 +1698,6 @@ namespace ShadowCulling
 			RE::NiCamera::RUNTIME_DATA2           camData2{};
 			RE::NiFrustumPlanes                   camClip{};
 			std::uint64_t                         camForced = 0, camDiffered = 0;
-			// Cache-Frame: Ebene vor Render mit dem Unbeweglichen belegt und Loeschen abgeschaltet (die Engine wertet die
-			// Karte noch innerhalb von Render aus - Zusammenfuehren danach kam zu spaet, 1.0.59-Test)
-			bool                                  preloaded = false, clearSaved = false;
-			std::uint64_t                         preloads = 0;
 			float                                 camDiffMax = 0.0f;
 			std::chrono::steady_clock::time_point lastLog = std::chrono::steady_clock::now();
 		};
@@ -1821,32 +1817,6 @@ namespace ShadowCulling
 			++f.camForced;
 		}
 
-		void FarBeforeRender(RE::BSShadowDirectionalLight* a_light) noexcept
-		{
-			auto& f = g_far;
-			f.preloaded = false;
-			if (!a_light || !Config::farShadowCache.enabled || static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed)) != FarMode::kCached) {
-				return;
-			}
-			auto&      descs = a_light->GetRuntimeData().shadowmapDescriptors;
-			const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
-			const auto ctx = renderer ? renderer->GetRuntimeData().context : nullptr;
-			if (kFarCascade >= descs.size() || !ctx) {
-				return;
-			}
-			const auto tex = renderer->GetDepthStencilData().depthStencils[static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS_ESRAM)].texture;
-			bool       recreated = false;
-			if (!tex || !FarShadowGpu::Ensure(0, tex, recreated) || recreated) {
-				return;
-			}
-			FarShadowGpu::Restore(ctx, 0, FarShadowGpu::kStatic, tex, f.slice);
-			auto& d = descs[kFarCascade];
-			f.clearSaved = d.clearRenderTarget;
-			d.clearRenderTarget = false;
-			f.preloaded = true;
-			++f.preloads;
-		}
-
 		// UpdateCamera (Entscheidung) laeuft VOR Accumulate. Lief sie in diesem Frame nicht, gilt nichts vom Vorframe
 		// (1.0.59-Test: hier wurde der Modus jedes Frame zurueckgesetzt -> Cache nie aktiv)
 		void FarBeforeAccumulate() noexcept
@@ -1866,11 +1836,10 @@ namespace ShadowCulling
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
 			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: static skipped {:.0f}, groups skipped {:.0f} | merge failed {} | depth test {} | "
-						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | camera held {} (engine differed {}, max {:.3f}) | preloaded {}",
+						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | camera held {} (engine differed {}, max {:.3f})",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
 				static_cast<double>(g_farPruned.exchange(0)) / c, f.mergeFail, FarShadowGpu::DepthFuncKnown() ? "learned" : "default", f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged,
-				f.camForced, f.camDiffered, f.camDiffMax, f.preloads);
-			f.preloads = 0;
+				f.camForced, f.camDiffered, f.camDiffMax);
 			f.camForced = f.camDiffered = 0;
 			f.camDiffMax = 0.0f;
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
@@ -1880,13 +1849,6 @@ namespace ShadowCulling
 
 		void FarAfterRender() noexcept
 		{
-			if (g_far.preloaded && g_cacheLight) {
-				auto& descs = g_cacheLight->GetRuntimeData().shadowmapDescriptors;
-				if (kFarCascade < descs.size()) {
-					descs[kFarCascade].clearRenderTarget = g_far.clearSaved;
-				}
-			}
-			g_far.preloaded = false;
 			if (!Config::farShadowCache.enabled) {
 				return;
 			}
@@ -2183,11 +2145,6 @@ namespace ShadowCulling
 	bool FreezeMatrix() noexcept
 	{
 		return Config::cascadeCache.freezeMatrix && !Config::stableCascade.enabled;
-	}
-
-	void BeforeSunRender(RE::BSShadowDirectionalLight* a_light) noexcept
-	{
-		FarBeforeRender(a_light);
 	}
 
 	void AfterSunRender() noexcept
