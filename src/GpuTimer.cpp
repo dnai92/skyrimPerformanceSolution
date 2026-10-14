@@ -37,6 +37,8 @@ namespace GpuTimer
 		double                  g_sectionSum[kSectionCount]{};
 		double                  g_callSum[kSectionCount]{};
 		double                  g_frameSum = 0;
+		double                  g_tapMs[kSectionCount]{};
+		std::uint32_t           g_tapFrames[kSectionCount]{};
 
 		ID3D11Query* Make(D3D11_QUERY a_type)
 		{
@@ -123,6 +125,10 @@ namespace GpuTimer
 				for (int i = 0; i < kSectionCount; ++i) {
 					g_sectionSum[i] += sections[i];
 					g_callSum[i] += s.count[i];
+					if (s.count[i] > 0) {
+						g_tapMs[i] += sections[i];
+						++g_tapFrames[i];
+					}
 				}
 			}
 		}
@@ -212,6 +218,14 @@ namespace GpuTimer
 		g_context->End(s.ends[a_section][n]);
 		s.open[a_section] = -1;
 		s.count[a_section] = n + 1;
+	}
+
+	Tap TakeTap(Section a_section) noexcept
+	{
+		Tap t{ g_tapMs[a_section], g_tapFrames[a_section] };
+		g_tapMs[a_section] = 0;
+		g_tapFrames[a_section] = 0;
+		return t;
 	}
 
 	Window Take() noexcept

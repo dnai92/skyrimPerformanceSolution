@@ -1,5 +1,6 @@
 #include "Hooks.h"
 #include "Occlusion.h"
+#include "PrepassAnalysis.h"
 
 #include "Config.h"
 #include "GpuTimer.h"
@@ -106,7 +107,8 @@ namespace Hooks
 				InstancingAnalysis::OnFrame();
 				ReportEngineWaits();
 				if (const auto renderer = RE::BSGraphics::Renderer::GetSingleton()) {
-					GpuTimer::FrameBoundary(renderer->GetRuntimeData().forwarder, renderer->GetRuntimeData().context, Config::analysis.load(std::memory_order_relaxed));
+					GpuTimer::FrameBoundary(renderer->GetRuntimeData().forwarder, renderer->GetRuntimeData().context,
+						Config::analysis.load(std::memory_order_relaxed) || PrepassAnalysis::Running());
 				}
 #endif
 				ZoneScopedN("Player Update");

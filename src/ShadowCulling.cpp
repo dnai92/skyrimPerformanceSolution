@@ -1,4 +1,5 @@
 #include "ShadowCulling.h"
+#include "PrepassAnalysis.h"
 #include "Features.h"
 
 #include "Config.h"
@@ -849,7 +850,9 @@ namespace ShadowCulling
 				g_inDepthPrepass.store(true, std::memory_order_relaxed);
 				Occlusion::OnDepthPrepassBegin();
 				GpuTimer::Begin(GpuTimer::kDepthPrepass);
+				const auto start = std::chrono::steady_clock::now();
 				func(a_arg1, a_arg2);
+				PrepassAnalysis::AddCpuNs(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count());
 				GpuTimer::End(GpuTimer::kDepthPrepass);
 				g_inDepthPrepass.store(false, std::memory_order_relaxed);
 				Occlusion::OnDepthPrepassEnd();
@@ -1738,6 +1741,9 @@ namespace ShadowCulling
 	{
 		Config::ReloadIfChanged();
 		EngineTimers::OnFrame();
+#ifndef SPS_VR
+		PrepassAnalysis::OnFrame();
+#endif
 		TextureStream::OnFrame();
 		g_viewValid.store(false, std::memory_order_relaxed);  // neu erst beim naechsten Sonnen-Accumulate (Innenraeume: nie)
 #ifndef SPS_VR

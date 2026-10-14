@@ -1,4 +1,5 @@
 #include "Menu.h"
+#include "PrepassAnalysis.h"
 
 #include "Config.h"
 #include "EngineTimers.h"
@@ -374,6 +375,14 @@ namespace Menu
 			}
 			Tip(T("Switches the far shadow cache off and on every 15 s and writes frame time and FPS of both to SPS.log ([Beta-AB]). Stand still outdoors in daylight. Your setting is restored afterwards.",
 				"Schaltet den fernen Schatten-Cache alle 15 s aus und an und schreibt Frame-Zeit und FPS beider Varianten in SPS.log ([Beta-AB]). Draußen bei Tageslicht stehen bleiben. Deine Einstellung wird danach wiederhergestellt."));
+
+#ifndef SPS_VR
+			if (!PrepassAnalysis::Running() && MenuApi::Button(T("Measure depth pre-pass (2 min)##prepass", "Tiefenvorpass messen (2 min)##prepass"))) {
+				PrepassAnalysis::Start();
+			}
+			Tip(T("Leaves out one kind of object (grass, alpha-tested, trees, landscape, small far objects, characters) in the depth pre-pass every 8 s and writes its GPU and CPU time to SPS.log ([Prepass-AB]). Stand still. The image can look wrong during the measurement.",
+				"Lässt alle 8 s eine Objektart (Gras, Alpha-Test, Bäume, Landschaft, kleine ferne Objekte, Figuren) im Tiefenvorpass weg und schreibt dessen GPU- und CPU-Zeit in SPS.log ([Prepass-AB]). Stehen bleiben. Das Bild kann während der Messung fehlerhaft aussehen."));
+#endif
 
 			MenuApi::SeparatorText(T("Skylighting culling (measurement)", "Himmelslicht-Culling (Messung)"));
 			if (!EngineTimers::PrecipTimerInstalled()) {

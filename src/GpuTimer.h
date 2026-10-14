@@ -38,4 +38,12 @@ namespace GpuTimer
 
 	// Mittelwerte seit dem letzten Aufruf (gleicher Thread wie FrameBoundary)
 	Window Take() noexcept;
+
+	// Eigener Abgriff eines Abschnitts fuer Messungen (unabhaengig von Take): Summe und Zahl der Frames seit dem letzten Aufruf
+	struct Tap
+	{
+		double        ms = 0;
+		std::uint32_t frames = 0;
+	};
+	Tap TakeTap(Section a_section) noexcept;
 }

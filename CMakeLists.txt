@@ -52,6 +52,7 @@ add_commonlibsse_plugin(
 		src/Occlusion.cpp
 		src/OcclusionGpu.cpp
 		src/FarShadowGpu.cpp
+		src/PrepassAnalysis.cpp
 		src/ShadowCulling.cpp
 		src/Stats.cpp
 		extern/tracy/public/TracyClient.cpp
