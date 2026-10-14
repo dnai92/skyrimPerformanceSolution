@@ -1,4 +1,5 @@
 #include "ShadowCulling.h"
+#include "AnimThrottle.h"
 #include "PrepassAnalysis.h"
 #include "Features.h"
 
@@ -1778,6 +1779,7 @@ namespace ShadowCulling
 		EngineTimers::OnFrame();
 #ifndef SPS_VR
 		PrepassAnalysis::OnFrame();
+		AnimThrottle::OnFrame();
 #endif
 		TextureStream::OnFrame();
 		g_viewValid.store(false, std::memory_order_relaxed);  // neu erst beim naechsten Sonnen-Accumulate (Innenraeume: nie)

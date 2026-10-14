@@ -352,6 +352,11 @@ namespace Menu
 				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
 
 			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));
+#ifndef SPS_VR
+			Toggle(T("Throttle animation of far / unseen NPCs", "Animation ferner / nicht sichtbarer NPCs drosseln"), Config::animThrottle.enabled,
+				T("Experiment: NPCs outside the view are animated every 4th frame, visible NPCs farther than ~35 m every 2nd frame (the skipped time is caught up). Never NPCs closer than ~11 m, in combat, followers, riders, kill moves or furniture. Watch [AnimThrottle] and Engine wait in SPS.log. Default OFF.",
+					"Experiment: NPCs außerhalb des Bildes werden nur jeden 4. Frame animiert, sichtbare NPCs weiter als ~35 m jeden 2. Frame (die ausgelassene Zeit wird nachgeholt). Nie NPCs näher als ~11 m, im Kampf, Begleiter, Reiter, Killmoves oder auf Möbeln. In SPS.log [AnimThrottle] und Engine wait beobachten. Standard AUS."));
+#endif
 			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
 				T("For testing only, can make whole objects disappear. Default OFF (saved).", "Nur zum Testen, kann ganze Objekte verschwinden lassen. Standard AUS (wird gespeichert)."));
 

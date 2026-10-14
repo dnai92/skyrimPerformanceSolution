@@ -1,4 +1,5 @@
 #include "Hooks.h"
+#include "AnimThrottle.h"
 #include "Hotkey.h"
 #include "InstancingAnalysis.h"
 #include "EngineTimers.h"
@@ -125,6 +126,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	InstancingAnalysis::Install();
 	LightGather::Install();
 	LightShadowCache::Install();
+	AnimThrottle::Install();
 #endif
 	TextureStream::Install();
 
