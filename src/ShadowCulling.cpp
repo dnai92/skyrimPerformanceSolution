@@ -1688,6 +1688,7 @@ namespace ShadowCulling
 			std::uint32_t                         lastFrame = 0;
 			FarMode                               last = FarMode::kNormal;
 			std::uint64_t                         frames = 0, cached = 0, builds = 0, waits = 0, normal = 0, mergeFail = 0;
+			std::uint64_t                         waitProjChanged = 0, waitNotSaved = 0, cacheProjChanged = 0;  // Diagnose: warum kein Aufbau
 			std::chrono::steady_clock::time_point lastLog = std::chrono::steady_clock::now();
 		};
 		FarState g_far{};
@@ -1735,11 +1736,17 @@ namespace ShadowCulling
 				if (f.valid && SameProjection(cur, f.build)) {
 					mode = FarMode::kCached;
 				} else {
+					if (f.valid) {
+						++f.cacheProjChanged;
+					}
 					f.valid = false;
 					if (f.last == FarMode::kWait && f.prebuilt && SameProjection(cur, f.wait)) {
 						mode = FarMode::kBuild;
 						f.build = cur;
 					} else {
+						if (f.last == FarMode::kWait) {
+							++(f.prebuilt ? f.waitProjChanged : f.waitNotSaved);
+						}
 						mode = FarMode::kWait;
 						f.wait = cur;
 						f.prebuilt = false;
@@ -1772,9 +1779,11 @@ namespace ShadowCulling
 			f.lastLog = std::chrono::steady_clock::now();
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
-			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: static skipped {:.0f}, groups skipped {:.0f} | merge failed {} | depth test {}",
+			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: static skipped {:.0f}, groups skipped {:.0f} | merge failed {} | depth test {} | "
+						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {}",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
-				static_cast<double>(g_farPruned.exchange(0)) / c, f.mergeFail, FarShadowGpu::DepthFuncKnown() ? "learned" : "default");
+				static_cast<double>(g_farPruned.exchange(0)) / c, f.mergeFail, FarShadowGpu::DepthFuncKnown() ? "learned" : "default", f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged);
+			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 			g_farSkippedDynamic.store(0);
 			f.frames = f.cached = f.builds = f.waits = f.normal = f.mergeFail = 0;
 		}
@@ -1808,11 +1817,17 @@ namespace ShadowCulling
 				}
 				REX::W32::D3D11_TEXTURE2D_DESC desc{};
 				tex->GetDesc(&desc);
-				if (f.slice >= desc.arraySize) {
-					continue;
-				}
 				bool recreated = false;
-				if (!FarShadowGpu::Ensure(t, tex, recreated)) {
+				const bool sliceOk = f.slice < desc.arraySize;
+				const bool ensured = sliceOk && FarShadowGpu::Ensure(t, tex, recreated);
+				// Diagnose: je Ziel einmal (bzw. bei Fehler bis zu 5x) Ziel, Format und Ergebnis protokollieren
+				static std::uint32_t logged[2]{};
+				if (logged[t] < (ensured ? 1u : 5u)) {
+					++logged[t];
+					logger::info("[FarShadowCache] target {} (index {}) | {}x{} format {} array {} mips {} | cascade slice {} | copy {}", t == 0 ? "sun" : "volumetric", idx[t],
+						desc.width, desc.height, static_cast<std::uint32_t>(desc.format), desc.arraySize, desc.mipLevels, f.slice, ensured ? "ok" : (sliceOk ? "FAILED" : "slice out of range"));
+				}
+				if (!ensured) {
 					continue;
 				}
 				if (recreated && mode != FarMode::kWait) {
