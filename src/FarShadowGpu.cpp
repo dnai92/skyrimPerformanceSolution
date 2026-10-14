@@ -398,6 +398,75 @@ float main(float4 pos : SV_Position) : SV_Depth
 		ctx->CopySubresourceRegion(static_cast<ID3D11Resource*>(a_dst), sub, 0, 0, 0, static_cast<ID3D11Resource*>(a_src), sub, nullptr);
 	}
 
+	std::uint32_t DepthFunc() noexcept { return static_cast<std::uint32_t>(g_func); }
+
+	ProbeResult Probe(void* a_context, void* a_texture, std::uint32_t a_slice, std::uint32_t a_target, std::uint32_t a_slot) noexcept
+	{
+		ProbeResult r{};
+		const auto  ctx = static_cast<ID3D11DeviceContext*>(a_context);
+		if (!ctx || !g_device || a_target >= 2 || a_slot >= 2) {
+			return r;
+		}
+		ID3D11Texture2D* src = a_texture ? static_cast<ID3D11Texture2D*>(a_texture) : g_targets[a_target].slots[a_slot].tex;
+		if (!src) {
+			return r;
+		}
+		D3D11_TEXTURE2D_DESC desc{};
+		src->GetDesc(&desc);
+		const UINT sub = a_texture ? a_slice * desc.MipLevels : 0;
+		const auto storage = StorageFormat(desc.Format);
+		if (storage != DXGI_FORMAT_R16_TYPELESS && storage != DXGI_FORMAT_R32_TYPELESS) {
+			return r;  // nur 16-/32-Bit-Tiefe ausgewertet
+		}
+		D3D11_TEXTURE2D_DESC sd{};
+		sd.Width = desc.Width;
+		sd.Height = desc.Height;
+		sd.MipLevels = 1;
+		sd.ArraySize = 1;
+		sd.Format = storage;
+		sd.SampleDesc.Count = 1;
+		sd.Usage = D3D11_USAGE_STAGING;
+		sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		ID3D11Texture2D* staging = nullptr;
+		if (FAILED(g_device->CreateTexture2D(&sd, nullptr, &staging)) || !staging) {
+			return r;
+		}
+		ctx->CopySubresourceRegion(staging, 0, 0, 0, 0, src, sub, nullptr);
+		D3D11_MAPPED_SUBRESOURCE m{};
+		if (SUCCEEDED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &m))) {
+			const bool     is16 = storage == DXGI_FORMAT_R16_TYPELESS;
+			const std::uint32_t maxRaw = is16 ? 0xFFFFu : 0x3F800000u;  // 1.0f
+			r.minV = UINT32_MAX;
+			for (UINT y = 0; y < desc.Height; ++y) {
+				const auto* row = static_cast<const std::uint8_t*>(m.pData) + static_cast<std::size_t>(y) * m.RowPitch;
+				for (UINT x = 0; x < desc.Width; ++x) {
+					std::uint32_t v = 0;
+					if (is16) {
+						v = reinterpret_cast<const std::uint16_t*>(row)[x];
+					} else {
+						v = reinterpret_cast<const std::uint32_t*>(row)[x];
+					}
+					if (v == 0) {
+						++r.zero;
+					} else if (v >= maxRaw) {
+						++r.full;
+					} else {
+						++r.covered;
+						r.minV = v < r.minV ? v : r.minV;
+						r.maxV = v > r.maxV ? v : r.maxV;
+					}
+				}
+			}
+			if (!r.covered) {
+				r.minV = 0;
+			}
+			r.ok = true;
+			ctx->Unmap(staging, 0);
+		}
+		staging->Release();
+		return r;
+	}
+
 	bool DepthFuncKnown() noexcept { return g_funcKnown; }
 
 	void NoteDepthState(void* a_context) noexcept

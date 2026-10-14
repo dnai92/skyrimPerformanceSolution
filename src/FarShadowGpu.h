@@ -38,6 +38,17 @@ namespace FarShadowGpu
 	// Ebene a_slice (Mip 0) von a_src nach a_dst kopieren
 	void CopySlice(void* a_context, void* a_dst, void* a_src, std::uint32_t a_slice) noexcept;
 
+	// Diagnose (CPU-Auslese, blockiert kurz): wie viele Texel der Ebene sind belegt (nicht 0 und nicht Maximalwert)?
+	struct ProbeResult
+	{
+		std::uint32_t covered = 0, zero = 0, full = 0;
+		std::uint32_t minV = 0, maxV = 0;  // ueber belegte Texel, Rohwert
+		bool          ok = false;
+	};
+	// a_texture != nullptr: Ebene a_slice dieser Textur; sonst eigene Kopie a_slot von Ziel a_target
+	ProbeResult Probe(void* a_context, void* a_texture, std::uint32_t a_slice, std::uint32_t a_target, std::uint32_t a_slot) noexcept;
+	std::uint32_t DepthFunc() noexcept;
+
 	// Vergleichsfunktion der Engine fuer Schattenkarten aus dem gerade gesetzten Tiefenzustand lernen (einmalig,
 	// waehrend des Sonnen-Zeichnens). Unbekannt = LESS_EQUAL (Standard-Tiefe).
 	bool DepthFuncKnown() noexcept;

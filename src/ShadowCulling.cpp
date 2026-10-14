@@ -1773,7 +1773,7 @@ namespace ShadowCulling
 		void FarLog() noexcept
 		{
 			auto& f = g_far;
-			if (std::chrono::steady_clock::now() - f.lastLog < std::chrono::seconds(60) || f.frames == 0) {
+			if (std::chrono::steady_clock::now() - f.lastLog < std::chrono::seconds(20) || f.frames == 0) {
 				return;
 			}
 			f.lastLog = std::chrono::steady_clock::now();
@@ -1866,18 +1866,47 @@ namespace ShadowCulling
 					f.valid = f.prebuilt = false;  // neue Kopie ist leer
 					continue;
 				}
+				// Diagnose: Belegung der Karten je Modus alle 3 s auslesen (CPU wartet kurz auf die GPU)
+				using PR = FarShadowGpu::ProbeResult;
+				static std::chrono::steady_clock::time_point probeAt[4]{};
+				const auto  now = std::chrono::steady_clock::now();
+				const bool  probe = t == 0 && now - probeAt[static_cast<int>(mode)] >= std::chrono::seconds(3);
+				const auto  fmt = [](const PR& a_p) {
+                    return a_p.ok ? std::format("covered {} zero {} full {} range {}-{}", a_p.covered, a_p.zero, a_p.full, a_p.minV, a_p.maxV) : std::string("n/a");
+				};
+				if (probe) {
+					probeAt[static_cast<int>(mode)] = now;
+				}
 				switch (mode) {
 				case FarMode::kWait:
 					FarShadowGpu::Save(ctx, t, FarShadowGpu::kPrev, tex, f.slice);
+					if (probe) {
+						logger::info("[FarShadowCache] probe wait | engine map {}", fmt(FarShadowGpu::Probe(ctx, tex, f.slice, t, 0)));
+					}
 					break;
 				case FarMode::kBuild:
 					FarShadowGpu::Save(ctx, t, FarShadowGpu::kStatic, tex, f.slice);
 					FarShadowGpu::Restore(ctx, t, FarShadowGpu::kPrev, tex, f.slice);  // sichtbar: vollstaendige Ebene des Vorframes
+					if (probe) {
+						logger::info("[FarShadowCache] probe build | static copy {} | shown (prev) {}", fmt(FarShadowGpu::Probe(ctx, nullptr, 0, t, FarShadowGpu::kStatic)),
+							fmt(FarShadowGpu::Probe(ctx, tex, f.slice, t, 0)));
+					}
 					break;
 				case FarMode::kCached:
-					if (!dsv || !FarShadowGpu::Merge(ctx, t, FarShadowGpu::kStatic, dsv)) {
-						FarShadowGpu::Restore(ctx, t, FarShadowGpu::kStatic, tex, f.slice);  // ohne Ebenen-Sicht: wenigstens das Unbewegliche
-						++f.mergeFail;
+					{
+						PR before{}, stat{};
+						if (probe) {
+							before = FarShadowGpu::Probe(ctx, tex, f.slice, t, 0);
+							stat = FarShadowGpu::Probe(ctx, nullptr, 0, t, FarShadowGpu::kStatic);
+						}
+						if (!dsv || !FarShadowGpu::Merge(ctx, t, FarShadowGpu::kStatic, dsv)) {
+							FarShadowGpu::Restore(ctx, t, FarShadowGpu::kStatic, tex, f.slice);  // ohne Ebenen-Sicht: wenigstens das Unbewegliche
+							++f.mergeFail;
+						}
+						if (probe) {
+							logger::info("[FarShadowCache] probe cached | engine map (dynamic only) {} | static copy {} | after merge {} | depth func {}", fmt(before), fmt(stat),
+								fmt(FarShadowGpu::Probe(ctx, tex, f.slice, t, 0)), FarShadowGpu::DepthFunc());
+						}
 					}
 					break;
 				default:
