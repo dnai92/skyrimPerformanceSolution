@@ -30,4 +30,18 @@ namespace WaitProbe
 
 	// Kopiert die Tabelle (seit dem letzten Aufruf) und setzt sie zurueck; nur vom Main-Thread aufrufen
 	std::size_t TakeCallers(CallerStat* a_out, std::size_t a_max) noexcept;
+
+	// Aufrufketten der Engine-Wartestellen (bis zu kChainDepth Ruecksprungadressen in SkyrimSE.exe oberhalb der
+	// Warte-Funktion). Erfasst wird jeder 32. Aufruf (Zeit hochgerechnet) und jede lange Wartezeit (ab 0,5 ms, exakt).
+	inline constexpr std::size_t kChainDepth = 5;
+	struct ChainStat
+	{
+		std::uintptr_t rva[kChainDepth]{};
+		std::uint64_t  ns = 0;
+		std::uint64_t  calls = 0;
+		std::uint64_t  maxNs = 0;
+	};
+	inline constexpr std::size_t kMaxChains = 32;
+	// a_long = false: Stichprobe (Zeit x32 hochgerechnet), true: lange Wartezeiten
+	std::size_t TakeChains(bool a_long, ChainStat* a_out, std::size_t a_max) noexcept;
 }

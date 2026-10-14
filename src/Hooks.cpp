@@ -44,6 +44,33 @@ namespace Hooks
 				logger::info("[Engine-Wait]   RVA 0x{:X} (ID {} +0x{:X}): {:.2f} ms/frame, {:.1f} calls/frame",
 					c.rva, id, delta, c.ns / 1e6 / 600.0, c.calls / 600.0);
 			}
+
+			// Aufrufketten: Wer ruft die Wartestellen auf? (ID +Versatz je Ebene, von innen nach aussen)
+			const auto idOf = [&](std::uintptr_t a_rva) {
+				if (!a_rva) {
+					return std::string("-");
+				}
+				auto it = std::upper_bound(offset2id.begin(), offset2id.end(), a_rva, [](std::uintptr_t a_off, const auto& a_map) { return a_off < a_map.offset; });
+				if (it == offset2id.begin()) {
+					return std::format("0x{:X}", a_rva);
+				}
+				--it;
+				return std::format("{}+0x{:X}", it->id, a_rva - it->offset);
+			};
+			for (const bool longWaits : { false, true }) {
+				std::array<WaitProbe::ChainStat, WaitProbe::kMaxChains> chains{};
+				const auto cn = WaitProbe::TakeChains(longWaits, chains.data(), chains.size());
+				std::sort(chains.begin(), chains.begin() + cn, [](const auto& a, const auto& b) { return a.ns > b.ns; });
+				logger::info("[Engine-Wait] {} (main thread, over 600 frames):", longWaits ? "long waits >= 0.5 ms by call chain" : "call chains (every 32nd wait, time extrapolated)");
+				for (std::size_t i = 0; i < cn && i < 8; ++i) {
+					const auto& c = chains[i];
+					std::string chain;
+					for (std::size_t d = 0; d < WaitProbe::kChainDepth; ++d) {
+						chain += (d ? " < " : "") + idOf(c.rva[d]);
+					}
+					logger::info("[Engine-Wait]   {:.2f} ms/frame | {} {} | max {:.2f} ms | {}", c.ns / 1e6 / 600.0, c.calls, longWaits ? "waits" : "samples", c.maxNs / 1e6, chain);
+				}
+			}
 		}
 
 		template <class T>

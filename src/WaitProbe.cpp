@@ -7,7 +7,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <intrin.h>
 
 #include "Stats.h"
@@ -38,6 +40,58 @@ namespace WaitProbe
 		std::uintptr_t                   g_gameBase = 0;
 		std::array<CallerStat, kMaxCallers> g_callers{};
 		std::uint64_t                    g_callersOther = 0;
+
+		// Aufrufketten (nur Main-Thread)
+		constexpr std::uint64_t              kSampleEvery = 32;
+		constexpr std::int64_t               kLongNs = 500'000;
+		std::array<ChainStat, kMaxChains>    g_chainsSampled{}, g_chainsLong{};
+		std::uint64_t                        g_chainCounter = 0;
+		std::uintptr_t                       g_gameEnd = 0;
+
+		void AddChain(std::array<ChainStat, kMaxChains>& a_table, const std::uintptr_t (&a_rva)[kChainDepth], std::uint64_t a_ns, std::uint64_t a_realNs) noexcept
+		{
+			for (auto& c : a_table) {
+				if (c.calls == 0) {
+					std::copy(std::begin(a_rva), std::end(a_rva), c.rva);
+				} else if (!std::equal(std::begin(a_rva), std::end(a_rva), c.rva)) {
+					continue;
+				}
+				c.ns += a_ns;
+				++c.calls;
+				c.maxNs = std::max<std::uint64_t>(c.maxNs, a_realNs);
+				return;
+			}
+		}
+
+		// Ruecksprungadressen in SkyrimSE.exe oberhalb der Warte-Funktion (Probe selbst und Systemrahmen uebersprungen)
+		void RecordChain(std::int64_t a_ns) noexcept
+		{
+			const bool longWait = a_ns >= kLongNs;
+			const bool sample = (++g_chainCounter % kSampleEvery) == 0;
+			if (!longWait && !sample) {
+				return;
+			}
+			void*      frames[24]{};
+			const auto n = RtlCaptureStackBackTrace(1, static_cast<DWORD>(std::size(frames)), frames, nullptr);
+			std::uintptr_t rva[kChainDepth]{};
+			std::size_t    k = 0;
+			for (USHORT i = 0; i < n && k < kChainDepth; ++i) {
+				const auto a = reinterpret_cast<std::uintptr_t>(frames[i]);
+				if (a >= g_gameBase && a < g_gameEnd) {
+					rva[k++] = a - g_gameBase;
+				}
+			}
+			if (k == 0) {
+				return;
+			}
+			const auto ns = static_cast<std::uint64_t>(a_ns);
+			if (sample) {
+				AddChain(g_chainsSampled, rva, ns * kSampleEvery, ns);
+			}
+			if (longWait) {
+				AddChain(g_chainsLong, rva, ns, ns);
+			}
+		}
 
 		void RecordCaller(void* a_ret, std::int64_t a_ns) noexcept
 		{
@@ -70,6 +124,7 @@ namespace WaitProbe
 				Stats::Count(kCounters[Slot]);
 				if constexpr (Slot == 2) {
 					RecordCaller(a_ret, ns);
+					RecordChain(ns);
 				}
 			}
 
@@ -222,6 +277,22 @@ namespace WaitProbe
 		return n;
 	}
 
+	std::size_t TakeChains(bool a_long, ChainStat* a_out, std::size_t a_max) noexcept
+	{
+		auto&       table = a_long ? g_chainsLong : g_chainsSampled;
+		std::size_t n = 0;
+		for (auto& c : table) {
+			if (c.calls == 0) {
+				break;
+			}
+			if (n < a_max) {
+				a_out[n++] = c;
+			}
+			c = {};
+		}
+		return n;
+	}
+
 	void Install(ModuleResult& a_fsmp, ModuleResult& a_cbpc, ModuleResult& a_game) noexcept
 	{
 		g_mainThread = GetCurrentThreadId();
@@ -232,6 +303,11 @@ namespace WaitProbe
 		a_fsmp = PatchModule<0>(L"hdtsmp64.dll");
 		a_cbpc = PatchModule<1>(L"cbp.dll");
 		g_gameBase = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+		{
+			const auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(g_gameBase);
+			const auto nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(g_gameBase + dos->e_lfanew);
+			g_gameEnd = g_gameBase + nt->OptionalHeader.SizeOfImage;
+		}
 		a_game = PatchModule<2>(nullptr);
 	}
 }
