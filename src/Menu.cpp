@@ -382,6 +382,18 @@ namespace Menu
 			Tip(T("Switches the far shadow cache off and on every 15 s and writes frame time and FPS of both to SPS.log ([Beta-AB]). Stand still outdoors in daylight. Your setting is restored afterwards.",
 				"Schaltet den fernen Schatten-Cache alle 15 s aus und an und schreibt Frame-Zeit und FPS beider Varianten in SPS.log ([Beta-AB]). Draußen bei Tageslicht stehen bleiben. Deine Einstellung wird danach wiederhergestellt."));
 
+			{
+				static constexpr const char* kFarTestEn[] = { "0 normal", "1 without group skipping", "2 nothing left out (merge on)", "3 nothing left out, no merge" };
+				static constexpr const char* kFarTestDe[] = { "0 normal", "1 ohne Gruppen-Überspringen", "2 nichts weglassen (Zusammenführen an)", "3 nichts weglassen, kein Zusammenführen" };
+				const int  m = ShadowCulling::FarTestMode();
+				const auto label = std::format("{}: {}##fartest", T("Far cache test mode", "Fern-Cache Testmodus"), T(kFarTestEn[m], kFarTestDe[m]));
+				if (MenuApi::Button(label.c_str())) {
+					ShadowCulling::CycleFarTestMode();
+				}
+				Tip(T("Diagnosis only (not saved): click to switch. Stand still with the far cache on and watch whether far shadows still flicker.",
+					"Nur Diagnose (wird nicht gespeichert): Klicken schaltet weiter. Mit eingeschaltetem fernen Cache still stehen und schauen, ob ferne Schatten noch flackern."));
+			}
+
 			MenuApi::SeparatorText(T("Skylighting culling (measurement)", "Himmelslicht-Culling (Messung)"));
 			if (!EngineTimers::PrecipTimerInstalled()) {
 				MenuApi::TextWrapped("%s", T("Needs bEngineProbes = true in SPS.ini [General] and a game restart.",

@@ -402,6 +402,7 @@ namespace ShadowCulling
 		};
 		constexpr std::uint32_t    kFarCascade = 1;
 		std::atomic<int>           g_farMode{ 0 };
+		std::atomic<int>           g_farTest{ 0 };  // Diagnose, siehe FarTestMode()
 		std::atomic<std::uint64_t> g_farSkippedStatic{ 0 }, g_farSkippedDynamic{ 0 }, g_farPruned{ 0 };
 		bool                       FarDynamic(const RE::BSGeometry& a_geom) noexcept;  // Figuren, Angehaengtes, Effekte (weiter unten)
 		std::uint32_t     g_cacheCounter = 0;
@@ -934,7 +935,7 @@ namespace ShadowCulling
 						const auto fm = static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed));
 						if (fm == FarMode::kBuild || fm == FarMode::kCached) {
 							const bool dyn = FarDynamic(a_visible);
-							if (fm == FarMode::kCached && !dyn) {
+							if (fm == FarMode::kCached && !dyn && g_farTest.load(std::memory_order_relaxed) <= 1) {
 								g_farSkippedStatic.fetch_add(1, std::memory_order_relaxed);
 								return;  // steckt im Cache
 							}
@@ -1294,7 +1295,8 @@ namespace ShadowCulling
 					return false;  // Kaskaden-Cache entscheidet selbst
 				}
 				// Ferne Kaskade aus dem Cache: ganze Gruppen ohne Figuren ueberspringen (Pruefung im Aufrufer)
-				if (cascade >= kFarCascade && static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed)) == FarMode::kCached) {
+				if (cascade >= kFarCascade && static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed)) == FarMode::kCached &&
+					g_farTest.load(std::memory_order_relaxed) == 0) {
 					g_farPruned.fetch_add(1, std::memory_order_relaxed);
 					a_sun = true;
 					return true;
@@ -1899,7 +1901,10 @@ namespace ShadowCulling
 							before = FarShadowGpu::Probe(ctx, tex, f.slice, t, 0);
 							stat = FarShadowGpu::Probe(ctx, nullptr, 0, t, FarShadowGpu::kStatic);
 						}
-						if (!dsv || !FarShadowGpu::Merge(ctx, t, FarShadowGpu::kStatic, dsv)) {
+						if (g_farTest.load(std::memory_order_relaxed) == 3) {
+						break;
+					}
+					if (!dsv || !FarShadowGpu::Merge(ctx, t, FarShadowGpu::kStatic, dsv)) {
 							FarShadowGpu::Restore(ctx, t, FarShadowGpu::kStatic, tex, f.slice);  // ohne Ebenen-Sicht: wenigstens das Unbewegliche
 							++f.mergeFail;
 						}
@@ -2086,6 +2091,18 @@ namespace ShadowCulling
 	bool FreezeMatrix() noexcept
 	{
 		return Config::cascadeCache.freezeMatrix && !Config::stableCascade.enabled;
+	}
+
+	int FarTestMode() noexcept
+	{
+		return g_farTest.load(std::memory_order_relaxed);
+	}
+
+	void CycleFarTestMode() noexcept
+	{
+		const int m = (g_farTest.load(std::memory_order_relaxed) + 1) % 4;
+		g_farTest.store(m, std::memory_order_relaxed);
+		logger::info("[FarShadowCache] test mode {}", m);
 	}
 
 	void AfterSunRender() noexcept
