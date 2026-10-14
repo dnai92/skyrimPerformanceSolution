@@ -3,6 +3,7 @@
 
 #include "Config.h"
 #include "DetourHelper.h"
+#include "InstancingAnalysis.h"
 #include "Stats.h"
 
 namespace EngineTimers
@@ -200,7 +201,7 @@ namespace EngineTimers
 		{
 			int           mode = 0;
 			std::uint64_t frames = 0;
-			double        ms = 0, npc = 0;
+			double        ms = 0, npc = 0, sunMs = 0, sunDraws = 0;  // Sonnenschatten: CPU-Zeit Render, ausgefuehrte Draws
 		};
 		std::array<BetaPhase, kBetaPhases>      g_betaPhases;
 		int                                     g_betaPhase = -1;
@@ -229,23 +230,26 @@ namespace EngineTimers
 		{
 			const auto& p = g_betaPhases[g_betaPhase];
 			const double f = p.frames ? static_cast<double>(p.frames) : 1.0;
-			logger::info("[Beta-AB] phase {} {}: {} frames | frame avg {:.2f} ms ({:.1f} FPS) | NPC updates/frame {:.1f}", g_betaPhase + 1, ModeName(p.mode), p.frames,
-				p.ms / f, p.ms > 0 ? 1000.0 * f / p.ms : 0.0, p.npc / f);
+			logger::info("[Beta-AB] phase {} {}: {} frames | frame avg {:.2f} ms ({:.1f} FPS) | NPC updates/frame {:.1f} | sun shadow draws {:.0f}/frame, CPU {:.3f} ms",
+				g_betaPhase + 1, ModeName(p.mode), p.frames, p.ms / f, p.ms > 0 ? 1000.0 * f / p.ms : 0.0, p.npc / f, p.sunDraws / f, p.sunMs / f);
 		}
 
 		void BetaFinish()
 		{
-			std::array<double, kBetaModes> ms{}, fr{}, npc{};
+			std::array<double, kBetaModes> ms{}, fr{}, npc{}, sun{}, draws{};
 			for (int i = 0; i < Phases(); ++i) {
 				const auto& p = g_betaPhases[i];
 				ms[p.mode] += p.ms;
 				fr[p.mode] += static_cast<double>(p.frames);
 				npc[p.mode] += p.npc;
+				sun[p.mode] += p.sunMs;
+				draws[p.mode] += p.sunDraws;
 			}
 			std::string line;
 			for (int m = 0; m < Modes(); ++m) {
-				line += std::format("{}{} {:.2f} ms ({:.1f} FPS, NPC {:.1f})", m ? " | " : "", ModeName(m), fr[m] > 0 ? ms[m] / fr[m] : 0.0, ms[m] > 0 ? 1000.0 * fr[m] / ms[m] : 0.0,
-					fr[m] > 0 ? npc[m] / fr[m] : 0.0);
+				const double n = fr[m] > 0 ? fr[m] : 1.0;
+				line += std::format("{}{} {:.2f} ms ({:.1f} FPS, NPC {:.1f}, sun shadow draws {:.0f}, CPU {:.3f} ms)", m ? " | " : "", ModeName(m), ms[m] / n,
+					ms[m] > 0 ? 1000.0 * fr[m] / ms[m] : 0.0, npc[m] / n, draws[m] / n, sun[m] / n);
 			}
 			logger::info("[Beta-AB] result: {}", line);
 			Config::occlusionCull.store(g_betaOrigOcc);
@@ -265,6 +269,8 @@ namespace EngineTimers
 				logger::info("[Beta-AB] start: {} phases of {} s, rotating {} (stand still or walk the same route)", Phases(), kBetaPhaseLength.count(),
 					g_betaSet == 1 ? "far cache off / on" : "betas off / occlusion only / shadow cache only / both");
 				g_betaRunning.store(true);
+				InstancingAnalysis::TakeSunRenderMs();
+				InstancingAnalysis::TakeSunDraws();
 				BetaBegin(0);
 				g_betaLastFrame = now;
 				return;
@@ -280,6 +286,11 @@ namespace EngineTimers
 				++p.frames;
 				p.ms += dt;
 				p.npc += Stats::FrameNpcUpdates();
+				p.sunMs += InstancingAnalysis::TakeSunRenderMs();
+				p.sunDraws += static_cast<double>(InstancingAnalysis::TakeSunDraws());
+			} else {
+				InstancingAnalysis::TakeSunRenderMs();
+				InstancingAnalysis::TakeSunDraws();
 			}
 			if (now - g_betaPhaseStart >= kBetaPhaseLength) {
 				BetaEnd();

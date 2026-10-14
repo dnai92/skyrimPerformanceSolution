@@ -10,4 +10,9 @@ namespace InstancingAnalysis
 
 	// Einmal pro Frame (Main-Thread)
 	void OnFrame();
+
+	// CPU-Zeit in BSShadowDirectionalLight::Render (Draw Calls der Sonnenschatten) und Zahl der ausgefuehrten
+	// Schatten-Draws seit dem letzten Aufruf (Messung Beta-A/B)
+	double        TakeSunRenderMs() noexcept;
+	std::uint64_t TakeSunDraws() noexcept;
 }

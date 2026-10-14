@@ -21,7 +21,9 @@ namespace InstancingAnalysis
 
 		// Wird waehrend BSShadowDirectionalLight::Render gesetzt (Render-Thread = Main-Thread)
 		std::atomic<bool> g_inSunShadows{ false };
-		std::int64_t      g_sunRenderNs = 0;  // Summe im Report-Fenster (Main-Thread)
+		std::int64_t      g_sunRenderNs = 0;
+	std::int64_t      g_sunRenderAbNs = 0;  // fuer TakeSunRenderMs (Beta-A/B)
+	std::uint64_t     g_sunDrawsAb = 0;  // Summe im Report-Fenster (Main-Thread)
 
 		// Ueber welche Aufrufstelle von RenderPassImmediately laeuft der aktuelle Draw? (0 = keine gehookte)
 		thread_local std::uint32_t t_callSite = 0;
@@ -546,7 +548,9 @@ namespace InstancingAnalysis
 				GpuTimer::Begin(GpuTimer::kSunShadows);
 				func(a_this, a_index);
 				GpuTimer::End(GpuTimer::kSunShadows);
-				g_sunRenderNs += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
+				const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
+				g_sunRenderNs += ns;
+				g_sunRenderAbNs += ns;
 				g_inSunShadows.store(false, std::memory_order_relaxed);
 				ShadowCulling::AfterSunRender();
 			}
@@ -616,6 +620,9 @@ namespace InstancingAnalysis
 				}
 				const auto prev = t_callSite;
 				t_callSite = Site;
+				if (g_inSunShadows.load(std::memory_order_relaxed)) {
+					++g_sunDrawsAb;
+				}
 				func(a_pass, a_technique, a_alphaTest, a_renderFlags);
 				t_callSite = prev;
 				// Tiefentest der Sonnen-Schattenkarten einmal lernen (Cache der fernen Kaskade legt seinen Stand damit darueber)
@@ -828,5 +835,19 @@ namespace InstancingAnalysis
 			}
 			g_sunRenderNs = 0;
 		}
+	}
+
+	double TakeSunRenderMs() noexcept
+	{
+		const auto ns = g_sunRenderAbNs;
+		g_sunRenderAbNs = 0;
+		return static_cast<double>(ns) / 1e6;
+	}
+
+	std::uint64_t TakeSunDraws() noexcept
+	{
+		const auto n = g_sunDrawsAb;
+		g_sunDrawsAb = 0;
+		return n;
 	}
 }
