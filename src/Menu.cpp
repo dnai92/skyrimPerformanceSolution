@@ -275,6 +275,9 @@ namespace Menu
 				T("Small objects are left out of the skylighting occlusion map.", "Kleine Objekte werden in der Himmelslicht-Karte weggelassen."));
 			Toggle(T("Decal culling", "Ferne Bodendetails weglassen"), Config::decalCulling.enabled,
 				T("Small decals (footprints, blood, dirt) far away are not drawn.", "Kleine Bodendetails (Fußspuren, Blut, Schmutz) in der Ferne werden nicht gezeichnet."));
+			Toggle(T("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern"), Config::lightShadowCache.enabled,
+				T("Shadows of lights that do not move are kept, only characters and moving things are redrawn. Mainly for interiors. Switch off if shadows near fires pulse.",
+					"Schatten von Lichtern, die sich nicht bewegen, werden aufbewahrt, nur Figuren und Bewegliches werden neu gezeichnet. Vor allem für Innenräume. Ausschalten, falls Schatten an Feuern pulsieren."));
 			Toggle(T("Light assignment throttle", "Licht-Zuordnung drosseln"), Config::lightGather.enabled,
 				T("Moving lights (torches, flickering lights) only search for the objects they light when they really moved.",
 					"Bewegte Lichter (Fackeln, flackernde Lichter) suchen die beleuchteten Objekte nur neu, wenn sie sich wirklich bewegt haben."));
@@ -287,9 +290,6 @@ namespace Menu
 
 			MenuApi::SeparatorText(T("Beta (off by default)", "Beta (standardmäßig aus)"));
 			MenuApi::TextWrapped("%s", T("These work, but not perfectly on every setup yet. Switch off again if something looks wrong.", "Diese funktionieren, aber noch nicht auf jedem System perfekt. Bei Bildfehlern wieder ausschalten."));
-			Toggle(T("Shadow cache for static lights (BETA)", "Schatten fester Lichter zwischenspeichern (BETA)"), Config::lightShadowCache.enabled,
-				T("Shadows of lights that do not move are kept, only characters and moving things are redrawn. Mainly for interiors. With some lighting mods (e.g. Lux) shadows near fires can pulse.",
-					"Schatten von Lichtern, die sich nicht bewegen, werden aufbewahrt, nur Figuren und Bewegliches werden neu gezeichnet. Vor allem für Innenräume. Mit manchen Lichtmods (z. B. Lux) können Schatten an Feuern pulsieren."));
 			Toggle(T("Shadow instancing (BETA)", "Gleiche Schatten bündeln (BETA)"), Config::shadowInstancing.enabled,
 				T("Draws identical simple meshes in sun shadows with one draw call. Small gain. Takes effect after restarting the game. Switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn. Wirkt erst nach einem Neustart des Spiels. Bei flackernden Schatten oder Objekten wieder ausschalten."));
 			Toggle(T("Main view micro culling (BETA)", "Winzige Objekte im Bild weglassen (BETA)"), Config::mainViewCulling.enabled,
@@ -483,10 +483,10 @@ namespace Menu
 					"Innenräume werden fast nur von Fackeln und Feuern beleuchtet, fehlende Schatten fallen dort auf. Aus = in Innenräumen volle Fackelschatten."));
 			RuleControls("point", Config::pointLightCulling, 5000.0f);
 
-			MenuApi::SeparatorText(T("Shadow cache for static lights (BETA)", "Schatten fester Lichter zwischenspeichern (BETA)"));
+			MenuApi::SeparatorText(T("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern"));
 			Toggle(T("Enabled##lcache", "Aktiv##lcache"), Config::lightShadowCache.enabled,
-				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters and moving objects are drawn again each frame. Flickering lights are always redrawn. Mainly for interiors with many lights. BETA, default OFF: with some lighting mods (e.g. Lux) shadows near fires can pulse.",
-					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren und Bewegliches neu gezeichnet. Flackernde Lichter werden immer neu gezeichnet. Vor allem für Innenräume mit vielen Lichtern. BETA, Standard AUS: mit manchen Lichtmods (z. B. Lux) können Schatten an Feuern pulsieren."));
+				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters, moving objects and trees in the wind are drawn again each frame. Lights that drift or change their radius are rebuilt. Mainly for interiors with many lights. Switch off if shadows near fires pulse.",
+					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren, Bewegliches und Bäume im Wind neu gezeichnet. Lichter, die wandern oder ihren Radius ändern, werden neu aufgebaut. Vor allem für Innenräume mit vielen Lichtern. Ausschalten, falls Schatten an Feuern pulsieren."));
 
 			MenuApi::SeparatorText(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"));
 			Toggle(T("Enabled##actor", "Aktiv##actor"), Config::actorShadowCulling.enabled,

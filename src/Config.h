@@ -177,7 +177,7 @@ namespace Config
 	// Schatten-Cache fester Lichter (siehe LightShadowCache.h)
 	struct LightShadowCache
 	{
-		bool  enabled = false;  // Standard AUS seit 1.0.51 (pulsierende Schatten an Feuern mit Lux)
+		bool  enabled = true;   // 1.0.51-1.0.57 Beta/aus (Pulsieren mit Lux, behoben 1.0.56); Drachenfeste A/B: mit Verdeckung ~1 ms
 		float debugMode = 0;    // Pruef-Modus: 1 nie neu aufbauen, 2 Aufbau ohne Vorframe-Karte, 3 zurueckkopieren + alles zeichnen
 	};
 	inline LightShadowCache lightShadowCache;  // [LightShadowCache]
