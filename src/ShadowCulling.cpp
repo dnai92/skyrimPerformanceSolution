@@ -1835,6 +1835,33 @@ namespace ShadowCulling
 				if (!ensured) {
 					continue;
 				}
+				// Beschreibbare Sicht genau auf diese Ebene suchen (views[slice] ist nicht zwingend die richtige)
+				void* dsv = nullptr;
+				int   dsvIndex = -1;
+				char  dsvInfo[96]{};
+				for (std::uint32_t v = 0; v < 8 && !dsv; ++v) {
+					const std::uint32_t vi = v == 0 ? (f.slice < 8 ? f.slice : 0) : (v <= f.slice ? v - 1 : v);
+					if (ds.views[vi] && FarShadowGpu::DsvMatches(ds.views[vi], tex, f.slice, v == 0 ? dsvInfo : nullptr, v == 0 ? sizeof(dsvInfo) : 0)) {
+						dsv = ds.views[vi];
+						dsvIndex = static_cast<int>(vi);
+					}
+				}
+				// Die Engine zeichnet in kSHADOWMAPS_ESRAM; gelesen wird womoeglich eine Kopie (kSHADOWMAPS), die schon waehrend
+				// Render angelegt wird - unser Stand muss dann auch dorthin (1.0.59-Test: feste Schatten fehlten in Cache-Frames)
+				const auto readTex = t == 0 && idx[t] == static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS_ESRAM) ?
+				                         depth[static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS)].texture :
+				                         nullptr;
+				const bool syncRead = readTex && readTex != tex && FarShadowGpu::SameLayout(readTex, tex);
+				static std::uint32_t dsvLogged[2]{};
+				if (dsvLogged[t] < 1) {
+					++dsvLogged[t];
+					REX::W32::D3D11_TEXTURE2D_DESC rd{};
+					if (readTex) {
+						readTex->GetDesc(&rd);
+					}
+					logger::info("[FarShadowCache] target {} | view[{}]: {} | used view {} | read map (index 4): {}", t == 0 ? "sun" : "volumetric", f.slice, dsvInfo, dsvIndex,
+						!readTex ? std::string("none") : readTex == tex ? std::string("same texture") : std::format("separate {}x{} format {} array {} - {}", rd.width, rd.height, static_cast<std::uint32_t>(rd.format), rd.arraySize, syncRead ? "synced" : "layout differs, not synced"));
+				}
 				if (recreated && mode != FarMode::kWait) {
 					f.valid = f.prebuilt = false;  // neue Kopie ist leer
 					continue;
@@ -1848,13 +1875,16 @@ namespace ShadowCulling
 					FarShadowGpu::Restore(ctx, t, FarShadowGpu::kPrev, tex, f.slice);  // sichtbar: vollstaendige Ebene des Vorframes
 					break;
 				case FarMode::kCached:
-					if (f.slice >= 8 || !ds.views[f.slice] || !FarShadowGpu::Merge(ctx, t, FarShadowGpu::kStatic, ds.views[f.slice])) {
+					if (!dsv || !FarShadowGpu::Merge(ctx, t, FarShadowGpu::kStatic, dsv)) {
 						FarShadowGpu::Restore(ctx, t, FarShadowGpu::kStatic, tex, f.slice);  // ohne Ebenen-Sicht: wenigstens das Unbewegliche
 						++f.mergeFail;
 					}
 					break;
 				default:
 					break;
+				}
+				if (syncRead && mode != FarMode::kWait) {
+					FarShadowGpu::CopySlice(ctx, readTex, tex, f.slice);
 				}
 				if (t == 0) {
 					mainOk = true;

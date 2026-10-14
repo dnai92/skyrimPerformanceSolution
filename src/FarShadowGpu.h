@@ -31,6 +31,13 @@ namespace FarShadowGpu
 	// Kopie a_slot per Tiefentest in die Ebene (Depth-Stencil-View a_dsv) zeichnen. Stellt den Zustand wieder her.
 	bool Merge(void* a_context, std::uint32_t a_target, std::uint32_t a_slot, void* a_dsv) noexcept;
 
+	// Passt die Depth-Stencil-View zu Ebene a_slice von a_texture (beschreibbar)? a_info: Kurzbeschreibung fuers Log.
+	bool DsvMatches(void* a_dsv, void* a_texture, std::uint32_t a_slice, char* a_info, std::size_t a_infoSize) noexcept;
+	// Gleich aufgebaute Texturen (Groesse, Format, Ebenen)?
+	bool SameLayout(void* a_a, void* a_b) noexcept;
+	// Ebene a_slice (Mip 0) von a_src nach a_dst kopieren
+	void CopySlice(void* a_context, void* a_dst, void* a_src, std::uint32_t a_slice) noexcept;
+
 	// Vergleichsfunktion der Engine fuer Schattenkarten aus dem gerade gesetzten Tiefenzustand lernen (einmalig,
 	// waehrend des Sonnen-Zeichnens). Unbekannt = LESS_EQUAL (Standard-Tiefe).
 	bool DepthFuncKnown() noexcept;

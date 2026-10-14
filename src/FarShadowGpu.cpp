@@ -344,6 +344,60 @@ float main(float4 pos : SV_Position) : SV_Depth
 		return true;
 	}
 
+	bool DsvMatches(void* a_dsv, void* a_texture, std::uint32_t a_slice, char* a_info, std::size_t a_infoSize) noexcept
+	{
+		if (a_info && a_infoSize) {
+			a_info[0] = '\0';
+		}
+		const auto dsv = static_cast<ID3D11DepthStencilView*>(a_dsv);
+		if (!dsv || !a_texture) {
+			return false;
+		}
+		ID3D11Resource* res = nullptr;
+		dsv->GetResource(&res);
+		const bool sameRes = res == static_cast<ID3D11Resource*>(a_texture);
+		if (res) {
+			res->Release();
+		}
+		D3D11_DEPTH_STENCIL_VIEW_DESC d{};
+		dsv->GetDesc(&d);
+		UINT first = 0, count = 1;
+		if (d.ViewDimension == D3D11_DSV_DIMENSION_TEXTURE2DARRAY) {
+			first = d.Texture2DArray.FirstArraySlice;
+			count = d.Texture2DArray.ArraySize;
+		}
+		const bool readOnly = (d.Flags & D3D11_DSV_READ_ONLY_DEPTH) != 0;
+		if (a_info && a_infoSize) {
+			std::snprintf(a_info, a_infoSize, "dim %d slices %u+%u fmt %d%s%s", static_cast<int>(d.ViewDimension), first, count, static_cast<int>(d.Format),
+				sameRes ? "" : " other texture", readOnly ? " read-only" : "");
+		}
+		return sameRes && !readOnly && d.ViewDimension == D3D11_DSV_DIMENSION_TEXTURE2DARRAY && first == a_slice && count == 1;
+	}
+
+	bool SameLayout(void* a_a, void* a_b) noexcept
+	{
+		if (!a_a || !a_b) {
+			return false;
+		}
+		D3D11_TEXTURE2D_DESC a{}, b{};
+		static_cast<ID3D11Texture2D*>(a_a)->GetDesc(&a);
+		static_cast<ID3D11Texture2D*>(a_b)->GetDesc(&b);
+		return a.Width == b.Width && a.Height == b.Height && a.Format == b.Format && a.ArraySize == b.ArraySize && a.MipLevels == b.MipLevels &&
+		       a.SampleDesc.Count == b.SampleDesc.Count;
+	}
+
+	void CopySlice(void* a_context, void* a_dst, void* a_src, std::uint32_t a_slice) noexcept
+	{
+		const auto ctx = static_cast<ID3D11DeviceContext*>(a_context);
+		if (!ctx || !a_dst || !a_src || a_dst == a_src) {
+			return;
+		}
+		D3D11_TEXTURE2D_DESC desc{};
+		static_cast<ID3D11Texture2D*>(a_src)->GetDesc(&desc);
+		const UINT sub = a_slice * desc.MipLevels;
+		ctx->CopySubresourceRegion(static_cast<ID3D11Resource*>(a_dst), sub, 0, 0, 0, static_cast<ID3D11Resource*>(a_src), sub, nullptr);
+	}
+
 	bool DepthFuncKnown() noexcept { return g_funcKnown; }
 
 	void NoteDepthState(void* a_context) noexcept
