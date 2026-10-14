@@ -1804,7 +1804,12 @@ namespace ShadowCulling
 				return;
 			}
 			auto&               depth = renderer->GetDepthStencilData().depthStencils;
-			const std::uint32_t idx[2]{ static_cast<std::uint32_t>(f.target), static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kVOLUMETRIC_LIGHTING_SHADOWMAPS_ESRAM) };
+			// Die Sonnenkaskaden tragen kein gueltiges Ziel im Deskriptor (kNONE) - gezeichnet wird in kSHADOWMAPS_ESRAM
+			// (wie der alte Kaskaden-Cache; 1.0.59-Test: Sonnenkarte wurde sonst uebersprungen, Aufbau nie fertig)
+			const auto          sunTarget = static_cast<std::uint32_t>(f.target) < static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kTOTAL) ?
+			                                    static_cast<std::uint32_t>(f.target) :
+			                                    static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS_ESRAM);
+			const std::uint32_t idx[2]{ sunTarget, static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kVOLUMETRIC_LIGHTING_SHADOWMAPS_ESRAM) };
 			bool                mainOk = false;
 			for (std::uint32_t t = 0; t < 2; ++t) {
 				if (idx[t] >= static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kTOTAL)) {
