@@ -122,16 +122,6 @@ namespace Config
 	};
 	inline ActorPartShadowCulling actorPartShadowCulling;  // [ActorPartShadowCulling]
 
-	// Entwickler-Test: Animation ferner / nicht sichtbarer NPCs seltener aktualisieren (siehe AnimThrottle.h)
-	struct AnimThrottle
-	{
-		bool          enabled = false;        // Standard AUS (Test)
-		float         minDistance = 800.0f;   // naeher nie drosseln (~11 m)
-		float         farDistance = 2500.0f;  // sichtbar und weiter weg (~35 m): jeden farInterval-ten Frame
-		std::uint32_t farInterval = 2;
-		std::uint32_t hiddenInterval = 4;     // ausserhalb des Sichtfelds: jeden hiddenInterval-ten Frame
-	};
-	inline AnimThrottle animThrottle;  // [AnimThrottle]
 
 	// Licht-Geometrie-Zuordnung dynamischer Punktlichter nicht in jedem Frame neu berechnen (siehe LightGather.h)
 	struct LightGather

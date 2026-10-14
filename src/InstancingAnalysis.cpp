@@ -7,7 +7,6 @@
 #include "InstancedDraw.h"
 #include "LightShadowCache.h"
 #include "ShadowCulling.h"
-#include "PrepassAnalysis.h"
 #include "Stats.h"
 
 #include <mutex>
@@ -600,9 +599,6 @@ namespace InstancingAnalysis
 		{
 			static void thunk(RE::BSRenderPass* a_pass, std::uint32_t a_technique, bool a_alphaTest, std::uint32_t a_renderFlags)
 			{
-				if (a_pass && ShadowCulling::InDepthPrepass() && PrepassAnalysis::SkipDraw(*a_pass, a_alphaTest)) {
-					return;  // Messung Tiefenvorpass: diese Objektart in dieser Phase weglassen
-				}
 				if (a_pass && ShadowCulling::ShouldSkipDepthPrepassDraw(*a_pass)) {
 					return;  // Tiefenvorpass: kleines, fernes Objekt -> Draw ueberspringen
 				}

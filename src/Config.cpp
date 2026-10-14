@@ -292,15 +292,6 @@ namespace Config
 		ac.pointLights = ini.GetBoolValue("ActorShadowCulling", "bPointLights", ac.pointLights);
 		logger::info("ActorShadowCulling: {} | from distance {:.0f} | point lights {}", ac.enabled ? "ON" : "OFF", ac.minDistance, ac.pointLights);
 
-		auto& at = animThrottle;
-		at.enabled = ini.GetBoolValue("AnimThrottle", "bEnabled", at.enabled);
-		at.minDistance = std::max(300.0f, static_cast<float>(ini.GetDoubleValue("AnimThrottle", "fMinDistance", at.minDistance)));
-		at.farDistance = std::max(at.minDistance, static_cast<float>(ini.GetDoubleValue("AnimThrottle", "fFarDistance", at.farDistance)));
-		at.farInterval = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(ini.GetLongValue("AnimThrottle", "iFarInterval", at.farInterval)), 1, 8);
-		at.hiddenInterval = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(ini.GetLongValue("AnimThrottle", "iHiddenInterval", at.hiddenInterval)), 1, 8);
-		logger::info("AnimThrottle (developer test): {} | never below {:.0f} | far beyond {:.0f} every {}. frame | hidden every {}. frame", at.enabled ? "ON" : "OFF",
-			at.minDistance, at.farDistance, at.farInterval, at.hiddenInterval);
-
 		auto& ap = actorPartShadowCulling;
 		ap.enabled = ini.GetBoolValue("ActorPartShadowCulling", "bEnabled", ap.enabled);
 		ap.maxRadius = std::clamp(static_cast<float>(ini.GetDoubleValue("ActorPartShadowCulling", "fMaxRadius", ap.maxRadius)), 0.0f, 20.0f);
