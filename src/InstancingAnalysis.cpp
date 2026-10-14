@@ -604,6 +604,9 @@ namespace InstancingAnalysis
 				if (a_pass && LightShadowCache::SkipDraw(*a_pass)) {
 					return;  // Schatten steckt in der zwischengespeicherten Karte
 				}
+				if (a_pass && ShadowCulling::FarSkipDraw(*a_pass)) {
+					return;  // ferne Sonnenkaskade: steckt im Cache bzw. Aufbau nur mit Unbeweglichem
+				}
 				bool first = false;
 				if (Site == 1 && g_instBatchActive && a_pass && Qualifies(*a_pass, a_alphaTest)) {
 					if (CollectInstance(*a_pass)) {

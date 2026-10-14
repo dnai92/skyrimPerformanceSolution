@@ -3,6 +3,7 @@
 #include "Config.h"
 #include "Features.h"
 #include "SceneUtil.h"
+#include "ShadowCulling.h"
 #include "Stats.h"
 
 #include <unordered_set>
@@ -516,6 +517,12 @@ namespace LightShadowCache
 					return;
 				}
 				LightState* l = a_camera ? FindByCamera(a_camera) : nullptr;
+				// Ferne Sonnenkaskade (eigener Cache in ShadowCulling, gleiches Verfahren)
+				if (!l && g_drawFilter && ShadowCulling::FarBeginDraw(a_camera)) {
+					func(a_camera, a_accumulator, a_flags);
+					ShadowCulling::FarEndDraw();
+					return;
+				}
 				if (l) {
 					NoteSlice(l);  // auch normal gezeichnete verwaltete Lichter: ihre Karte koennte ueberschrieben werden
 				}

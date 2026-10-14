@@ -402,7 +402,7 @@ namespace ShadowCulling
 		};
 		constexpr std::uint32_t    kFarCascade = 1;
 		std::atomic<int>           g_farMode{ 0 };
-		std::atomic<int>           g_farTest{ 0 };  // Diagnose, siehe FarTestMode()
+		int                        g_farDrawMode = 0;  // FarMode waehrend die ferne Kaskade gezeichnet wird (sonst 0)
 		std::atomic<std::uint64_t> g_farSkippedStatic{ 0 }, g_farSkippedDynamic{ 0 }, g_farPruned{ 0 };
 		bool                       FarDynamic(const RE::BSGeometry& a_geom) noexcept;  // Figuren, Angehaengtes, Effekte (weiter unten)
 		std::uint32_t     g_cacheCounter = 0;
@@ -931,20 +931,6 @@ namespace ShadowCulling
 						Stats::Count(Stats::Counter::CascadeSkipped);
 						return;  // Kaskade kommt diesen Frame aus dem Cache
 					}
-					if (cascade >= kFarCascade) {
-						const auto fm = static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed));
-						if (fm == FarMode::kBuild || fm == FarMode::kCached) {
-							const bool dyn = FarDynamic(a_visible);
-							if (fm == FarMode::kCached && !dyn && g_farTest.load(std::memory_order_relaxed) <= 1) {
-								g_farSkippedStatic.fetch_add(1, std::memory_order_relaxed);
-								return;  // steckt im Cache
-							}
-							if (fm == FarMode::kBuild && dyn) {
-								g_farSkippedDynamic.fetch_add(1, std::memory_order_relaxed);
-								return;  // Cache nur mit Unbeweglichem
-							}
-						}
-					}
 					if (!a_visible.GetGeometryRuntimeData().skinInstance && ShadowOutsideView(a_visible.worldBound)) {
 						Stats::Count(Stats::Counter::SunViewCulled);
 						return;
@@ -1293,13 +1279,6 @@ namespace ShadowCulling
 			case Kind::kSun:
 				if (g_cacheSkip.load(std::memory_order_relaxed) && Config::cascadeCache.skipDraws && cascade >= Config::cascadeCache.cascade) {
 					return false;  // Kaskaden-Cache entscheidet selbst
-				}
-				// Ferne Kaskade aus dem Cache: ganze Gruppen ohne Figuren ueberspringen (Pruefung im Aufrufer)
-				if (cascade >= kFarCascade && static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed)) == FarMode::kCached &&
-					g_farTest.load(std::memory_order_relaxed) == 0) {
-					g_farPruned.fetch_add(1, std::memory_order_relaxed);
-					a_sun = true;
-					return true;
 				}
 				if (ShadowOutsideView(bound)) {
 					Stats::Count(Stats::Counter::PrunedSunView);
@@ -1691,6 +1670,11 @@ namespace ShadowCulling
 			FarMode                               last = FarMode::kNormal;
 			std::uint64_t                         frames = 0, cached = 0, builds = 0, waits = 0, normal = 0, mergeFail = 0;
 			std::uint64_t                         waitProjChanged = 0, waitNotSaved = 0, cacheProjChanged = 0;  // Diagnose: warum kein Aufbau
+			// Zeichen-Hook der fernen Kaskade (FarBeginDraw/FarEndDraw)
+			void*                                 drawCtx = nullptr;
+			REX::W32::ID3D11Texture2D*            drawTex = nullptr;
+			bool                                  drawDone = false;
+			std::uint64_t                         hookMissed = 0, notBound = 0;
 			std::chrono::steady_clock::time_point lastLog = std::chrono::steady_clock::now();
 		};
 		FarState g_far{};
@@ -1781,15 +1765,18 @@ namespace ShadowCulling
 			f.lastLog = std::chrono::steady_clock::now();
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
-			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: static skipped {:.0f}, groups skipped {:.0f} | merge failed {} | depth test {} | "
+			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: draws skipped {:.0f} | draw hook missed {} (other target {}) | "
 						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {}",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
-				static_cast<double>(g_farPruned.exchange(0)) / c, f.mergeFail, FarShadowGpu::DepthFuncKnown() ? "learned" : "default", f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged);
+				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged);
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
+			f.hookMissed = f.notBound = 0;
 			g_farSkippedDynamic.store(0);
 			f.frames = f.cached = f.builds = f.waits = f.normal = f.mergeFail = 0;
 		}
 
+		// Nach Render: Ergebnis des Zeichen-Hooks verbuchen. Nur wenn die ferne Kaskade wirklich ueber den Hook lief, gilt
+		// ihr Stand; sonst wurde normal (alles) gezeichnet und der Cache baut neu auf.
 		void FarAfterRender() noexcept
 		{
 			if (!Config::farShadowCache.enabled) {
@@ -1798,149 +1785,122 @@ namespace ShadowCulling
 			auto&      f = g_far;
 			const auto mode = static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed));
 			++f.frames;
-			const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
-			const auto ctx = renderer ? renderer->GetRuntimeData().context : nullptr;
-			if (mode == FarMode::kNormal || !ctx) {
-				++f.normal;
-				FarLog();
-				return;
-			}
-			auto&               depth = renderer->GetDepthStencilData().depthStencils;
-			// Die Sonnenkaskaden tragen kein gueltiges Ziel im Deskriptor (kNONE) - gezeichnet wird in kSHADOWMAPS_ESRAM
-			// (wie der alte Kaskaden-Cache; 1.0.59-Test: Sonnenkarte wurde sonst uebersprungen, Aufbau nie fertig)
-			const auto          sunTarget = static_cast<std::uint32_t>(f.target) < static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kTOTAL) ?
-			                                    static_cast<std::uint32_t>(f.target) :
-			                                    static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS_ESRAM);
-			const std::uint32_t idx[2]{ sunTarget, static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kVOLUMETRIC_LIGHTING_SHADOWMAPS_ESRAM) };
-			bool                mainOk = false;
-			for (std::uint32_t t = 0; t < 2; ++t) {
-				if (idx[t] >= static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kTOTAL)) {
-					continue;
-				}
-				auto&      ds = depth[idx[t]];
-				const auto tex = ds.texture;
-				if (!tex) {
-					continue;
-				}
-				REX::W32::D3D11_TEXTURE2D_DESC desc{};
-				tex->GetDesc(&desc);
-				bool recreated = false;
-				const bool sliceOk = f.slice < desc.arraySize;
-				const bool ensured = sliceOk && FarShadowGpu::Ensure(t, tex, recreated);
-				// Diagnose: je Ziel einmal (bzw. bei Fehler bis zu 5x) Ziel, Format und Ergebnis protokollieren
-				static std::uint32_t logged[2]{};
-				if (logged[t] < (ensured ? 1u : 5u)) {
-					++logged[t];
-					logger::info("[FarShadowCache] target {} (index {}) | {}x{} format {} array {} mips {} | cascade slice {} | copy {}", t == 0 ? "sun" : "volumetric", idx[t],
-						desc.width, desc.height, static_cast<std::uint32_t>(desc.format), desc.arraySize, desc.mipLevels, f.slice, ensured ? "ok" : (sliceOk ? "FAILED" : "slice out of range"));
-				}
-				if (!ensured) {
-					continue;
-				}
-				// Beschreibbare Sicht genau auf diese Ebene suchen (views[slice] ist nicht zwingend die richtige)
-				void* dsv = nullptr;
-				int   dsvIndex = -1;
-				char  dsvInfo[96]{};
-				for (std::uint32_t v = 0; v < 8 && !dsv; ++v) {
-					const std::uint32_t vi = v == 0 ? (f.slice < 8 ? f.slice : 0) : (v <= f.slice ? v - 1 : v);
-					if (ds.views[vi] && FarShadowGpu::DsvMatches(ds.views[vi], tex, f.slice, v == 0 ? dsvInfo : nullptr, v == 0 ? sizeof(dsvInfo) : 0)) {
-						dsv = ds.views[vi];
-						dsvIndex = static_cast<int>(vi);
-					}
-				}
-				// Die Engine zeichnet in kSHADOWMAPS_ESRAM; gelesen wird womoeglich eine Kopie (kSHADOWMAPS), die schon waehrend
-				// Render angelegt wird - unser Stand muss dann auch dorthin (1.0.59-Test: feste Schatten fehlten in Cache-Frames)
-				const auto readTex = t == 0 && idx[t] == static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS_ESRAM) ?
-				                         depth[static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS)].texture :
-				                         nullptr;
-				const bool syncRead = readTex && readTex != tex && FarShadowGpu::SameLayout(readTex, tex);
-				static std::uint32_t dsvLogged[2]{};
-				if (dsvLogged[t] < 1) {
-					++dsvLogged[t];
-					REX::W32::D3D11_TEXTURE2D_DESC rd{};
-					if (readTex) {
-						readTex->GetDesc(&rd);
-					}
-					logger::info("[FarShadowCache] target {} | view[{}]: {} | used view {} | read map (index 4): {}", t == 0 ? "sun" : "volumetric", f.slice, dsvInfo, dsvIndex,
-						!readTex ? std::string("none") : readTex == tex ? std::string("same texture") : std::format("separate {}x{} format {} array {} - {}", rd.width, rd.height, static_cast<std::uint32_t>(rd.format), rd.arraySize, syncRead ? "synced" : "layout differs, not synced"));
-				}
-				if (recreated && mode != FarMode::kWait) {
-					f.valid = f.prebuilt = false;  // neue Kopie ist leer
-					continue;
-				}
-				// Diagnose: Belegung der Karten je Modus alle 3 s auslesen (CPU wartet kurz auf die GPU)
-				using PR = FarShadowGpu::ProbeResult;
-				static std::chrono::steady_clock::time_point probeAt[4]{};
-				const auto  now = std::chrono::steady_clock::now();
-				const bool  probe = t == 0 && now - probeAt[static_cast<int>(mode)] >= std::chrono::seconds(3);
-				const auto  fmt = [](const PR& a_p) {
-                    return a_p.ok ? std::format("covered {} zero {} full {} range {}-{}", a_p.covered, a_p.zero, a_p.full, a_p.minV, a_p.maxV) : std::string("n/a");
-				};
-				if (probe) {
-					probeAt[static_cast<int>(mode)] = now;
-				}
-				switch (mode) {
-				case FarMode::kWait:
-					FarShadowGpu::Save(ctx, t, FarShadowGpu::kPrev, tex, f.slice);
-					if (probe) {
-						logger::info("[FarShadowCache] probe wait | engine map {}", fmt(FarShadowGpu::Probe(ctx, tex, f.slice, t, 0)));
-					}
-					break;
-				case FarMode::kBuild:
-					FarShadowGpu::Save(ctx, t, FarShadowGpu::kStatic, tex, f.slice);
-					FarShadowGpu::Restore(ctx, t, FarShadowGpu::kPrev, tex, f.slice);  // sichtbar: vollstaendige Ebene des Vorframes
-					if (probe) {
-						logger::info("[FarShadowCache] probe build | static copy {} | shown (prev) {}", fmt(FarShadowGpu::Probe(ctx, nullptr, 0, t, FarShadowGpu::kStatic)),
-							fmt(FarShadowGpu::Probe(ctx, tex, f.slice, t, 0)));
-					}
-					break;
-				case FarMode::kCached:
-					{
-						PR before{}, stat{};
-						if (probe) {
-							before = FarShadowGpu::Probe(ctx, tex, f.slice, t, 0);
-							stat = FarShadowGpu::Probe(ctx, nullptr, 0, t, FarShadowGpu::kStatic);
-						}
-						if (g_farTest.load(std::memory_order_relaxed) == 3) {
-						break;
-					}
-					if (!dsv || !FarShadowGpu::Merge(ctx, t, FarShadowGpu::kStatic, dsv)) {
-							FarShadowGpu::Restore(ctx, t, FarShadowGpu::kStatic, tex, f.slice);  // ohne Ebenen-Sicht: wenigstens das Unbewegliche
-							++f.mergeFail;
-						}
-						if (probe) {
-							logger::info("[FarShadowCache] probe cached | engine map (dynamic only) {} | static copy {} | after merge {} | depth func {}", fmt(before), fmt(stat),
-								fmt(FarShadowGpu::Probe(ctx, tex, f.slice, t, 0)), FarShadowGpu::DepthFunc());
-						}
-					}
-					break;
-				default:
-					break;
-				}
-				if (syncRead && mode != FarMode::kWait) {
-					FarShadowGpu::CopySlice(ctx, readTex, tex, f.slice);
-				}
-				if (t == 0) {
-					mainOk = true;
-				}
-			}
 			switch (mode) {
 			case FarMode::kWait:
-				f.prebuilt = mainOk;
+				f.prebuilt = f.drawDone;
 				++f.waits;
 				break;
 			case FarMode::kBuild:
-				f.valid = mainOk;
+				f.valid = f.drawDone;
 				++f.builds;
 				break;
 			case FarMode::kCached:
-				++f.cached;
+				if (f.drawDone) {
+					++f.cached;
+				} else {
+					f.valid = false;
+					++f.normal;
+				}
 				break;
 			default:
+				++f.normal;
 				break;
 			}
+			if (mode != FarMode::kNormal && !f.drawDone) {
+				++f.hookMissed;
+			}
+			f.drawDone = false;
 			FarLog();
 		}
+	}
+
+	// Zeichnen einer einzelnen Schattenkarte (ID 107604+0x167, Hook im Schatten-Cache fester Lichter). Fuer die ferne
+	// Sonnenkaskade: eingesammelt wird alles wie ohne Cache, weggelassen wird erst beim einzelnen Draw (FarSkipDraw) -
+	// das Weglassen beim Einsammeln nahm Boden und Wegen den Schatten (1.0.59-Test, Testmodus 1 vs. 2), dieselbe
+	// Erfahrung wie beim Cache fester Lichter (1.0.33).
+	bool FarBeginDraw(const RE::NiCamera* a_camera) noexcept
+	{
+		auto& f = g_far;
+		g_farDrawMode = 0;
+		if (!a_camera || !Config::farShadowCache.enabled || !g_cacheLight) {
+			return false;
+		}
+		const auto mode = static_cast<FarMode>(g_farMode.load(std::memory_order_relaxed));
+		if (mode == FarMode::kNormal) {
+			return false;
+		}
+		const auto& descs = g_cacheLight->GetRuntimeData().shadowmapDescriptors;
+		if (kFarCascade >= descs.size() || descs[kFarCascade].camera.get() != a_camera) {
+			return false;
+		}
+		const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
+		const auto ctx = renderer ? renderer->GetRuntimeData().context : nullptr;
+		if (!ctx) {
+			return false;
+		}
+		const auto tex = renderer->GetDepthStencilData().depthStencils[static_cast<std::uint32_t>(RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS_ESRAM)].texture;
+		// Nur die Sonnenkarte selbst (nicht etwa die Volumetric-Karte mit derselben Kamera)
+		if (!tex || !FarShadowGpu::BoundSlice(ctx, tex, f.slice)) {
+			++f.notBound;
+			return false;
+		}
+		bool recreated = false;
+		if (!FarShadowGpu::Ensure(0, tex, recreated)) {
+			return false;
+		}
+		if (recreated && mode != FarMode::kWait) {
+			f.valid = f.prebuilt = false;  // neue Kopien sind leer
+			return false;
+		}
+		if (mode == FarMode::kCached) {
+			FarShadowGpu::Restore(ctx, 0, FarShadowGpu::kStatic, tex, f.slice);  // nach dem Leeren: Unbewegliches einsetzen
+		}
+		f.drawCtx = ctx;
+		f.drawTex = tex;
+		g_farDrawMode = static_cast<int>(mode);
+		return true;
+	}
+
+	void FarEndDraw() noexcept
+	{
+		auto&      f = g_far;
+		const auto mode = static_cast<FarMode>(g_farDrawMode);
+		g_farDrawMode = 0;
+		if (!f.drawCtx || !f.drawTex) {
+			return;
+		}
+		switch (mode) {
+		case FarMode::kWait:
+			FarShadowGpu::Save(f.drawCtx, 0, FarShadowGpu::kPrev, f.drawTex, f.slice);  // vollstaendige Ebene fuer den Aufbau-Frame
+			break;
+		case FarMode::kBuild:
+			FarShadowGpu::Save(f.drawCtx, 0, FarShadowGpu::kStatic, f.drawTex, f.slice);   // nur Unbewegliches sichern
+			FarShadowGpu::Restore(f.drawCtx, 0, FarShadowGpu::kPrev, f.drawTex, f.slice);  // sichtbar: vollstaendige Ebene des Vorframes
+			break;
+		default:
+			break;
+		}
+		f.drawDone = mode != FarMode::kNormal;
+		f.drawCtx = nullptr;
+		f.drawTex = nullptr;
+	}
+
+	bool FarSkipDraw(const RE::BSRenderPass& a_pass) noexcept
+	{
+		const auto mode = static_cast<FarMode>(g_farDrawMode);
+		if ((mode != FarMode::kCached && mode != FarMode::kBuild) || !a_pass.geometry) {
+			return false;
+		}
+		const bool dyn = FarDynamic(*a_pass.geometry);
+		if (mode == FarMode::kCached && !dyn) {
+			g_farSkippedStatic.fetch_add(1, std::memory_order_relaxed);
+			return true;  // steckt im Cache
+		}
+		if (mode == FarMode::kBuild && dyn) {
+			g_farSkippedDynamic.fetch_add(1, std::memory_order_relaxed);
+			return true;  // Cache nur mit Unbeweglichem
+		}
+		return false;
 	}
 
 	void AfterSunUpdateCamera(RE::BSShadowDirectionalLight* a_light) noexcept
@@ -2091,18 +2051,6 @@ namespace ShadowCulling
 	bool FreezeMatrix() noexcept
 	{
 		return Config::cascadeCache.freezeMatrix && !Config::stableCascade.enabled;
-	}
-
-	int FarTestMode() noexcept
-	{
-		return g_farTest.load(std::memory_order_relaxed);
-	}
-
-	void CycleFarTestMode() noexcept
-	{
-		const int m = (g_farTest.load(std::memory_order_relaxed) + 1) % 4;
-		g_farTest.store(m, std::memory_order_relaxed);
-		logger::info("[FarShadowCache] test mode {}", m);
 	}
 
 	void AfterSunRender() noexcept

@@ -374,6 +374,22 @@ float main(float4 pos : SV_Position) : SV_Depth
 		return sameRes && !readOnly && d.ViewDimension == D3D11_DSV_DIMENSION_TEXTURE2DARRAY && first == a_slice && count == 1;
 	}
 
+	bool BoundSlice(void* a_context, void* a_texture, std::uint32_t a_slice) noexcept
+	{
+		const auto ctx = static_cast<ID3D11DeviceContext*>(a_context);
+		if (!ctx || !a_texture) {
+			return false;
+		}
+		ID3D11DepthStencilView* dsv = nullptr;
+		ctx->OMGetRenderTargets(0, nullptr, &dsv);
+		if (!dsv) {
+			return false;
+		}
+		const bool ok = DsvMatches(dsv, a_texture, a_slice, nullptr, 0);
+		dsv->Release();
+		return ok;
+	}
+
 	bool SameLayout(void* a_a, void* a_b) noexcept
 	{
 		if (!a_a || !a_b) {

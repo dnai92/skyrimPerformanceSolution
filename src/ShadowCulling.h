@@ -20,9 +20,12 @@ namespace ShadowCulling
 	void AfterSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept;
 	// Nach BSShadowDirectionalLight::Render: ferne Kaskade sichern (gezeichneter Frame) bzw. zuruecklegen (Cache-Frame)
 	void AfterSunRender() noexcept;
-	// Diagnose fern-Cache: 0 normal, 1 ohne Gruppen-Ueberspringen, 2 nichts auslassen (Zusammenfuehren aktiv), 3 nichts auslassen und kein Zusammenfuehren
-	int  FarTestMode() noexcept;
-	void CycleFarTestMode() noexcept;
+	// Cache der fernen Kaskade am Zeichnen einer Schattenkarte (Hook ID 107604+0x167, Render-Thread):
+	// true = diese Karte ist die ferne Sonnenkaskade und wird gefiltert; danach FarEndDraw aufrufen
+	bool FarBeginDraw(const RE::NiCamera* a_camera) noexcept;
+	void FarEndDraw() noexcept;
+	// Einzelner Draw waehrend der fernen Kaskade: true = weglassen
+	bool FarSkipDraw(const RE::BSRenderPass& a_pass) noexcept;
 	// Nach BSShadowDirectionalLight::UpdateCamera: Projektion der fernen Kaskade mit dem gecachten Stand vergleichen
 	void AfterSunUpdateCamera(RE::BSShadowDirectionalLight* a_light) noexcept;
 	void SetInSunAccumulate(bool a_in) noexcept;

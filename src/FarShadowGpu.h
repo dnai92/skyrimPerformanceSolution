@@ -33,6 +33,8 @@ namespace FarShadowGpu
 
 	// Passt die Depth-Stencil-View zu Ebene a_slice von a_texture (beschreibbar)? a_info: Kurzbeschreibung fuers Log.
 	bool DsvMatches(void* a_dsv, void* a_texture, std::uint32_t a_slice, char* a_info, std::size_t a_infoSize) noexcept;
+	// Ist gerade genau Ebene a_slice von a_texture als Tiefenpuffer gebunden?
+	bool BoundSlice(void* a_context, void* a_texture, std::uint32_t a_slice) noexcept;
 	// Gleich aufgebaute Texturen (Groesse, Format, Ebenen)?
 	bool SameLayout(void* a_a, void* a_b) noexcept;
 	// Ebene a_slice (Mip 0) von a_src nach a_dst kopieren
