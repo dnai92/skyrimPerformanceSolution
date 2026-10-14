@@ -511,6 +511,13 @@ namespace LightShadowCache
 
 			static void thunk(RE::NiCamera* a_camera, void* a_accumulator, std::uint32_t a_flags)
 			{
+				ShadowCulling::SetInShadowMapDraw(true);  // Filter kleiner Figurenteile (ShadowCulling)
+				Draw(a_camera, a_accumulator, a_flags);
+				ShadowCulling::SetInShadowMapDraw(false);
+			}
+
+			static void Draw(RE::NiCamera* a_camera, void* a_accumulator, std::uint32_t a_flags)
+			{
 				// Diagnose: alle 5 s die Schattenkarten von 3 Frames protokollieren
 				if (g_targetDiagLeft > 0 && Config::analysis.load(std::memory_order_relaxed)) {
 					DiagDraw(a_camera, a_accumulator, a_flags);

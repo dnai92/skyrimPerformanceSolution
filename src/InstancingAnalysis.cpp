@@ -606,6 +606,9 @@ namespace InstancingAnalysis
 				if (a_pass && ShadowCulling::ShouldSkipDepthPrepassDraw(*a_pass)) {
 					return;  // Tiefenvorpass: kleines, fernes Objekt -> Draw ueberspringen
 				}
+				if (a_pass && ShadowCulling::SkipActorPartShadowDraw(*a_pass)) {
+					return;  // kleines Figurenteil in der Ferne: Schatten nicht sichtbar
+				}
 				if (a_pass && LightShadowCache::SkipDraw(*a_pass)) {
 					return;  // Schatten steckt in der zwischengespeicherten Karte
 				}

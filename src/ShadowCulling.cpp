@@ -1690,6 +1690,41 @@ namespace ShadowCulling
 		f.drawTex = nullptr;
 	}
 
+	namespace
+	{
+		thread_local bool t_inShadowMapDraw = false;
+	}
+
+	void SetInShadowMapDraw(bool a_in) noexcept
+	{
+		t_inShadowMapDraw = a_in;
+	}
+
+	// Ringe, Ohrringe, Augen, Zaehne und kleine Ruestungsteile: ihr Schatten ist ab wenigen Metern nicht zu sehen.
+	// Erst beim Draw weggelassen - beim Einsammeln haette das Nebenwirkungen (Schattenempfang, siehe Cache der fernen
+	// Kaskade 1.0.59), z. B. leuchtende Augen im Schatten.
+	bool SkipActorPartShadowDraw(const RE::BSRenderPass& a_pass) noexcept
+	{
+		const auto& cfg = Config::actorPartShadowCulling;
+		if (!t_inShadowMapDraw || !cfg.enabled || !a_pass.geometry || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+			return false;
+		}
+		const auto& geom = *a_pass.geometry;
+		if (!const_cast<RE::BSGeometry&>(geom).GetGeometryRuntimeData().skinInstance) {
+			return false;
+		}
+		const auto& b = geom.worldBound;
+		if (b.radius <= 0.0f || b.radius >= cfg.maxRadius) {
+			return false;
+		}
+		if (DistanceToCamera(b) > cfg.minDistance) {
+			Stats::Count(Stats::Counter::ActorPartShadowCulled);
+			return true;
+		}
+		Stats::Count(Stats::Counter::ActorPartShadowKept);
+		return false;
+	}
+
 	bool FarSkipDraw(const RE::BSRenderPass& a_pass) noexcept
 	{
 		const auto mode = static_cast<FarMode>(g_farDrawMode);

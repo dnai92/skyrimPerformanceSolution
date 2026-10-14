@@ -112,6 +112,16 @@ namespace Config
 	};
 	inline ActorShadowCulling actorShadowCulling;  // [ActorShadowCulling]
 
+	// Kleine Figurenteile (Ringe, Ohrringe, Augen, Zaehne, kleine Ruestungsteile) werfen ab einer Entfernung keinen
+	// Schatten mehr. Weggelassen wird erst beim einzelnen Schatten-Draw (eingesammelt wird alles) - nur AE.
+	struct ActorPartShadowCulling
+	{
+		bool  enabled = false;        // BETA, Standard AUS
+		float maxRadius = 8.0f;       // nur Teile mit kleinerem Begrenzungsradius (Einheiten)
+		float minDistance = 500.0f;   // ab dieser Entfernung zur Kamera (~7 m)
+	};
+	inline ActorPartShadowCulling actorPartShadowCulling;  // [ActorPartShadowCulling]
+
 	// Licht-Geometrie-Zuordnung dynamischer Punktlichter nicht in jedem Frame neu berechnen (siehe LightGather.h)
 	struct LightGather
 	{

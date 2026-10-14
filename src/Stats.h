@@ -66,8 +66,8 @@ namespace Stats
 		FsmpWaitCalls,    // Warte-Aufrufe von FSMP auf dem Main-Thread
 		CbpcWaitCalls,    // Warte-Aufrufe von CBPC auf dem Main-Thread
 		GameWaitCalls,    // Warte-Aufrufe der Engine auf dem Main-Thread
-		CascadeSkipped,   // Meshes, die wegen Kaskaden-Cache nicht neu gezeichnet werden
-		CascadeSkipFrames,// Frames, in denen die ferne Kaskade aus dem Cache kam (0/1)
+		ActorPartShadowKept,   // kleine Figurenteile in Schattenkarten gezeichnet (nur gepruefte Teile)
+		ActorPartShadowCulled, // davon weggelassen (Ringe, Augen, kleine Ruestungsteile)
 		InstancedMeshes,  // per Instancing gezeichnete Meshes (ohne das jeweils erste der Gruppe)
 		InstancedCalls,   // dafuer abgesetzte Instanced-Draw-Calls
 		ActorShadowKept,  // geskinnte Meshes in Schattenkarten (Sonne + Punktlicht)
@@ -107,8 +107,8 @@ namespace Stats
 		"FSMP wait calls",
 		"CBPC wait calls",
 		"Engine wait calls",
-		"Cascade cache meshes saved",
-		"Cascade cache frames",
+		"Actor part shadows kept",
+		"Actor part shadows culled",
 		"Instancing meshes",
 		"Instancing draw calls",
 		"Actor shadows kept",

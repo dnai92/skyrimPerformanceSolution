@@ -272,6 +272,9 @@ namespace Menu
 				T("Small, far objects do not cast shadows from torches and fires.", "Kleine, ferne Objekte werfen keinen Schatten von Fackeln und Feuern."));
 			Toggle(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"), Config::actorShadowCulling.enabled,
 				T("Characters far away do not cast shadows.", "Weit entfernte Figuren werfen keinen Schatten."));
+			Toggle(T("Small character parts cast no shadow (BETA)", "Kleine Figurenteile ohne Schatten (BETA)"), Config::actorPartShadowCulling.enabled,
+				T("Rings, earrings, eyes, teeth and small armor parts of characters a few meters away cast no shadow (invisible at that distance). Saves draw calls in crowded places. Anniversary Edition only.",
+					"Ringe, Ohrringe, Augen, Zähne und kleine Rüstungsteile von Figuren werfen ab wenigen Metern keinen Schatten (dort nicht zu sehen). Spart Draw Calls an vollen Orten. Nur Anniversary Edition."));
 			Toggle(T("Skylighting culling (Community Shaders)", "Himmelslicht: kleine Objekte weglassen (Community Shaders)"), Config::skylightingCulling.enabled,
 				T("Small objects are left out of the skylighting occlusion map.", "Kleine Objekte werden in der Himmelslicht-Karte weggelassen."));
 			Toggle(T("Decal culling", "Ferne Bodendetails weglassen"), Config::decalCulling.enabled,

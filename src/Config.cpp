@@ -80,6 +80,7 @@ namespace Config
 			b("ActorShadowCulling", "bEnabled", actorShadowCulling.enabled);
 			f("ActorShadowCulling", "fMinDistance", actorShadowCulling.minDistance);
 			b("ActorShadowCulling", "bPointLights", actorShadowCulling.pointLights);
+			b("ActorPartShadowCulling", "bEnabled", actorPartShadowCulling.enabled);
 			b("LightGatherThrottle", "bEnabled", lightGather.enabled);
 			b("SubtreePruning", "bEnabled", subtreePruning.enabled);
 			b("TextureStream", "bEnabled", textureStream.enabled);
@@ -290,6 +291,12 @@ namespace Config
 		ac.minDistance = std::max(ActorShadowCulling::kMinAllowed, static_cast<float>(ini.GetDoubleValue("ActorShadowCulling", "fMinDistance", ac.minDistance)));
 		ac.pointLights = ini.GetBoolValue("ActorShadowCulling", "bPointLights", ac.pointLights);
 		logger::info("ActorShadowCulling: {} | from distance {:.0f} | point lights {}", ac.enabled ? "ON" : "OFF", ac.minDistance, ac.pointLights);
+
+		auto& ap = actorPartShadowCulling;
+		ap.enabled = ini.GetBoolValue("ActorPartShadowCulling", "bEnabled", ap.enabled);
+		ap.maxRadius = std::clamp(static_cast<float>(ini.GetDoubleValue("ActorPartShadowCulling", "fMaxRadius", ap.maxRadius)), 0.0f, 20.0f);
+		ap.minDistance = std::max(200.0f, static_cast<float>(ini.GetDoubleValue("ActorPartShadowCulling", "fMinDistance", ap.minDistance)));
+		logger::info("ActorPartShadowCulling: {} | radius < {:.0f} | from distance {:.0f}", ap.enabled ? "ON" : "OFF", ap.maxRadius, ap.minDistance);
 
 		auto& lg = lightGather;
 		lg.enabled = ini.GetBoolValue("LightGatherThrottle", "bEnabled", lg.enabled);
