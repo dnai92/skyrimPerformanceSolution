@@ -350,10 +350,6 @@ namespace Menu
 			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));
 			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
 				T("For testing only, can make whole objects disappear. Default OFF (saved).", "Nur zum Testen, kann ganze Objekte verschwinden lassen. Standard AUS (wird gespeichert)."));
-			if (MenuApi::Button(T("Log shadow cascades (300 frames)##cc", "Schattenkaskaden protokollieren (300 Frames)##cc"))) {
-				ShadowCulling::RequestCascadeDump(300);
-			}
-			Tip(T("Writes how the game aligns the sun shadow cascades in each frame to SPS.log.", "Schreibt pro Frame, wie das Spiel die Sonnenschatten-Kaskaden ausrichtet, in SPS.log."));
 
 			MenuApi::SeparatorText(T("Main view micro culling (diagnostics)", "Winzige Objekte weglassen (Diagnose)"));
 			if (MenuApi::Button(T("Save list of left out objects##micro", "Liste weggelassener Objekte speichern##micro"))) {

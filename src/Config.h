@@ -62,30 +62,10 @@ namespace Config
 	};
 	inline DecalCulling decalCulling;
 
-	// Ferne Sonnenkaskade nur jeden n-ten Frame neu zeichnen, dazwischen alte Schattenkarte weiterverwenden
-	struct CascadeCache
-	{
-		bool          enabled = false;  // Standard AUS: Flackern bei tiefer Sonne (siehe INI)
-		std::uint32_t cascade = 1;   // ab dieser Kaskade (0 = nah)
-		std::uint32_t interval = 2;  // 2 = jeden 2. Frame neu zeichnen
-		// Diagnose-Schalter (einzeln abschaltbar, um Flackern einzugrenzen)
-		bool freezeMatrix = true;       // im Cache-Frame alte lightTransform einsetzen
-		bool freezeCamera = true;       // im Cache-Frame Kamera + clipPlanes einfrieren; Engine-Stand vor naechstem Accumulate zurueck
-		bool freezeSplits = true;       // im Cache-Frame Kaskaden-Grenzen, isEnabled und Port einfrieren
-		bool skipDraws = true;          // Diagnose: false = ferne Kaskade im Cache-Frame trotzdem zeichnen (keine Ersparnis)
-		bool requireSameProjection = true;  // nur cachen, wenn die Engine exakt dieselbe Kaskaden-Projektion berechnet
-		float projectionEpsilon = 0.0001f;  // erlaubte Abweichung (worldToCam/Frustum)
-		bool noClear = true;            // im Cache-Frame clearRenderTarget = false
-		bool restoreShadowmap = true;   // Sonnen-Schattenkarte per GPU-Kopie sichern/zuruecklegen
-		bool restoreVolumetric = true;  // Volumetric-Schattenkarte (CS) per GPU-Kopie sichern/zuruecklegen
-	};
-	inline CascadeCache cascadeCache;  // [ShadowCascadeCache]
-
-	// Stabile ferne Sonnenkaskade (Stufe 1 fuer den Kaskaden-Cache): Lage, Ausschnitt und Tiefenbereich der fernen
-	// Kaskade aendern sich nur noch in Schritten statt in jedem Frame (Engine passt sie sonst laufend an Blick und Sonne an)
+	// Ruhige ferne Sonnenkaskade (laeuft mit dem Cache der fernen Kaskade): Lage, Ausschnitt und Tiefenbereich aendern
+	// sich nur noch in Schritten statt in jedem Frame (Engine passt sie sonst laufend an Blick und Sonne an)
 	struct StableCascade
 	{
-		bool  enabled = false;        // Standard AUS (Test)
 		float maxAngleDeg = 0.05f;    // Sonnenrichtung erst nachfuehren, wenn sie um mehr als diesen Winkel abweicht (0,15 = sichtbare Spruenge)
 		// Reserven klein halten: der Tiefen-Versatz der Engine (Shadow Bias) waechst mit Tiefenbereich und Texelgroesse -
 		// mit ~1,4x groesserem Ausschnitt/Bereich fehlten kurze Schatten (Dachueberstand auf Hauswand, Test 1.0.10)
@@ -96,13 +76,10 @@ namespace Config
 		float extentFactor = 1.0f;    // Ausschnitt = (Engine-Ausschnitt + margin) * Faktor
 		float margin = 48.0f;         // Spielraum um den Engine-Ausschnitt, bevor neu ausgerichtet wird
 		float depthStep = 64.0f;      // Tiefen-Spielraum je Seite (Einheiten)
-		// Diagnose (Menue): 0 normal | 1 nur rechnen, nichts setzen | 2 Engine-Werte ueber unseren Weg setzen (Update) |
-		// 3 normal ohne Kamera-Update | 4 normal mit Engine-Tiefenbereich | 5 ohne Festhalten von Drehung/Position
-		float debugMode = 0.0f;
 	};
 	inline StableCascade stableCascade;  // [ShadowStableCascade]
 
-	// Cache der fernen Sonnenkaskade (Beta): ruhige Projektion (wie stableCascade), unbewegliche Schattenwerfer der
+	// Cache der fernen Sonnenkaskade (Beta): ruhige Projektion (stableCascade), unbewegliche Schattenwerfer der
 	// fernen Kaskade einmal je Ausrichtung zeichnen und zwischenspeichern, sonst nur Figuren/Bewegliches
 	struct FarShadowCache
 	{

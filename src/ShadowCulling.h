@@ -15,10 +15,10 @@ namespace ShadowCulling
 	bool ShouldSkipDepthPrepassDraw(const RE::BSRenderPass& a_pass) noexcept;
 	bool InDepthPrepass() noexcept;
 
-	// Kaskaden-Cache: vor bzw. nach BSShadowDirectionalLight::Accumulate (Main-Thread)
+	// Cache der fernen Kaskade: vor bzw. nach BSShadowDirectionalLight::Accumulate (Main-Thread)
 	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept;
 	void AfterSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept;
-	// Nach BSShadowDirectionalLight::Render: ferne Kaskade sichern (gezeichneter Frame) bzw. zuruecklegen (Cache-Frame)
+	// Nach BSShadowDirectionalLight::Render: Ergebnis des Caches der fernen Kaskade verbuchen
 	void AfterSunRender() noexcept;
 	// Cache der fernen Kaskade am Zeichnen einer Schattenkarte (Hook ID 107604+0x167, Render-Thread):
 	// true = diese Karte ist die ferne Sonnenkaskade und wird gefiltert; danach FarEndDraw aufrufen
@@ -26,11 +26,8 @@ namespace ShadowCulling
 	void FarEndDraw() noexcept;
 	// Einzelner Draw waehrend der fernen Kaskade: true = weglassen
 	bool FarSkipDraw(const RE::BSRenderPass& a_pass) noexcept;
-	// Nach BSShadowDirectionalLight::UpdateCamera: Projektion der fernen Kaskade mit dem gecachten Stand vergleichen
+	// Nach BSShadowDirectionalLight::UpdateCamera: ferne Kaskade ruhig halten, Modus des Caches festlegen
 	void AfterSunUpdateCamera(RE::BSShadowDirectionalLight* a_light) noexcept;
-	void SetInSunAccumulate(bool a_in) noexcept;
-	// Diagnose: die naechsten a_frames Frames die Kaskaden-Ausrichtung der Engine ins Log schreiben
-	void RequestCascadeDump(int a_frames) noexcept;
 	// Diagnose: 30 Frames lang alle im Hauptbild weggelassenen Objekte (Mikro-Culling, ferne Decals) sammeln und als
 	// SPS_MicroCulled_N.csv in den SKSE-Log-Ordner schreiben
 	void RequestMicroCullList() noexcept;

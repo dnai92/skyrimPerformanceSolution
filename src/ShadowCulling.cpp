@@ -387,12 +387,9 @@ namespace ShadowCulling
 			g_viewValid.store(true, std::memory_order_release);
 		}
 
-		// Kaskaden-Cache (nur Main-Thread schreibt; Culling-Jobs lesen g_cacheSkip)
-		std::atomic<bool> g_cacheSkip{ false };  // dieser Frame: ferne Kaskade(n) nicht neu zeichnen
-
-		// Cache der fernen Kaskade (FarShadowCache). Modus je Frame (Main-Thread setzt in UpdateCamera, Culling-Jobs lesen):
+		// Cache der fernen Kaskade (FarShadowCache). Modus je Frame (Main-Thread setzt in UpdateCamera):
 		// kWait = normal zeichnen, danach vollstaendige Ebene sichern | kBuild = nur Unbewegliche zeichnen, als Cache sichern,
-		// vollstaendige Ebene des Vorframes zuruecklegen | kCached = nur Bewegliche zeichnen, Cache per Tiefentest darueber
+		// vollstaendige Ebene des Vorframes zuruecklegen | kCached = Cache einsetzen, nur Bewegliche darueber zeichnen
 		enum class FarMode : int
 		{
 			kNormal,
@@ -400,69 +397,18 @@ namespace ShadowCulling
 			kBuild,
 			kCached
 		};
-		constexpr std::uint32_t    kFarCascade = 1;
-		std::atomic<int>           g_farMode{ 0 };
-		int                        g_farDrawMode = 0;  // FarMode waehrend die ferne Kaskade gezeichnet wird (sonst 0)
-		std::atomic<std::uint64_t> g_farSkippedStatic{ 0 }, g_farSkippedDynamic{ 0 }, g_farPruned{ 0 };
-		bool                       FarDynamic(const RE::BSGeometry& a_geom) noexcept;  // Figuren, Angehaengtes, Effekte (weiter unten)
-		std::uint32_t     g_cacheCounter = 0;
-		struct CachedCascade
-		{
-			bool                           valid = false;
-			REX::W32::XMFLOAT4X4           lightTransform{};
-			RE::RENDER_TARGET_DEPTHSTENCIL renderTarget{};
-			std::uint32_t                  shadowmapIndex = 0;
-			// Kamera der Kaskade: die Engine setzt daraus die Shader-Konstanten fuer das Abtasten der Schattenkarte.
-			// Im Cache-Frame (leere Kaskade) passt sie Tiefenbereich/Ausschnitt an -> Sonne scheint durch Objekte.
-			RE::NiTransform                camWorld{};
-			float                          camWorldToCam[4][4]{};
-			RE::NiCamera::RUNTIME_DATA2    camData2{};
-			RE::NiFrustumPlanes            clipPlanes{};
-			// Frisch berechneter Engine-Stand der Kamera im Cache-Frame: wird vor dem naechsten Accumulate
-			// zurueckgeschrieben, damit UpdateCamera von ihrem eigenen Stand weiterrechnet (0.9.4 rechnete vom
-			// eingefrorenen Stand weiter -> Schatten sprangen staerker)
-			RE::NiTransform                engWorld{};
-			float                          engWorldToCam[4][4]{};
-			RE::NiCamera::RUNTIME_DATA2    engData2{};
-			RE::NiFrustumPlanes            engClipPlanes{};
-			bool                           camTouched = false;
-			// lightTransform NACH Render (falls Render sie neu berechnet) - diese Matrix gehoert zum Inhalt der Karte
-			REX::W32::XMFLOAT4X4           lightTransformFinal{};
-			REX::W32::XMFLOAT4X4           lightTransformAfterAccum{};  // Diagnose
-			bool                           finalValid = false;
-			RE::NiRect<std::int32_t>       port{};
-			bool                           isEnabled = true;
-			bool                           clearSaved = false;    // clearRenderTarget vor unserer Aenderung (nur Cache-Frame)
-			bool                           clearTouched = false;  // wir haben clearRenderTarget in diesem Frame geaendert
-		};
-		RE::BSShadowDirectionalLight* g_cacheLight = nullptr;      // Licht des laufenden Frames (Main-Thread)
-		std::array<float, 3>          g_cachedStartSplits{};       // Kaskaden-Grenzen des letzten gezeichneten Frames
-		std::array<float, 3>          g_cachedEndSplits{};
+		constexpr std::uint32_t       kFarCascade = 1;
+		std::atomic<int>              g_farMode{ 0 };
+		int                           g_farDrawMode = 0;  // FarMode waehrend die ferne Kaskade gezeichnet wird (sonst 0)
+		std::atomic<std::uint64_t>    g_farSkippedStatic{ 0 };
+		bool                          FarDynamic(const RE::BSGeometry& a_geom) noexcept;  // Figuren, Angehaengtes, Effekte (weiter unten)
+		RE::BSShadowDirectionalLight* g_cacheLight = nullptr;                              // Licht des laufenden Frames (Main-Thread)
 
-		// Diagnose: was rechnet die Engine im Cache-Frame (leere ferne Kaskade) anders als im letzten gezeichneten Frame?
-		struct FrameDiff
-		{
-			std::uint32_t frames = 0;
-			std::uint32_t lightTransform = 0, worldToCam = 0, frustum = 0, clipPlanes = 0, splits = 0, enabled = 0, port = 0;
-			float         maxLightTransform = 0.0f, maxWorldToCam = 0.0f, maxFrustum = 0.0f, maxSplits = 0.0f;
-		};
-		FrameDiff g_diffCache{};   // Cache-Frame vs. letzter gezeichneter Frame
-		FrameDiff g_diffNormal{};  // gezeichneter Frame vs. vorheriger gezeichneter Frame (Vergleichswert)
-		// Projektions-Vergleich: Stand nach UpdateCamera im aktuellen Frame vs. im letzten gezeichneten Frame
 		struct Projection
 		{
-			float          worldToCam[4][4]{};
-			RE::NiFrustum  frustum{};
+			float         worldToCam[4][4]{};
+			RE::NiFrustum frustum{};
 		};
-		std::array<Projection, kMaxCascades> g_projCurrent{};
-		std::array<Projection, kMaxCascades> g_projReference{};
-		bool                                 g_projReferenceValid = false;
-		bool                                 g_projSameThisFrame = false;
-		bool                                 g_projSeenThisFrame = false;
-		bool                                 g_inSunAccumulate = false;
-		std::uint32_t                        g_projSame = 0, g_projChecked = 0;
-		std::uint32_t g_renderChangedMatrix = 0, g_renderChecked = 0;  // Diagnose: aendert Render die lightTransform?
-		float         g_renderChangedMax = 0.0f;
 
 		float MaxAbsDiff(const float* a_a, const float* a_b, std::size_t a_n) noexcept
 		{
@@ -471,114 +417,6 @@ namespace ShadowCulling
 				m = std::max(m, std::abs(a_a[i] - a_b[i]));
 			}
 			return m;
-		}
-
-		template <class Cached>
-		void Compare(FrameDiff& a_out, const RE::BSShadowLight::ShadowmapDescriptor& a_d, const Cached& a_c, const RE::BSShadowDirectionalLight* a_light) noexcept
-		{
-			constexpr float eps = 1e-4f;
-			++a_out.frames;
-			const float lt = MaxAbsDiff(&a_d.lightTransform.m[0][0], &a_c.lightTransform.m[0][0], 16);
-			if (lt > eps) {
-				++a_out.lightTransform;
-				a_out.maxLightTransform = std::max(a_out.maxLightTransform, lt);
-			}
-			if (const auto cam = a_d.camera.get()) {
-				const float wc = MaxAbsDiff(&cam->GetRuntimeData().worldToCam[0][0], &a_c.camWorldToCam[0][0], 16);
-				if (wc > eps) {
-					++a_out.worldToCam;
-					a_out.maxWorldToCam = std::max(a_out.maxWorldToCam, wc);
-				}
-				const auto& f1 = cam->GetRuntimeData2().viewFrustum;
-				const auto& f2 = a_c.camData2.viewFrustum;
-				const float fr = std::max({ std::abs(f1.fLeft - f2.fLeft), std::abs(f1.fRight - f2.fRight), std::abs(f1.fTop - f2.fTop),
-					std::abs(f1.fBottom - f2.fBottom), std::abs(f1.fNear - f2.fNear), std::abs(f1.fFar - f2.fFar) });
-				if (fr > eps) {
-					++a_out.frustum;
-					a_out.maxFrustum = std::max(a_out.maxFrustum, fr);
-				}
-			}
-			if (std::memcmp(&a_d.clipPlanes, &a_c.clipPlanes, sizeof(a_d.clipPlanes)) != 0) {
-				++a_out.clipPlanes;
-			}
-			if (a_d.isEnabled != a_c.isEnabled) {
-				++a_out.enabled;
-			}
-			if (std::memcmp(&a_d.port, &a_c.port, sizeof(a_d.port)) != 0) {
-				++a_out.port;
-			}
-			if (a_light) {
-				const auto& dir = a_light->GetShadowDirectionalLightRuntimeData();
-				const float sp = std::max(MaxAbsDiff(dir.startSplitDistances, g_cachedStartSplits.data(), 3), MaxAbsDiff(dir.endSplitDistances, g_cachedEndSplits.data(), 3));
-				if (sp > eps) {
-					++a_out.splits;
-					a_out.maxSplits = std::max(a_out.maxSplits, sp);
-				}
-			}
-		}
-
-		void LogDiff(const char* a_label, FrameDiff& a_d)
-		{
-			logger::info("[Cascade-Diag]   {}: {} frames | lightTransform {} (max {:.4f}) | worldToCam {} (max {:.4f}) | frustum {} (max {:.2f}) | clipPlanes {} | splits {} (max {:.1f}) | isEnabled {} | port {}",
-				a_label, a_d.frames, a_d.lightTransform, a_d.maxLightTransform, a_d.worldToCam, a_d.maxWorldToCam, a_d.frustum, a_d.maxFrustum, a_d.clipPlanes, a_d.splits, a_d.maxSplits, a_d.enabled, a_d.port);
-			a_d = {};
-		}
-		std::array<std::uint32_t, 2>  g_clearFlagSeen{};           // Diagnose: Normal-Frames mit clearRenderTarget false/true (ferne Kaskade)
-		std::array<CachedCascade, kMaxCascades> g_cached{};
-		std::uint32_t                           g_cacheInvalidations = 0;  // Diagnose: Ziel/Slice hat sich geaendert
-
-		// Die Engine loescht jede Kaskaden-Ebene per ClearDepthStencilView, unabhaengig von clearRenderTarget
-		// (RenderDoc). Deshalb wird die ferne Kaskade nach dem Zeichnen in eine eigene Textur kopiert und im
-		// Cache-Frame nach dem (leeren) Render zurueckkopiert. Betroffen: Sonnen-Schattenkarte und die
-		// Volumetric-Lighting-Schattenkarte von Community Shaders (beide 2 Ebenen = 2 Kaskaden).
-		struct CascadeBackup
-		{
-			RE::RENDER_TARGETS_DEPTHSTENCIL::RENDER_TARGET_DEPTHSTENCIL target;
-			REX::W32::ID3D11Texture2D*                                  source = nullptr;  // Engine-Textur (nicht besessen)
-			REX::W32::ID3D11Texture2D*                                  copy = nullptr;    // eigene Kopie
-			std::uint32_t                                               mipLevels = 1;
-			std::uint32_t                                               arraySize = 0;
-			bool                                                        allSlices = false;  // true: alle Ebenen sichern (nicht nur ab iCascade)
-		};
-		// Volumetric Lighting: beide Ebenen komplett aus dem Cache-Frame - im Test 0.9.1 flackerte sonst die
-		// Helligkeit der ganzen Szene (Lichtstrahlen/Nebel werden offenbar aus der fernen Kaskade gespeist)
-		std::array<CascadeBackup, 2> g_backups{ { { RE::RENDER_TARGETS_DEPTHSTENCIL::kSHADOWMAPS_ESRAM }, { RE::RENDER_TARGETS_DEPTHSTENCIL::kVOLUMETRIC_LIGHTING_SHADOWMAPS_ESRAM, nullptr, nullptr, 1, 0, true } } };
-		bool BackupWanted(const CascadeBackup& a_b) noexcept
-		{
-			return a_b.allSlices ? Config::cascadeCache.restoreVolumetric : Config::cascadeCache.restoreShadowmap;
-		}
-		bool                         g_backupValid = false;  // Kopie passt zum letzten gezeichneten Frame
-		bool                         g_backupFailed = false;
-
-		// Kopie anlegen bzw. bei geaenderter Engine-Textur (Aufloesung) neu anlegen
-		bool EnsureBackup(CascadeBackup& a_b, REX::W32::ID3D11Texture2D* a_src) noexcept
-		{
-			if (a_b.source == a_src && a_b.copy) {
-				return true;
-			}
-			if (a_b.copy) {
-				a_b.copy->Release();
-				a_b.copy = nullptr;
-			}
-			a_b.source = a_src;
-			if (!a_src) {
-				return false;
-			}
-			REX::W32::D3D11_TEXTURE2D_DESC desc{};
-			a_src->GetDesc(&desc);
-			a_b.mipLevels = desc.mipLevels;
-			a_b.arraySize = desc.arraySize;
-			desc.usage = REX::W32::D3D11_USAGE_DEFAULT;
-			desc.bindFlags = 0;
-			desc.cpuAccessFlags = 0;
-			desc.miscFlags = 0;
-			const auto device = RE::BSGraphics::Renderer::GetDevice();
-			if (!device || device->CreateTexture2D(&desc, nullptr, &a_b.copy) < 0 || !a_b.copy) {
-				a_b.copy = nullptr;
-				return false;
-			}
-			logger::info("Cascade cache: backup texture {}x{} x{} created (target {})", desc.width, desc.height, desc.arraySize, static_cast<std::uint32_t>(a_b.target));
-			return true;
 		}
 
 		void DiagRecord(const RE::NiCamera* a_camera) noexcept
@@ -927,10 +765,6 @@ namespace ShadowCulling
 				std::uint32_t cascade = 0;
 				switch (Classify(a_this, cascade)) {
 				case Kind::kSun:
-					if (g_cacheSkip.load(std::memory_order_relaxed) && Config::cascadeCache.skipDraws && cascade >= Config::cascadeCache.cascade) {
-						Stats::Count(Stats::Counter::CascadeSkipped);
-						return;  // Kaskade kommt diesen Frame aus dem Cache
-					}
 					if (!a_visible.GetGeometryRuntimeData().skinInstance && ShadowOutsideView(a_visible.worldBound)) {
 						Stats::Count(Stats::Counter::SunViewCulled);
 						return;
@@ -1277,9 +1111,6 @@ namespace ShadowCulling
 			std::uint32_t cascade = 0;
 			switch (Classify(a_this, cascade)) {
 			case Kind::kSun:
-				if (g_cacheSkip.load(std::memory_order_relaxed) && Config::cascadeCache.skipDraws && cascade >= Config::cascadeCache.cascade) {
-					return false;  // Kaskaden-Cache entscheidet selbst
-				}
 				if (ShadowOutsideView(bound)) {
 					Stats::Count(Stats::Counter::PrunedSunView);
 					a_sun = true;
@@ -1484,21 +1315,15 @@ namespace ShadowCulling
 		return false;
 	}
 
-	void SetInSunAccumulate(bool a_in) noexcept
-	{
-		g_inSunAccumulate = a_in;
-	}
-
 	namespace
 	{
-		// ---------------- Stabile ferne Kaskade ----------------
+		// ---------------- Ruhige ferne Kaskade (Voraussetzung fuer den Cache) ----------------
 		// Die Engine richtet jede Kaskade in jedem Frame neu aus (UpdateCamera, AE ID 108496): Lage folgt der Sonne,
-		// Ausschnitt (Ortho-Frustum l/r/t/b) dem Blick, Tiefenbereich den Objekten. Fuer die ferne Kaskade halten wir
-		// stattdessen einen Bezugsrahmen (Drehung + Position) und einen Ausschnitt fest, der den Engine-Ausschnitt
-		// umschliesst, und richten nur neu aus, wenn er nicht mehr passt. Kamera-Achsen: Spalte 0 = Blickrichtung,
-		// left/right laufen entlang -Spalte 2, top/bottom entlang -Spalte 1 (gespiegelt, per worldToCam nachgemessen:
-		// Kameraposition lag bei clip x = +0,81 statt -0,81). Mit +Spalten wanderte der Ausschnitt beim Gehen doppelt so
-		// weit in die falsche Richtung -> fehlende Schatten (Test 1.0.10). Engine-Weg: SetViewFrustum (70626) + Update (70251).
+		// Ausschnitt (Ortho-Frustum l/r/t/b) dem Blick, Tiefenbereich den Objekten - ohne Festhalten gleicht keine
+		// Projektion der vorigen und der Cache greift nie. Gehalten werden ein Bezugsrahmen (Drehung + Position) und ein
+		// Ausschnitt, der den Engine-Ausschnitt umschliesst; neu ausgerichtet wird erst, wenn er nicht mehr passt.
+		// Kamera-Achsen: Spalte 0 = Blickrichtung, left/right laufen entlang -Spalte 2, top/bottom entlang -Spalte 1
+		// (gespiegelt, per worldToCam nachgemessen; mit +Spalten fehlten Schatten, Test 1.0.10).
 		struct StableState
 		{
 			bool          valid = false;
@@ -1507,27 +1332,23 @@ namespace ShadowCulling
 			float         cx = 0.0f, cy = 0.0f, hx = 0.0f, hy = 0.0f, n = 0.0f, f = 0.0f;
 		};
 		StableState   g_stable{};
-		std::uint32_t g_stableFrames = 0, g_stableChanged = 0, g_stableReanchor = 0;
+		std::uint32_t g_stableChanged = 0, g_stableReanchor = 0;  // fuers [FarShadowCache]-Log
 
 		RE::NiPoint3 Col(const RE::NiMatrix3& a_m, int a_c) noexcept { return { a_m.entry[0][a_c], a_m.entry[1][a_c], a_m.entry[2][a_c] }; }
 		float        Dot3(const RE::NiPoint3& a_a, const RE::NiPoint3& a_b) noexcept { return a_a.x * a_b.x + a_a.y * a_b.y + a_a.z * a_b.z; }
 		float        QuantUp(float a_v, float a_step) noexcept { return std::ceil(a_v / a_step) * a_step; }
-		float        QuantDown(float a_v, float a_step) noexcept { return std::floor(a_v / a_step) * a_step; }
 
 		void StabilizeFarCascade(RE::BSShadowDirectionalLight* a_light) noexcept
 		{
-			const auto& cfg = Config::stableCascade;
-			// Der Cache der fernen Kaskade braucht die ruhige Projektion (auch wenn "Ruhigere ferne Schatten" aus ist)
-			if (!(cfg.enabled || Config::farShadowCache.enabled) || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+			if (!Config::farShadowCache.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
 				g_stable.valid = false;
 				return;
 			}
-			auto&      descs = a_light->GetRuntimeData().shadowmapDescriptors;
-			const auto idx = Config::cascadeCache.cascade;
-			if (idx >= descs.size()) {
+			auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
+			if (kFarCascade >= descs.size()) {
 				return;
 			}
-			auto&      desc = descs[idx];
+			auto&      desc = descs[kFarCascade];
 			const auto cam = desc.camera.get();
 			if (!cam) {
 				return;
@@ -1536,6 +1357,7 @@ namespace ShadowCulling
 			if (!fr.bOrtho || fr.fRight <= fr.fLeft || fr.fTop <= fr.fBottom) {
 				return;
 			}
+			const auto&         cfg = Config::stableCascade;
 			const RE::NiMatrix3 rotE = cam->world.rotate;
 			const RE::NiPoint3  posE = cam->world.translate;
 			const RE::NiPoint3  dirE = Col(rotE, 0), upE = -Col(rotE, 1), rightE = -Col(rotE, 2);
@@ -1544,23 +1366,9 @@ namespace ShadowCulling
 			const float         ehx = 0.5f * (fr.fRight - fr.fLeft), ehy = 0.5f * (fr.fTop - fr.fBottom);
 			const RE::NiPoint3  centerW = posE + rightE * exc + upE * eyc;
 
-			const int mode = static_cast<int>(std::lround(cfg.debugMode));
-			if (mode == 2) {
-				// Diagnose: Engine-Werte unveraendert ueber unseren Weg (local setzen + Update) - prueft den Mechanismus
-				cam->local.rotate = rotE;
-				cam->local.translate = posE;
-				RE::NiUpdateData ud2{};
-				cam->Update(ud2);
-				return;
-			}
 			auto& s = g_stable;
-			++g_stableFrames;
-			bool changed = false;
-			bool reanchor = !s.valid || mode == 5;
-			if (s.valid) {
-				reanchor = Dot3(dirE, Col(s.rot, 0)) < std::cos(cfg.maxAngleDeg * 0.017453292f);
-			}
-			if (reanchor) {
+			bool  changed = false;
+			if (!s.valid || Dot3(dirE, Col(s.rot, 0)) < std::cos(cfg.maxAngleDeg * 0.017453292f)) {
 				s = {};
 				s.valid = true;
 				s.rot = rotE;
@@ -1592,35 +1400,14 @@ namespace ShadowCulling
 				s.cy = std::round(y / texY) * texY;
 				changed = true;
 			}
-			// Tiefe: Engine-Bereich muss hineinpassen, nicht unnoetig gross
-			if (mode == 4) {
-				s.n = en;
-				s.f = ef;
-			} else if (mode == 6 || mode == 7) {
-				// Diagnose: eine Ebene wie die Engine, die andere festgehalten
-				const float heldN = std::max(1.0f, QuantDown(en - 0.25f * cfg.depthStep, cfg.depthStep));
-				const float heldF = QuantUp(ef + 0.25f * cfg.depthStep, cfg.depthStep);
-				if (changed || s.n == 0.0f || s.f == 0.0f || en < s.n || ef > s.f) {
-					s.n = heldN;
-					s.f = heldF;
-				}
-				if (mode == 6) {
-					s.n = en;  // nah (zur Sonne) wie Engine, fern festgehalten
-				} else {
-					s.f = ef;  // fern wie Engine, nah festgehalten
-				}
-			} else if (changed || en < s.n || ef > s.f || (s.f - s.n) > (ef - en) + 4.0f * cfg.depthStep) {
-				// eng an der Engine: nur depthStep Spielraum je Seite (Zittern im Stand), sonst sofort nachfuehren
+			// Tiefe: eng an der Engine, nur depthStep Spielraum je Seite (Zittern im Stand), sonst sofort nachfuehren
+			if (changed || en < s.n || ef > s.f || (s.f - s.n) > (ef - en) + 4.0f * cfg.depthStep) {
 				s.n = std::max(1.0f, en - cfg.depthStep);
 				s.f = ef + cfg.depthStep;
 				changed = true;
 			}
 			if (changed) {
 				++g_stableChanged;
-			}
-
-			if (mode == 1) {
-				return;  // Diagnose: nur rechnen
 			}
 			// Anwenden: Lage + Frustum setzen, Kamera neu berechnen lassen (worldToCam) - wie die Engine selbst
 			cam->local.rotate = s.rot;
@@ -1633,23 +1420,12 @@ namespace ShadowCulling
 			fr.fBottom = s.cy - s.hy;
 			fr.fNear = s.n;
 			fr.fFar = s.f;
-			if (mode != 3) {
-				RE::NiUpdateData ud{};
-				cam->Update(ud);
-			}
-			// Mit Kaskaden-Cache: Schattenwerfer fuer den GANZEN gehaltenen Ausschnitt sammeln. Die Engine cullt sonst mit
-			// einer engen Huelle um den aktuellen Sichtbereich (customCullPlanes) - beim Drehen fehlten im wiederverwendeten
-			// Frame Schatten am Rand. Ohne die Huelle gelten die Ebenen der Kamera, also unser Ausschnitt.
-			if ((Config::cascadeCache.enabled || Config::farShadowCache.enabled) && desc.cullingProcess) {
+			RE::NiUpdateData ud{};
+			cam->Update(ud);
+			// Schattenwerfer fuer den GANZEN gehaltenen Ausschnitt sammeln: die Engine cullt sonst mit einer engen Huelle um
+			// den aktuellen Sichtbereich (customCullPlanes) - beim Drehen fehlten im Cache Schatten am Rand
+			if (desc.cullingProcess) {
 				desc.cullingProcess->doCustomCullPlanes = false;
-			}
-
-			static auto lastLog = std::chrono::steady_clock::now();
-			if (std::chrono::steady_clock::now() - lastLog >= std::chrono::seconds(10)) {
-				lastLog = std::chrono::steady_clock::now();
-				logger::info("[StableCascade] {} frames | changed {} | sun re-anchored {} | window {:.0f} x {:.0f} (engine {:.0f} x {:.0f}) | depth {:.0f}-{:.0f} (engine {:.0f}-{:.0f})",
-					g_stableFrames, g_stableChanged, g_stableReanchor, 2.0f * s.hx, 2.0f * s.hy, 2.0f * ehx, 2.0f * ehy, s.n, s.f, en, ef);
-				g_stableFrames = g_stableChanged = g_stableReanchor = 0;
 			}
 		}
 	}
@@ -1661,14 +1437,13 @@ namespace ShadowCulling
 		{
 			bool                                  valid = false;     // Cache passt zur Projektion "build"
 			bool                                  prebuilt = false;  // vollstaendige Ebene des Vorframes gesichert
-			bool                                  gpuInit = false, gpuFailed = false;
 			bool                                  decided = false;   // fuer lastFrame schon entschieden
 			Projection                            build{}, wait{};
 			RE::RENDER_TARGET_DEPTHSTENCIL        target{};
 			std::uint32_t                         slice = 0;
 			std::uint32_t                         lastFrame = 0;
 			FarMode                               last = FarMode::kNormal;
-			std::uint64_t                         frames = 0, cached = 0, builds = 0, waits = 0, normal = 0, mergeFail = 0;
+			std::uint64_t                         frames = 0, cached = 0, builds = 0, waits = 0, normal = 0;
 			std::uint64_t                         waitProjChanged = 0, waitNotSaved = 0, cacheProjChanged = 0;  // Diagnose: warum kein Aufbau
 			// Zeichen-Hook der fernen Kaskade (FarBeginDraw/FarEndDraw)
 			void*                                 drawCtx = nullptr;
@@ -1695,19 +1470,8 @@ namespace ShadowCulling
 			FarMode     mode = FarMode::kNormal;
 			const auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
 			const bool  on = Config::farShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && g_stable.valid && kFarCascade < descs.size();
-			if (on && !f.gpuInit) {
-				f.gpuInit = true;
-				char       err[256]{};
-				const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
-				if (!renderer || !FarShadowGpu::Init(renderer->GetRuntimeData().forwarder, err, sizeof(err))) {
-					f.gpuFailed = true;
-					logger::warn("[FarShadowCache] could not be started: {} - switched off", err);
-				} else {
-					logger::info("[FarShadowCache] ready");
-				}
-			}
 			const auto cam = on ? descs[kFarCascade].camera.get() : nullptr;
-			if (on && !f.gpuFailed && cam) {
+			if (on && cam) {
 				const auto& d = descs[kFarCascade];
 				Projection  cur{};
 				std::memcpy(cur.worldToCam, cam->GetRuntimeData().worldToCam, sizeof(cur.worldToCam));
@@ -1766,13 +1530,13 @@ namespace ShadowCulling
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
 			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: draws skipped {:.0f} | draw hook missed {} (other target {}) | "
-						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {}",
+						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {})",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
-				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged);
+				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor);
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 			f.hookMissed = f.notBound = 0;
-			g_farSkippedDynamic.store(0);
-			f.frames = f.cached = f.builds = f.waits = f.normal = f.mergeFail = 0;
+			g_stableChanged = g_stableReanchor = 0;
+			f.frames = f.cached = f.builds = f.waits = f.normal = 0;
 		}
 
 		// Nach Render: Ergebnis des Zeichen-Hooks verbuchen. Nur wenn die ferne Kaskade wirklich ueber den Hook lief, gilt
@@ -1845,7 +1609,7 @@ namespace ShadowCulling
 			return false;
 		}
 		bool recreated = false;
-		if (!FarShadowGpu::Ensure(0, tex, recreated)) {
+		if (!FarShadowGpu::Ensure(tex, recreated)) {
 			return false;
 		}
 		if (recreated && mode != FarMode::kWait) {
@@ -1853,7 +1617,7 @@ namespace ShadowCulling
 			return false;
 		}
 		if (mode == FarMode::kCached) {
-			FarShadowGpu::Restore(ctx, 0, FarShadowGpu::kStatic, tex, f.slice);  // nach dem Leeren: Unbewegliches einsetzen
+			FarShadowGpu::Restore(ctx, FarShadowGpu::kStatic, tex, f.slice);  // nach dem Leeren: Unbewegliches einsetzen
 		}
 		f.drawCtx = ctx;
 		f.drawTex = tex;
@@ -1871,11 +1635,11 @@ namespace ShadowCulling
 		}
 		switch (mode) {
 		case FarMode::kWait:
-			FarShadowGpu::Save(f.drawCtx, 0, FarShadowGpu::kPrev, f.drawTex, f.slice);  // vollstaendige Ebene fuer den Aufbau-Frame
+			FarShadowGpu::Save(f.drawCtx, FarShadowGpu::kPrev, f.drawTex, f.slice);  // vollstaendige Ebene fuer den Aufbau-Frame
 			break;
 		case FarMode::kBuild:
-			FarShadowGpu::Save(f.drawCtx, 0, FarShadowGpu::kStatic, f.drawTex, f.slice);   // nur Unbewegliches sichern
-			FarShadowGpu::Restore(f.drawCtx, 0, FarShadowGpu::kPrev, f.drawTex, f.slice);  // sichtbar: vollstaendige Ebene des Vorframes
+			FarShadowGpu::Save(f.drawCtx, FarShadowGpu::kStatic, f.drawTex, f.slice);   // nur Unbewegliches sichern
+			FarShadowGpu::Restore(f.drawCtx, FarShadowGpu::kPrev, f.drawTex, f.slice);  // sichtbar: vollstaendige Ebene des Vorframes
 			break;
 		default:
 			break;
@@ -1897,7 +1661,6 @@ namespace ShadowCulling
 			return true;  // steckt im Cache
 		}
 		if (mode == FarMode::kBuild && dyn) {
-			g_farSkippedDynamic.fetch_add(1, std::memory_order_relaxed);
 			return true;  // Cache nur mit Unbeweglichem
 		}
 		return false;
@@ -1910,314 +1673,27 @@ namespace ShadowCulling
 		}
 		StabilizeFarCascade(a_light);
 		FarDecide(a_light);
-		const auto& cfg = Config::cascadeCache;
-		auto&       descs = a_light->GetRuntimeData().shadowmapDescriptors;
-		bool        same = g_projReferenceValid;
-		for (std::uint32_t i = cfg.cascade; i < descs.size() && i < kMaxCascades; ++i) {
-			const auto cam = descs[i].camera.get();
-			if (!cam) {
-				same = false;
-				continue;
-			}
-			auto& p = g_projCurrent[i];
-			std::memcpy(p.worldToCam, cam->GetRuntimeData().worldToCam, sizeof(p.worldToCam));
-			p.frustum = cam->GetRuntimeData2().viewFrustum;
-			if (same) {
-				const auto& r = g_projReference[i];
-				const float d1 = MaxAbsDiff(&p.worldToCam[0][0], &r.worldToCam[0][0], 16);
-				const float d2 = MaxAbsDiff(&p.frustum.fLeft, &r.frustum.fLeft, 6);
-				same = d1 <= cfg.projectionEpsilon && d2 <= cfg.projectionEpsilon;
-			}
-		}
-		g_projSameThisFrame = same;
-		g_projSeenThisFrame = true;
-		++g_projChecked;
-		if (same) {
-			++g_projSame;
-		}
-		// Laeuft UpdateCamera innerhalb von Accumulate (vor dem Culling), gilt die Entscheidung sofort
-		if (g_inSunAccumulate && cfg.requireSameProjection && !same) {
-			g_cacheSkip.store(false, std::memory_order_relaxed);
-		}
 	}
 
 	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept
 	{
 		UpdateViewPlanes(a_light);
 		FarBeforeAccumulate();
-		const auto& cfg = Config::cascadeCache;
-		// Kamera-Stand der Engine aus dem letzten Cache-Frame zuruecklegen (auch wenn der Cache inzwischen aus ist)
-		if (a_light) {
-			auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
-			for (std::uint32_t i = 0; i < descs.size() && i < kMaxCascades; ++i) {
-				auto& c = g_cached[i];
-				if (!c.camTouched) {
-					continue;
-				}
-				descs[i].clipPlanes = c.engClipPlanes;
-				if (const auto cam = descs[i].camera.get()) {
-					cam->world = c.engWorld;
-					std::memcpy(cam->GetRuntimeData().worldToCam, c.engWorldToCam, sizeof(c.engWorldToCam));
-					cam->GetRuntimeData2() = c.engData2;
-				}
-				c.camTouched = false;
-			}
-		}
-		bool        skip = false;
-		if (cfg.enabled && !Config::farShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && cfg.interval > 1 && a_light) {
-			const auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
-			skip = (++g_cacheCounter % cfg.interval) != 0 && cfg.cascade < descs.size();
-			// Nur ueberspringen, wenn eine Sicherung und fuer alle betroffenen Kaskaden ein gueltiger Stand vorliegt
-			skip = skip && g_backupValid && !g_backupFailed;
-			// UpdateCamera lief bereits vor Accumulate -> Ergebnis hier beruecksichtigen
-			if (cfg.requireSameProjection && g_projSeenThisFrame && !g_projSameThisFrame) {
-				skip = false;
-			}
-			for (std::uint32_t i = cfg.cascade; skip && i < descs.size() && i < kMaxCascades; ++i) {
-				skip = g_cached[i].valid;
-			}
-		} else {
-			for (auto& c : g_cached) {
-				c.valid = false;
-			}
-			g_backupValid = false;
-		}
-		g_cacheSkip.store(skip, std::memory_order_relaxed);
 	}
-
-	// Diagnose (Menue-Knopf): wie richtet die Engine die Kaskaden pro Frame aus? Je Frame und Kaskade eine Zeile mit
-	// Frustum (Tiefenbereich!), Kamera-Lage, unitsPerTexel und lightTransform - Grundlage fuer eine stabile ferne Kaskade.
-	std::atomic<int> g_cascadeDump{ 0 };
-	std::uint32_t    g_cascadeDumpFrame = 0;
 
 	void RequestMicroCullList() noexcept
 	{
 		g_microListFrames.store(30, std::memory_order_relaxed);
 	}
 
-	void RequestCascadeDump(int a_frames) noexcept
-	{
-		g_cascadeDumpFrame = 0;
-		g_cascadeDump.store(a_frames, std::memory_order_relaxed);
-	}
-
-	namespace
-	{
-		void DumpCascades(RE::BSShadowDirectionalLight* a_light) noexcept
-		{
-			const auto frame = g_cascadeDumpFrame++;
-			if (frame == 0) {
-				logger::info("[Cascade-Dump] start (frame | cascade | frustum l r t b near far ortho | cam pos | cam dir | unitsPerTexel | port | lightTransform rows)");
-			}
-			if (const auto main = RE::Main::WorldRootCamera()) {
-				const auto& w = main->world;
-				const auto& dir = a_light->GetShadowDirectionalLightRuntimeData();
-				logger::info("[Cascade-Dump] {} main pos {:.1f} {:.1f} {:.1f} fwd {:.4f} {:.4f} {:.4f} | sun {:.5f} {:.5f} {:.5f} | splits {:.0f}-{:.0f} {:.0f}-{:.0f}",
-					frame, w.translate.x, w.translate.y, w.translate.z, w.rotate.entry[0][0], w.rotate.entry[1][0], w.rotate.entry[2][0],
-					dir.sunVector.x, dir.sunVector.y, dir.sunVector.z, dir.startSplitDistances[0], dir.endSplitDistances[0], dir.startSplitDistances[1], dir.endSplitDistances[1]);
-			}
-			auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
-			for (std::uint32_t i = 0; i < descs.size() && i < kMaxCascades; ++i) {
-				const auto& d = descs[i];
-				const auto  cam = d.camera.get();
-				if (!cam) {
-					continue;
-				}
-				const auto& f = cam->GetRuntimeData2().viewFrustum;
-				const auto& w = cam->world;
-				const auto& m = d.lightTransform.m;
-				const auto* port = reinterpret_cast<const std::int32_t*>(&d.port);  // left right top bottom (Felder protected)
-				logger::info("[Cascade-Dump] {} C{} | {:.2f} {:.2f} {:.2f} {:.2f} {:.1f} {:.1f} {} | {:.1f} {:.1f} {:.1f} | {:.5f} {:.5f} {:.5f} | {} | {} {} {} {} | "
-							 "{:.6f} {:.6f} {:.6f} {:.3f} / {:.6f} {:.6f} {:.6f} {:.3f} / {:.6f} {:.6f} {:.6f} {:.3f} / {:.6f} {:.6f} {:.6f} {:.3f}",
-					frame, i, f.fLeft, f.fRight, f.fTop, f.fBottom, f.fNear, f.fFar, f.bOrtho, w.translate.x, w.translate.y, w.translate.z,
-					w.rotate.entry[0][0], w.rotate.entry[1][0], w.rotate.entry[2][0], d.unitsPerTexel, port[0], port[1], port[2], port[3],
-					m[0][0], m[0][1], m[0][2], m[0][3], m[1][0], m[1][1], m[1][2], m[1][3], m[2][0], m[2][1], m[2][2], m[2][3], m[3][0], m[3][1], m[3][2], m[3][3]);
-				// Volle Drehung (Spalten 0/1/2) und worldToCam: Achsen-Zuordnung von left/right bzw. top/bottom pruefen
-				const auto& r = w.rotate.entry;
-				const auto& wc = cam->GetRuntimeData().worldToCam;
-				logger::info("[Cascade-Dump] {} C{} rot | {:.5f} {:.5f} {:.5f} / {:.5f} {:.5f} {:.5f} / {:.5f} {:.5f} {:.5f} | w2c {:.7f} {:.7f} {:.7f} {:.4f} / {:.7f} {:.7f} {:.7f} {:.4f} / {:.7f} {:.7f} {:.7f} {:.4f} / {:.7f} {:.7f} {:.7f} {:.4f}",
-					frame, i, r[0][0], r[0][1], r[0][2], r[1][0], r[1][1], r[1][2], r[2][0], r[2][1], r[2][2],
-					wc[0][0], wc[0][1], wc[0][2], wc[0][3], wc[1][0], wc[1][1], wc[1][2], wc[1][3], wc[2][0], wc[2][1], wc[2][2], wc[2][3], wc[3][0], wc[3][1], wc[3][2], wc[3][3]);
-			}
-			if (g_cascadeDump.fetch_sub(1, std::memory_order_relaxed) == 1) {
-				logger::info("[Cascade-Dump] end");
-			}
-		}
-	}
-
-	// Mit stabiler Kaskade ist die Projektion im Cache-Frame dieselbe - die Engine-Matrix des aktuellen Frames passt dann
-	// zur alten Karte. Die alte Matrix einzusetzen waere falsch: sie enthaelt den Kamera-Versatz des Vorframes
-	// (kamera-relative Darstellung) -> Schatten zuckten beim Bewegen in jedem 2. Frame (Test 1.0.10).
-	bool FreezeMatrix() noexcept
-	{
-		return Config::cascadeCache.freezeMatrix && !Config::stableCascade.enabled;
-	}
-
 	void AfterSunRender() noexcept
 	{
-		if (g_cacheLight && g_cascadeDump.load(std::memory_order_relaxed) > 0) {
-			DumpCascades(g_cacheLight);
-		}
 		FarAfterRender();
-		const auto& cfg = Config::cascadeCache;
-		// clearRenderTarget der Engine zuruecksetzen (auch wenn der Cache inzwischen abgeschaltet wurde)
-		if (g_cacheLight) {
-			auto&      descs = g_cacheLight->GetRuntimeData().shadowmapDescriptors;
-			const bool skipNow = g_cacheSkip.load(std::memory_order_relaxed);
-			for (std::uint32_t i = 0; i < descs.size() && i < kMaxCascades; ++i) {
-				auto& c = g_cached[i];
-				if (c.clearTouched) {
-					descs[i].clearRenderTarget = c.clearSaved;
-					c.clearTouched = false;
-				}
-				if (i < cfg.cascade) {
-					continue;
-				}
-				// Diagnose: hat Render die Matrix nach Accumulate noch veraendert?
-				const float diff = MaxAbsDiff(&descs[i].lightTransform.m[0][0], &c.lightTransformAfterAccum.m[0][0], 16);
-				++g_renderChecked;
-				if (diff > 1e-4f) {
-					++g_renderChangedMatrix;
-					g_renderChangedMax = std::max(g_renderChangedMax, diff);
-				}
-				if (skipNow && FreezeMatrix() && c.finalValid) {
-					descs[i].lightTransform = c.lightTransformFinal;  // gilt fuer alle spaeteren Leser (CS Deferred)
-				} else if (!skipNow) {
-					c.lightTransformFinal = descs[i].lightTransform;
-					c.finalValid = true;
-				}
-			}
-			// Gezeichneter Frame: seine Projektion ist die Referenz fuer die naechsten Cache-Frames
-			if (!skipNow && g_projSeenThisFrame) {
-				g_projReference = g_projCurrent;
-				g_projReferenceValid = true;
-			}
-			g_projSeenThisFrame = false;
-		}
-		if (!cfg.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || cfg.interval <= 1 || g_backupFailed) {
-			return;
-		}
-		const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
-		if (!renderer) {
-			return;
-		}
-		const auto context = renderer->GetRuntimeData().context;
-		auto&      depth = renderer->GetDepthStencilData().depthStencils;
-		if (!context) {
-			return;
-		}
-		const bool skip = g_cacheSkip.load(std::memory_order_relaxed);
-		bool       ok = true;
-		for (auto& b : g_backups) {
-			const auto src = depth[b.target].texture;
-			if (!src || !BackupWanted(b)) {
-				continue;  // Volumetric-Schatten ggf. nicht vorhanden
-			}
-			if (!EnsureBackup(b, src)) {
-				ok = false;
-				continue;
-			}
-			for (std::uint32_t slice = b.allSlices ? 0 : cfg.cascade; slice < b.arraySize; ++slice) {
-				const auto sub = slice * b.mipLevels;  // Mip 0 der Ebene
-				if (skip) {
-					context->CopySubresourceRegion(src, sub, 0, 0, 0, b.copy, sub, nullptr);  // alten Stand zuruecklegen
-				} else {
-					context->CopySubresourceRegion(b.copy, sub, 0, 0, 0, src, sub, nullptr);  // frisch gezeichneten Stand sichern
-				}
-			}
-		}
-		if (!ok) {
-			g_backupFailed = true;
-			g_backupValid = false;
-			logger::error("Cascade cache: backup texture could not be created - cache disabled");
-			return;
-		}
-		if (!skip) {
-			g_backupValid = true;
-		}
 	}
 
 	void AfterSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept
 	{
-		if (!a_light) {
-			return;
-		}
-		const auto& cfg = Config::cascadeCache;
-		const bool  skip = g_cacheSkip.load(std::memory_order_relaxed);
-		auto&       descs = a_light->GetRuntimeData().shadowmapDescriptors;
 		g_cacheLight = a_light;
-		for (std::uint32_t i = cfg.cascade; i < descs.size() && i < kMaxCascades; ++i) {
-			auto& d = descs[i];
-			auto& c = g_cached[i];
-			c.clearTouched = false;
-			if (skip && FreezeMatrix() && c.finalValid) {
-				c.lightTransformAfterAccum = c.lightTransformFinal;  // Vergleich nach Render gegen den eingefrorenen Wert
-			} else {
-				c.lightTransformAfterAccum = d.lightTransform;
-			}
-			if (skip) {
-				if (d.renderTarget != c.renderTarget || d.shadowmapIndex != c.shadowmapIndex) {
-					// Ziel hat sich geaendert -> alter Inhalt unbrauchbar
-					++g_cacheInvalidations;
-					c.valid = false;
-					continue;
-				}
-				Compare(g_diffCache, d, c, a_light);
-				if (FreezeMatrix()) {
-					d.lightTransform = c.finalValid ? c.lightTransformFinal : c.lightTransform;  // alte Matrix passend zum alten Inhalt
-				}
-				if (cfg.freezeCamera) {
-					c.engClipPlanes = d.clipPlanes;
-					d.clipPlanes = c.clipPlanes;
-					if (const auto cam = d.camera.get()) {
-						c.engWorld = cam->world;
-						std::memcpy(c.engWorldToCam, cam->GetRuntimeData().worldToCam, sizeof(c.engWorldToCam));
-						c.engData2 = cam->GetRuntimeData2();
-						c.camTouched = true;
-						cam->world = c.camWorld;
-						std::memcpy(cam->GetRuntimeData().worldToCam, c.camWorldToCam, sizeof(c.camWorldToCam));
-						cam->GetRuntimeData2() = c.camData2;
-					}
-				}
-				if (cfg.freezeSplits) {
-					d.isEnabled = c.isEnabled;
-					d.port = c.port;
-					auto& dir = a_light->GetShadowDirectionalLightRuntimeData();
-					std::copy(g_cachedStartSplits.begin(), g_cachedStartSplits.end(), dir.startSplitDistances);
-					std::copy(g_cachedEndSplits.begin(), g_cachedEndSplits.end(), dir.endSplitDistances);
-				}
-				if (cfg.noClear) {
-					// Nur fuer diesen Frame; nach Render wird der Engine-Wert wiederhergestellt (AfterSunRender)
-					c.clearSaved = d.clearRenderTarget;
-					c.clearTouched = true;
-					d.clearRenderTarget = false;
-				}
-				Stats::Count(Stats::Counter::CascadeSkipFrames);
-			} else {
-				// Normal-Frame: Engine-Werte unangetastet lassen, nur Stand merken
-				++g_clearFlagSeen[d.clearRenderTarget ? 1 : 0];
-				if (c.valid) {
-					Compare(g_diffNormal, d, c, a_light);
-				}
-				c.lightTransform = d.lightTransform;
-				c.port = d.port;
-				c.isEnabled = d.isEnabled;
-				if (i == cfg.cascade) {
-					const auto& dir = a_light->GetShadowDirectionalLightRuntimeData();
-					std::copy(std::begin(dir.startSplitDistances), std::end(dir.startSplitDistances), g_cachedStartSplits.begin());
-					std::copy(std::begin(dir.endSplitDistances), std::end(dir.endSplitDistances), g_cachedEndSplits.begin());
-				}
-				c.clipPlanes = d.clipPlanes;
-				if (const auto cam = d.camera.get()) {
-					c.camWorld = cam->world;
-					std::memcpy(c.camWorldToCam, cam->GetRuntimeData().worldToCam, sizeof(c.camWorldToCam));
-					c.camData2 = cam->GetRuntimeData2();
-				}
-				c.renderTarget = d.renderTarget;
-				c.shadowmapIndex = d.shadowmapIndex;
-				c.valid = true;
-			}
-		}
 	}
 
 	void OnFrame()
@@ -2323,44 +1799,12 @@ namespace ShadowCulling
 #endif
 			logger::info("[ShadowCulling-Diag] sun descriptors: {} | point light cameras: {} | sun elevation sin={:.2f} (~{:.0f} deg, shadow factor {:.1f})",
 				g_descCount, pointCount, g_sunSin.load(), std::asin(g_sunSin.load()) * 57.2958f, 1.0f / g_sunSin.load());
-			// Kaskaden-Cache: Ziel-Textur und Slice aller Schattenkarten (Sonne + Punktlichter) - teilen sie sich etwas?
-			if (const auto ssn = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]) {
-				auto& ssnData = ssn->GetRuntimeData();
-				if (const auto sun = ssnData.sunShadowDirLight) {
-					const auto& descs = sun->GetRuntimeData().shadowmapDescriptors;
-					for (std::uint32_t i = 0; i < descs.size(); ++i) {
-						const auto& d = descs[i];
-						logger::info("[Cascade-Diag]   sun C{}: target {} slice {} clear {} active {} port {}x{}", i, static_cast<std::uint32_t>(d.renderTarget), d.shadowmapIndex,
-							d.clearRenderTarget, d.isEnabled, d.port.GetWidth(), d.port.GetHeight());
-					}
-				}
-				std::uint32_t n = 0;
-				for (const auto& light : ssnData.activeShadowLights) {
-					if (!light || light.get() == ssnData.sunShadowDirLight || n >= 6) {
-						continue;
-					}
-					for (const auto& d : light->GetRuntimeData().shadowmapDescriptors) {
-						logger::info("[Cascade-Diag]   light {}: target {} slice {}", n, static_cast<std::uint32_t>(d.renderTarget), d.shadowmapIndex);
-					}
-					++n;
-				}
-			}
 			ReportCulled();
 			ReportLightCacheDiag();
 			LightShadowCache::Report();
 			if (Config::analysis.load(std::memory_order_relaxed)) {
 				ReportDecalTextures();
 			}
-			logger::info("[Cascade-Diag]   cache invalidations (target/slice changed): {} | normal frames far cascade clearRenderTarget false/true: {}/{}",
-				g_cacheInvalidations, g_clearFlagSeen[0], g_clearFlagSeen[1]);
-			g_clearFlagSeen = {};
-			logger::info("[Cascade-Diag]   Render changes lightTransform after Accumulate: {}/{} (max {:.4f})", g_renderChangedMatrix, g_renderChecked, g_renderChangedMax);
-			logger::info("[Cascade-Diag]   projection same as in last drawn frame: {}/{} frames", g_projSame, g_projChecked);
-			g_projSame = g_projChecked = 0;
-			g_renderChangedMatrix = g_renderChecked = 0;
-			g_renderChangedMax = 0.0f;
-			LogDiff("cache frame vs. last drawn", g_diffCache);
-			LogDiff("drawn vs. previous drawn", g_diffNormal);
 			if (const auto mainCam = RE::Main::WorldRootCamera()) {
 				logger::info("[ShadowCulling-Diag]   main camera (WorldRootCamera): {:p} '{}'", static_cast<const void*>(mainCam), mainCam->name.c_str());
 			}
