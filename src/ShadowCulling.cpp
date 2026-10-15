@@ -924,7 +924,7 @@ namespace ShadowCulling
 			if (!a_acc) {
 				return false;
 			}
-			if (g_camMatchOk.load(std::memory_order_relaxed) && !Config::dbgMainViewByVote.load(std::memory_order_relaxed)) {
+			if (g_camMatchOk.load(std::memory_order_relaxed)) {
 				const auto cam = RE::Main::WorldRootCamera();
 				return cam && static_cast<const RE::NiAccumulator*>(a_acc)->camera == cam;
 			}
@@ -1578,7 +1578,9 @@ namespace ShadowCulling
 				}
 				f.target = d.renderTarget;
 				f.slice = d.shadowmapIndex;
-				if (f.valid && SameProjection(cur, f.build)) {
+				if (Config::dbgFarStableOnly.load(std::memory_order_relaxed)) {
+					f.valid = f.prebuilt = false;  // Diagnose: nur festhalten, normal zeichnen
+				} else if (f.valid && SameProjection(cur, f.build)) {
 					mode = FarMode::kCached;
 				} else {
 					if (f.valid) {
@@ -1711,7 +1713,7 @@ namespace ShadowCulling
 		}
 		// Waehrend einer Pause laeuft keine neue Entscheidung (Spiel-Frame steht), die Kaskade kann sich aber bewegen
 		// (Freikamera): Cache bzw. Aufbau nur, wenn die Projektion noch zu ihm passt
-		if (mode != FarMode::kWait && !Config::dbgFarNoProjCheck.load(std::memory_order_relaxed)) {
+		if (mode != FarMode::kWait) {
 			Projection cur{};
 			std::memcpy(cur.worldToCam, a_camera->GetRuntimeData().worldToCam, sizeof(cur.worldToCam));
 			cur.frustum = a_camera->GetRuntimeData2().viewFrustum;
@@ -1841,8 +1843,8 @@ namespace ShadowCulling
 				f.statics.insert_or_assign(&geom, pose);
 				return false;
 			}
-			if (Config::dbgFarSkipAllStatic.load(std::memory_order_relaxed)) {
-				return true;  // Diagnose: wie 1.0.60
+			if (Config::dbgFarDrawAll.load(std::memory_order_relaxed)) {
+				return false;  // Diagnose: alles zeichnen
 			}
 			const auto it = f.statics.find(&geom);
 			if (it == f.statics.end()) {
