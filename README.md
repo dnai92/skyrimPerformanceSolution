@@ -27,21 +27,22 @@ so you can compare with and without the plugin at any time.
 | **Sun shadow culling** | Small, far objects do not cast sun shadows. Shadow length is taken into account (no culling below 10° sun elevation). | ON |
 | **Torch / point light shadow culling** | Small, far objects do not cast shadows from torches and fires. The rule looks at how big the shadow can get (objects close to the light cast big shadows and keep them); not applied in interiors by default (switch in the menu). | ON (exteriors) |
 | **Shadow cache for static lights** | Shadow maps of lights that do not move (wall lamps, fireplaces) are kept; each frame only characters, things attached to them, effects and objects seen moving or swaying in the wind are drawn again. Lights that drift or change their radius are rebuilt. Mainly for interiors with many lights (Dragonsreach: ~1.3–1.5 ms less GPU time for torch shadows). AE only. | ON |
-| **Character shadow culling** | Characters and creatures far away (default 50 m, min. 30 m) do not cast shadows. | ON |
+| **Character shadow culling** | Characters and creatures far away (default 50 m, min. 30 m) do not cast shadows. Decided per character with a small hysteresis (back below 90 % of the distance), so shadows do not flicker at the limit. | ON |
+| **Small character parts cast no shadow** *(BETA)* | Rings, earrings, eyes, teeth and small armor parts of characters a few meters away cast no shadow (sun and torches). Only the single shadow draw is left out, everything is still collected as usual. AE only. | OFF |
 | **Skylighting culling** | Small objects are left out of the Community Shaders skylighting / precipitation occlusion map. | ON |
 | **Decal culling** | Footprint-sized decals (radius < 32, e.g. Dynamic Footprints) farther than ~21 m are not drawn. Larger decals such as plaster patches on walls stay. | ON |
 | **Shadow instancing** *(BETA)* | Identical simple meshes in the sun shadow pass are drawn with one instanced draw call. Small gain, AE only, takes effect after a game restart. | OFF |
 | **Hide occluded objects** *(BETA)* | Objects in the main view that are completely hidden behind walls, houses or terrain (depth of the previous frame) are not drawn. Works with DLSS, FSR and dynamic resolution. | OFF |
 | **Main view micro culling** *(BETA)* | Tiny far objects are not drawn at all; only in the main world view, never in previews or menus. | OFF |
-| **Calmer far shadows** *(BETA)* | Holds the far sun shadow cascade still so far shadows shimmer less when moving. No performance gain. | OFF |
+| **Far shadow cache** *(BETA)* | Static objects (houses, rocks, trees) are drawn into the far sun shadow cascade only when the sun or the view moves on; in between only characters and moving things are drawn. The cascade is held still for this, so far shadows also shimmer less. Outdoors about 60 % fewer sun shadow draw calls (~850 per frame) and ~0.4 ms less CPU time for sun shadows. AE only. | OFF |
 | **Light assignment throttle** | Moving lights (torches, flickering lights) only re-search the geometry they light when they actually moved — the engine does this for every dynamic light every frame. | ON |
 | **Subtree pruning** | Whole scene-graph branches are skipped in the sun shadow and skylighting passes when the branch as a whole already meets the culling rule. Same result, less traversal. | ON |
 | **In-game menu** | All switches and sliders via SKSE Menu Framework, English and German, saved automatically (also in the main menu and while paused). Features that do not work perfectly on every setup yet are marked (BETA) and grouped under Overview > Beta. A help page lists which switch to try for which visual issue. A debug page holds analysis logging, the crosshair texture log and developer tools. | — |
 | **Hotkey** | One key toggles every optimization (default *Page Up*, freely assignable in the menu, or *No key*). | — |
 | **Logging & diagnostics** | One summary line per minute in `SPS.log`; every frame over 100 ms is logged with what SPS did in it and how long the measured areas took (`[Hitch]`); each press of the hotkey writes a `[Compare]` line with FPS of the part before (ON vs OFF). With *Analysis logging* also GPU times of the shadow passes and the depth pre-pass and the CPU wait in Present (`[GPU]`). The *Analysis logging* switch (menu page Debug, always starts off; VR: `bAnalysis` in the INI) adds a detailed 10-second report (counters per optimization, VRAM, streaming), and *Log textures under crosshair* writes path and current size of every texture you look at — handy for bug reports. Tracy timeline in developer builds only. | analysis off |
 
-Developer tests on the Debug page (known side effects, not for normal play): depth pre-pass culling, far shadow cascade
-cache.
+Developer tests on the Debug page (known side effects, not for normal play): depth pre-pass culling. The Debug page
+also has A/B measurements for the beta features (results in `SPS.log` as `[Beta-AB]`).
 
 ## Numbers and facts
 
@@ -106,9 +107,10 @@ and depth passes, and sun shadows alone cost ~12–14 ms of CPU time per frame.
 
 ## Skyrim VR (beta)
 
-A separate build for **Skyrim VR 1.4.15** (`SPS-VR-<version>.zip`, own Nexus file). It contains the **texture streaming
-only** (budget mode, refill, load at remembered size, RAM buffer). The shadow, draw-call and engine features are not
-active in VR yet - VR renders differently and they are not verified there. Install only one of the two files.
+A separate build for **Skyrim VR 1.4.15** (`SPS-VR-<version>.zip`, own Nexus file). It contains the **texture streaming**
+(budget mode, refill, load at remembered size, RAM buffer) and the **shadow culling of single meshes** (sun, torch and
+character shadows). The other shadow, draw-call and engine features are not active in VR - VR renders differently and
+they are not verified there. Install only one of the two files.
 
 | VR dependency | Required | Notes |
 |---|---|---|
