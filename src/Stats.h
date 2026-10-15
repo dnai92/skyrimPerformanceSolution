@@ -79,9 +79,6 @@ namespace Stats
 		PrunedSun,          // im Sonnenschatten-Durchlauf uebersprungene Knoten (samt Inhalt)
 		PrunedPoint,        // im Punktlicht-Durchlauf uebersprungene Knoten
 		PrunedPrecip,       // im Niederschlags-/Skylighting-Durchlauf uebersprungene Knoten
-		SunViewCulled,      // Sonnenschatten ausserhalb des Sichtfelds weggelassen (Meshes)
-		PrunedSunView,      // ... ganze Knoten
-		ViewCheckOutside,   // Kontrolle: in der Hauptszene gezeichnet, aber laut Sichtfeld-Ebenen ausserhalb (soll ~0 sein)
 
 		kTotal
 	};
@@ -120,9 +117,6 @@ namespace Stats
 		"Nodes skipped sun",
 		"Nodes skipped point light",
 		"Nodes skipped rain/sky",
-		"Sun outside view culled",
-		"Nodes skipped sun view",
-		"View check outside",
 	};
 
 	void Init();

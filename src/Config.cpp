@@ -129,9 +129,11 @@ namespace Config
 				ini.Delete("TextureStream", "fBudgetStartPct", true);
 				ini.Delete("TextureStream", "fRefillGapPct", true);
 			}
-			// Erst in eine Zwischendatei, dann ersetzen: ein Absturz mitten im Schreiben loeschte sonst alle Einstellungen
+			// Erst in eine Zwischendatei, dann ersetzen: ein Absturz mitten im Schreiben loeschte sonst alle Einstellungen.
+			// Ohne WRITE_THROUGH: das erzwungene Durchschreiben auf die Platte hielt den Hauptthread bei HDD/Virenscanner/MO2
+			// jedes Mal 10-50 ms auf
 			const std::wstring tmp = std::wstring(kUserPath) + L".tmp";
-			if (ini.SaveFile(tmp.c_str()) < 0 || !MoveFileExW(tmp.c_str(), kUserPath, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+			if (ini.SaveFile(tmp.c_str()) < 0 || !MoveFileExW(tmp.c_str(), kUserPath, MOVEFILE_REPLACE_EXISTING)) {
 				logger::warn("Menu settings could not be saved to SPS_User.ini (write protected?)");
 				return false;
 			}
@@ -140,7 +142,16 @@ namespace Config
 		}
 	}
 
-	void MarkDirty() noexcept { g_dirty.store(true); }
+	namespace
+	{
+		std::atomic<std::chrono::steady_clock::rep> g_lastDirtyTicks{ 0 };
+	}
+
+	void MarkDirty() noexcept
+	{
+		g_lastDirtyTicks.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+		g_dirty.store(true);
+	}
 	void RequestReset() noexcept { g_reset.store(true); }
 
 	namespace
@@ -188,7 +199,9 @@ namespace Config
 			return;
 		}
 		g_lastCheck = now;
-		if (g_dirty.exchange(false)) {
+		// erst speichern, wenn seit 1 s nichts mehr geaendert wurde (Regler ziehen schrieb sonst alle 2 s die Datei)
+		const auto sinceDirty = now.time_since_epoch().count() - g_lastDirtyTicks.load(std::memory_order_relaxed);
+		if (g_dirty.load() && sinceDirty >= std::chrono::duration_cast<std::chrono::steady_clock::duration>(1s).count() && g_dirty.exchange(false)) {
 			if (SaveUser()) {
 				logger::info("Menu settings saved to SPS_User.ini");
 			}

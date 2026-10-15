@@ -36,8 +36,7 @@ namespace Config
 	inline CullRule shadowCulling;                                               // Sonne [ShadowCulling]
 	// Sonnenschatten, die das Sichtfeld nicht erreichen koennen, weglassen - ZURUECKGESTELLT (1.0.17): ganze Knoten mit
 	// NPCs wurden wegen veralteter Figuren-Huellen weggelassen (fehlende NPC-Schatten mitten im Bild), einzelne Meshes
-	// bringen nur 2-25 pro Frame. Nicht mehr per INI/Menue schaltbar.
-	inline std::atomic<bool>  sunViewCulling{ false };
+	// bringen nur 2-25 pro Frame. Code 1.0.62 entfernt.
 	inline std::atomic<float> sunMinElevation{ 10.0f };  // Sonne tiefer (Grad) -> kein Sonnen-Culling (lange Schatten) [ShadowCulling] fMinSunElevation
 	inline CullRule pointLightCulling{ true, 0, 1000.0f, 150.0f, 0.035f, true };  // Punktlichter [PointLightShadowCulling]
 	// Innenraeume werden fast nur von Punktlichtern beleuchtet -> fehlende Schatten fallen dort auf (Drachenfeste)
