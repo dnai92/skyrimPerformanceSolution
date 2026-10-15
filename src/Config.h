@@ -87,10 +87,7 @@ namespace Config
 	};
 	inline FarShadowCache farShadowCache;  // [FarShadowCache]
 	// Diagnose 1.0.61 (nicht gespeichert): Review-Aenderungen einzeln abschalten, um fehlende ferne Schatten einzugrenzen
-	inline std::atomic<bool> dbgFarStableOnly{ false };  // ferne Kaskade nur festhalten, nie aus dem Cache
-	inline std::atomic<bool> dbgFarDrawAll{ false };     // Cache-Frame: gespeicherte Ebene einsetzen und trotzdem alles zeichnen
-	inline std::atomic<bool> dbgFarEngineCull{ false };  // Sammelgrenzen der Engine (customCullPlanes) nicht abschalten
-	inline std::atomic<bool> dbgFarDeepNear{ false };    // Tiefenbereich zur Sonne hin bis zur Kamera erweitern
+	inline std::atomic<bool> dbgFarEngineCull{ false };  // Sammelgrenzen der Engine (customCullPlanes) unveraendert lassen
 
 	// Instancing der Sonnenschatten (Schritt 2): gleiche einfache Meshes eines Batches in einem Draw Call
 	struct ShadowInstancing

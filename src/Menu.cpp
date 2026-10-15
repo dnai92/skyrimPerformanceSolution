@@ -351,16 +351,10 @@ namespace Menu
 				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
 
 			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));
-			MenuApi::TextWrapped("%s", T("Test (not saved, only with \"Far shadow cache (BETA)\" on): narrow down missing far shadows.",
-											"Test (wird nicht gespeichert, nur mit \"Ferne Sonnenschatten zwischenspeichern (BETA)\" an): fehlende ferne Schatten eingrenzen."));
-			AtomicToggle(T("Test D: only hold the far cascade, never use the cache", "Test D: ferne Kaskade nur festhalten, nie aus dem Cache"), Config::dbgFarStableOnly,
-				T("Every frame drawn normally, only the cascade is held still.", "Jedes Bild normal gezeichnet, nur die Kaskade wird festgehalten."), false);
-			AtomicToggle(T("Test E: cached frames draw everything again", "Test E: im Cache-Frame alles neu zeichnen"), Config::dbgFarDrawAll,
-				T("Stored shadows are inserted and everything is drawn on top.", "Gespeicherte Schatten werden eingesetzt und alles darüber gezeichnet."), false);
+			MenuApi::TextWrapped("%s", T("Test (not saved, only with \"Far shadow cache (BETA)\" on).",
+											"Test (wird nicht gespeichert, nur mit \"Ferne Sonnenschatten zwischenspeichern (BETA)\" an)."));
 			AtomicToggle(T("Test F: keep the engine's collection limits", "Test F: Sammelgrenzen der Engine behalten"), Config::dbgFarEngineCull,
 				T("Shadow casters are collected like without the cache.", "Schattenwerfer werden wie ohne Cache eingesammelt."), false);
-			AtomicToggle(T("Test G: extend depth range towards the sun", "Test G: Tiefenbereich zur Sonne hin erweitern"), Config::dbgFarDeepNear,
-				T("Casters between sun and view area are kept.", "Schattenwerfer zwischen Sonne und Sichtbereich bleiben erhalten."), false);
 			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
 				T("For testing only, can make whole objects disappear. Default OFF (saved).", "Nur zum Testen, kann ganze Objekte verschwinden lassen. Standard AUS (wird gespeichert)."));
 
