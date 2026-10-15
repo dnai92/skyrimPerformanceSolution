@@ -1503,13 +1503,13 @@ namespace ShadowCulling
 			fr.fRight = s.cx + s.hx;
 			fr.fTop = s.cy + s.hy;
 			fr.fBottom = s.cy - s.hy;
-			fr.fNear = s.n;
+			fr.fNear = Config::dbgFarDeepNear.load(std::memory_order_relaxed) ? 1.0f : s.n;
 			fr.fFar = s.f;
 			RE::NiUpdateData ud{};
 			cam->Update(ud);
 			// Schattenwerfer fuer den GANZEN gehaltenen Ausschnitt sammeln: die Engine cullt sonst mit einer engen Huelle um
 			// den aktuellen Sichtbereich (customCullPlanes) - beim Drehen fehlten im Cache Schatten am Rand
-			if (desc.cullingProcess) {
+			if (desc.cullingProcess && !Config::dbgFarEngineCull.load(std::memory_order_relaxed)) {
 				desc.cullingProcess->doCustomCullPlanes = false;
 			}
 		}
