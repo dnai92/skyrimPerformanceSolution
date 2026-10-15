@@ -30,6 +30,11 @@ namespace ShadowCulling
 	bool FarSkipDraw(const RE::BSRenderPass& a_pass) noexcept;
 	// Zeichnen einer Schattenkarte (Sonnenkaskade, Fackel/Lampe) laeuft - gesetzt vom Hook ID 107604+0x167
 	void SetInShadowMapDraw(bool a_in) noexcept;
+	// Schnellweg des Zeichen-Filters: > 0, solange ein Tiefenvorpass oder das Zeichnen einer Schattenkarte laeuft. Nur dann
+	// kann einer der Filter (Tiefenvorpass, Figurenteile, Licht-Cache, ferne Kaskade) greifen - sonst ein einziger Lesezugriff
+	// je Draw statt vier Aufrufen (bis 1.0.62)
+	inline std::atomic<int> g_drawFilterScopes{ 0 };
+	inline bool             DrawFilterMayApply() noexcept { return g_drawFilterScopes.load(std::memory_order_relaxed) > 0; }
 	// Einzelner Schatten-Draw: kleines Figurenteil in der Ferne -> true = weglassen (ActorPartShadowCulling)
 	bool SkipActorPartShadowDraw(const RE::BSRenderPass& a_pass) noexcept;
 	// Ladebildschirm / Hauptmenue: Zustand der Welt (Cache der fernen Kaskade, Hysterese der Figurenschatten) verwerfen

@@ -57,7 +57,7 @@ namespace LightShadowCache
 			REX::W32::ID3D11Texture2D*            boundTex = nullptr;   // Ebene der 1. Karte in diesem Frame (Vergleich)
 			std::uint32_t                         boundSub = 0;
 			std::uint32_t                         texW = 0, texH = 0, texFormat = 0;
-			// Culling-Jobs (unter lock)
+			// Inhalt des Caches - nur im Main-Thread (Zeichnen, OnFrame); Filter prueft das statt einer Sperre je Draw
 			struct Entry
 			{
 				RE::NiTransform pose;  // Lage beim Aufbau
@@ -78,6 +78,7 @@ namespace LightShadowCache
 		std::uint32_t              g_prevW = 0, g_prevH = 0, g_prevFormat = 0;
 		const void*                g_prevOwner = nullptr;  // Licht (LightState), das gerade wartet/aufbaut
 		std::atomic<std::uint32_t>         g_frame{ 0 };
+		std::atomic<std::uint32_t>         g_mainThreadId{ 0 };  // gesetzt in OnFrame
 		// Spiel pausiert (F1-Menue, Menues): gezeichnet wird weiter, der Frame-Beginn (Spieler-Update) laeuft aber nicht.
 		// Ohne ihn stimmen die Modi nicht mehr (1.0.28: Lichter gingen im F1-Menue nacheinander aus) -> in solchen
 		// Bildern alles normal zeichnen. Entschieden je Bild an der Bildausgabe: lief seit der letzten kein Frame-Beginn?
@@ -688,11 +689,15 @@ namespace LightShadowCache
 	{
 	bool Filter(LightState* l, RE::BSGeometry& geom) noexcept
 	{
+		// Alles hier laeuft im Main-Thread (Skyrim zeichnet dort) - bis 1.0.62 trotzdem mit Sperre je Draw. Sollte doch einmal
+		// ein anderer Thread zeichnen: normal zeichnen und den Cache nicht anfassen.
+		if (::GetCurrentThreadId() != g_mainThreadId.load(std::memory_order_relaxed)) {
+			return false;
+		}
 		const auto mode = g_curMode;
 		try {
 			if (mode == Mode::kBuild) {
 				const bool dynamic = IsDynamic(geom);
-				std::scoped_lock lock(l->lock);
 				if (dynamic || l->promoted.contains(&geom)) {
 					return true;  // Aufbau-Frame: nur Unbewegliche in die Karte
 				}
@@ -703,7 +708,6 @@ namespace LightShadowCache
 			if (DebugMode() == 3) {
 				return false;  // Pruef-Modus: zurueckkopieren, aber alles zeichnen
 			}
-			std::scoped_lock lock(l->lock);
 			const bool diag = Config::analysis.load(std::memory_order_relaxed);
 			if (l->promoted.contains(&geom)) {
 				if (diag) {
@@ -755,6 +759,7 @@ namespace LightShadowCache
 			return;
 		}
 		const auto frame = g_frame.fetch_add(1, std::memory_order_relaxed) + 1;
+		g_mainThreadId.store(::GetCurrentThreadId(), std::memory_order_relaxed);
 		g_onFrameSeen.store(true, std::memory_order_relaxed);
 		g_presentsSinceFrame = 0;
 		g_stalled.store(false, std::memory_order_relaxed);  // bis 1.0.60 erst beim naechsten Present zurueckgesetzt

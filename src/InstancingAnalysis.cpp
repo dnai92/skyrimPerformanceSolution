@@ -603,17 +603,19 @@ namespace InstancingAnalysis
 		{
 			static void thunk(RE::BSRenderPass* a_pass, std::uint32_t a_technique, bool a_alphaTest, std::uint32_t a_renderFlags)
 			{
-				if (a_pass && ShadowCulling::ShouldSkipDepthPrepassDraw(*a_pass)) {
-					return;  // Tiefenvorpass: kleines, fernes Objekt -> Draw ueberspringen
-				}
-				if (a_pass && ShadowCulling::SkipActorPartShadowDraw(*a_pass)) {
-					return;  // kleines Figurenteil in der Ferne: Schatten nicht sichtbar
-				}
-				if (a_pass && LightShadowCache::SkipDraw(*a_pass)) {
-					return;  // Schatten steckt in der zwischengespeicherten Karte
-				}
-				if (a_pass && ShadowCulling::FarSkipDraw(*a_pass)) {
-					return;  // ferne Sonnenkaskade: steckt im Cache bzw. Aufbau nur mit Unbeweglichem
+				if (a_pass && ShadowCulling::DrawFilterMayApply()) {
+					if (ShadowCulling::ShouldSkipDepthPrepassDraw(*a_pass)) {
+						return;  // Tiefenvorpass: kleines, fernes Objekt -> Draw ueberspringen
+					}
+					if (ShadowCulling::SkipActorPartShadowDraw(*a_pass)) {
+						return;  // kleines Figurenteil in der Ferne: Schatten nicht sichtbar
+					}
+					if (LightShadowCache::SkipDraw(*a_pass)) {
+						return;  // Schatten steckt in der zwischengespeicherten Karte
+					}
+					if (ShadowCulling::FarSkipDraw(*a_pass)) {
+						return;  // ferne Sonnenkaskade: steckt im Cache bzw. Aufbau nur mit Unbeweglichem
+					}
 				}
 				bool first = false;
 				if (Site == 1 && g_instBatchActive && a_pass && Qualifies(*a_pass, a_alphaTest)) {

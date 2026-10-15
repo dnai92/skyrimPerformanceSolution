@@ -437,6 +437,7 @@ namespace TextureStream
 			double        upMs = 0, upMB = 0;
 			std::uint32_t passes = 0, passFrames = 0, passNodes = 0;
 			double        passMs = 0;
+			double        passEndMs = 0, passEndMaxMs = 0;  // Abschluss je Durchlauf (PassEnd)
 		} g_stats;
 		std::uint32_t g_failLogged = 0;
 
@@ -1388,6 +1389,10 @@ namespace TextureStream
 		std::uint32_t g_passId = 1;
 
 		// Textur wurde an einem Objekt gefunden, das a_needPx Pixel gross erscheint
+		// Zeitpunkt fuer "zuletzt gesehen": einmal je Durchlauf-Abschnitt bzw. Vorschau-Tick gesetzt (Main-Thread). Bis 1.0.62
+		// fragte OnSeen die Uhr fuer jede gesehene Textur ab (~100 000 Mal je Durchlauf)
+		Clock::time_point g_sightNow = Clock::now();
+
 		void OnSeen(RE::NiSourceTexture* a_src, float a_needPx, bool a_skinned)
 		{
 			const auto r = a_src->rendererTexture;
@@ -1451,7 +1456,7 @@ namespace TextureStream
 					}
 				}
 			}
-			st.lastSeen = Clock::now();
+			st.lastSeen = g_sightNow;
 			if (a_skinned) {
 				st.skinPass = g_passId;
 			}
@@ -2131,6 +2136,7 @@ namespace TextureStream
 		void PreviewTick()
 		{
 			std::scoped_lock state(g_stateLock);
+			g_sightNow = Clock::now();
 			ApplyResults();
 			const auto ui = RE::UI::GetSingleton();
 			if (!ui) {
@@ -2347,9 +2353,9 @@ namespace TextureStream
 				logger::info("[TextureStream]   figures (skinned, current size): {} textures, {:.0f} MB of {:.0f} MB seen | body/face/hair {} ({:.0f} MB), armor/clothing/other {} ({:.0f} MB) | 4K+ {} ({:.0f} MB)",
 					nChar + nOther, mbChar + mbOther, mbAll, nChar, mbChar, nOther, mbOther, nBig, mbBig);
 			}
-			logger::info("[TextureStream]   10 s: downscaled {} (skipped {}) | reloaded {} ({:.0f} MB, avg {:.0f} ms) | load errors {} | expired in queue {} | ping-pong {} | refilled {} | queue {} | passes {} (avg {:.0f} frames, {:.0f} nodes, {:.2f} ms total)",
+			logger::info("[TextureStream]   10 s: downscaled {} (skipped {}) | reloaded {} ({:.0f} MB, avg {:.0f} ms) | load errors {} | expired in queue {} | ping-pong {} | refilled {} | queue {} | passes {} (avg {:.0f} frames, {:.0f} nodes, {:.2f} ms total, end of pass avg {:.2f} ms max {:.2f} ms, {} textures)",
 				s.downs, s.downsSkipped, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, s.upExpired, s.pingPong, s.refills, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
-				s.passes ? double(s.passNodes) / s.passes : 0.0, s.passes ? s.passMs / s.passes : 0.0);
+				s.passes ? double(s.passNodes) / s.passes : 0.0, s.passes ? s.passMs / s.passes : 0.0, s.passes ? s.passEndMs / s.passes : 0.0, s.passEndMaxMs, g_tex.size());
 			std::size_t remembered = 0;
 			{
 				std::scoped_lock lock(g_sizeLock);
@@ -2702,6 +2708,7 @@ namespace TextureStream
 		UpdateCamera();
 		++g_passFrames;
 		const auto t0 = Clock::now();
+		g_sightNow = t0;
 		const auto budget = std::chrono::duration<double, std::milli>(std::clamp(cfg.budgetMs, 0.05f, 5.0f));
 		std::uint32_t n = 0;
 		while (!g_stack.empty()) {
@@ -2726,7 +2733,12 @@ namespace TextureStream
 			g_stats.passNodes += g_passNodes;
 			g_stats.passMs += g_passMs;
 			g_act.passEnd = true;
+			const auto pe0 = Clock::now();
 			PassEnd();
+			// Abschluss laeuft am Stueck ueber alle Texturen - gemessen, bevor er auf mehrere Bilder verteilt wird
+			const double peMs = std::chrono::duration<double, std::milli>(Clock::now() - pe0).count();
+			g_stats.passEndMs += peMs;
+			g_stats.passEndMaxMs = std::max(g_stats.passEndMaxMs, peMs);
 		}
 	}
 }

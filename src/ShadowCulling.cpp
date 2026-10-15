@@ -105,17 +105,29 @@ namespace ShadowCulling
 			return false;
 		}
 
-		void RecordPointMesh(const RE::NiCamera* a_camera, RE::BSGeometry& a_geom) noexcept
+		// Platz der Punktlicht-Kamera in g_pointCameras (UINT32_MAX = keine bekannte). Einmal je Mesh suchen und weitergeben -
+		// bis 1.0.62 durchsuchten Einordnen und Schattenvergroesserung die Tabelle getrennt
+		std::uint32_t PointSlot(const RE::NiCamera* a_camera) noexcept
+		{
+			if (!a_camera) {
+				return UINT32_MAX;
+			}
+			const auto count = std::min(g_pointCameraCount.load(std::memory_order_relaxed), static_cast<std::uint32_t>(kMaxPointCameras));
+			for (std::uint32_t i = 0; i < count; ++i) {
+				if (g_pointCameras[i].load(std::memory_order_relaxed) == a_camera) {
+					return i;
+				}
+			}
+			return UINT32_MAX;
+		}
+
+		void RecordPointMesh(std::uint32_t a_slot, RE::BSGeometry& a_geom) noexcept
 		{
 			if (!Config::analysis.load(std::memory_order_relaxed)) {
 				return;
 			}
-			const auto count = g_pointCameraCount.load(std::memory_order_relaxed);
-			for (std::uint32_t i = 0; i < count && i < kMaxPointCameras; ++i) {
-				if (g_pointCameras[i].load(std::memory_order_relaxed) != a_camera) {
-					continue;
-				}
-				auto& d = g_pointDiag[i];
+			if (a_slot < kMaxPointCameras) {
+				auto& d = g_pointDiag[a_slot];
 				if (a_geom.GetGeometryRuntimeData().skinInstance) {
 					std::scoped_lock lock(d.lock);
 					++d.skinned;
@@ -368,11 +380,9 @@ namespace ShadowCulling
 					return Kind::kSun;
 				}
 			}
-			const auto count = g_pointCameraCount.load(std::memory_order_relaxed);
-			for (std::uint32_t i = 0; i < count && i < kMaxPointCameras; ++i) {
-				if (g_pointCameras[i].load(std::memory_order_relaxed) == camera) {
-					return Kind::kPoint;
-				}
+			if (const auto slot = PointSlot(camera); slot != UINT32_MAX) {
+				a_cascade = slot;  // Punktlicht: Platz in g_pointCameras
+				return Kind::kPoint;
 			}
 			return Kind::kOther;
 		}
@@ -419,20 +429,16 @@ namespace ShadowCulling
 		// Punktlicht: Der Schatten auf einer Flaeche hinter dem Objekt ist um (Abstand Licht-Flaeche / Abstand Licht-Objekt)
 		// groesser als das Objekt; die Flaeche liegt hoechstens im Leuchtradius. Bewertet wird deshalb die moegliche
 		// Schattengroesse (wie bei der Sonne die Schattenlaenge), nicht das Objekt - grosse Schatten an der Wand fehlten.
-		float PointShadowScale(const RE::NiCamera* a_lightCamera, const RE::BSGeometry& a_geom) noexcept
+		float PointShadowScale(std::uint32_t a_slot, const RE::BSGeometry& a_geom) noexcept
 		{
-			const auto count = g_pointCameraCount.load(std::memory_order_relaxed);
-			for (std::uint32_t i = 0; i < count && i < kMaxPointCameras; ++i) {
-				if (g_pointCameras[i].load(std::memory_order_relaxed) != a_lightCamera) {
-					continue;
-				}
-				const auto& p = g_pointLightPos[i];
-				const auto& b = a_geom.worldBound;
-				const float dx = b.center.x - p.x, dy = b.center.y - p.y, dz = b.center.z - p.z;
-				const float d = std::max(std::sqrt(dx * dx + dy * dy + dz * dz) - b.radius, 1.0f);
-				return std::clamp(g_pointLightRadius[i] / d, 1.0f, 50.0f);
+			if (a_slot >= kMaxPointCameras) {
+				return 1.0f;
 			}
-			return 1.0f;
+			const auto& p = g_pointLightPos[a_slot];
+			const auto& b = a_geom.worldBound;
+			const float dx = b.center.x - p.x, dy = b.center.y - p.y, dz = b.center.z - p.z;
+			const float d = std::max(std::sqrt(dx * dx + dy * dy + dz * dz) - b.radius, 1.0f);
+			return std::clamp(g_pointLightRadius[a_slot] / d, 1.0f, 50.0f);
 		}
 
 		bool NearPointLight(const RE::NiCamera* a_lightCamera, const RE::BSGeometry& a_geom) noexcept
@@ -706,12 +712,12 @@ namespace ShadowCulling
 					}
 					// minCascade gilt nur fuer die Sonne -> hier Kaskade als "hinreichend gross" uebergeben
 					if (g_pointCullAllowed.load(std::memory_order_relaxed) && PointCullOn() && !NearPointLight(a_this->camera, a_visible) &&
-						ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX, PointShadowScale(a_this->camera, a_visible))) {
+						ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX, PointShadowScale(cascade, a_visible))) {
 						Stats::Count(Stats::Counter::PointCulled);
 						return;
 					}
 					Stats::Count(Stats::Counter::PointKept);
-					RecordPointMesh(a_this->camera, a_visible);
+					RecordPointMesh(cascade, a_visible);
 					break;
 				default:
 					Stats::Count(Stats::Counter::OtherCullers);
@@ -729,12 +735,14 @@ namespace ShadowCulling
 		{
 			static void thunk(bool a_arg1, bool a_arg2)
 			{
+				g_drawFilterScopes.fetch_add(1, std::memory_order_relaxed);
 				g_inDepthPrepass.store(true, std::memory_order_relaxed);
 				Occlusion::OnDepthPrepassBegin();
 				GpuTimer::Begin(GpuTimer::kDepthPrepass);
 				func(a_arg1, a_arg2);
 				GpuTimer::End(GpuTimer::kDepthPrepass);
 				g_inDepthPrepass.store(false, std::memory_order_relaxed);
+				g_drawFilterScopes.fetch_sub(1, std::memory_order_relaxed);
 				Occlusion::OnDepthPrepassEnd();
 			}
 			static inline void (*func)(bool, bool) = nullptr;
@@ -751,13 +759,14 @@ namespace ShadowCulling
 				if (CullActorShadow(a_visible, true)) {
 					return;
 				}
+				const auto slot = PointSlot(a_this->camera);
 				if (g_pointCullAllowed.load(std::memory_order_relaxed) && PointCullOn() && !NearPointLight(a_this->camera, a_visible) &&
-					ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX, PointShadowScale(a_this->camera, a_visible))) {
+					ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX, PointShadowScale(slot, a_visible))) {
 					Stats::Count(Stats::Counter::PointCulled);
 					return;
 				}
 				Stats::Count(Stats::Counter::PointKept);
-				RecordPointMesh(a_this->camera, a_visible);
+				RecordPointMesh(slot, a_visible);
 				func(a_this, a_visible, a_alphaGroupIndex);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -1020,11 +1029,17 @@ namespace ShadowCulling
 
 		// Kamera der Niederschlags-/Skylighting-Verdeckungskarte. Erkennung ueber die Kamera, nicht ueber den Culler:
 		// das Spiel verteilt den Durchlauf auf Kopien des Cullers (Zeigervergleich traf nie).
-		const RE::NiCamera* PrecipCamera() noexcept
+		// Je Bild einmal im Main-Thread ermittelt (OnFrame) - bis 1.0.62 fuer jeden Knoten jedes Cullers ueber das Sky-Objekt.
+		// Nur Zeigervergleich, nie dereferenziert: ein Wetterwechsel innerhalb des Bildes kostet hoechstens einmal Pruning.
+		std::atomic<const RE::NiCamera*> g_precipCamera{ nullptr };
+
+		void UpdatePrecipCamera() noexcept
 		{
 			const auto sky = RE::Sky::GetSingleton();
-			return sky && sky->precip ? sky->precip->occlusionData.camera.get() : nullptr;
+			g_precipCamera.store(sky && sky->precip ? sky->precip->occlusionData.camera.get() : nullptr, std::memory_order_relaxed);
 		}
+
+		const RE::NiCamera* PrecipCamera() noexcept { return g_precipCamera.load(std::memory_order_relaxed); }
 
 		// true = Knoten samt Inhalt ueberspringen; a_sun = Sonnen-Durchlauf (dort gelten Figuren-/Skinning-Ausnahmen)
 		bool ShouldPrune(RE::BSCullingProcess* a_this, RE::NiAVObject* a_obj, bool a_parabolic, bool& a_sun) noexcept
@@ -1691,6 +1706,9 @@ namespace ShadowCulling
 
 	void SetInShadowMapDraw(bool a_in) noexcept
 	{
+		if (a_in != t_inShadowMapDraw) {
+			g_drawFilterScopes.fetch_add(a_in ? 1 : -1, std::memory_order_relaxed);
+		}
 		t_inShadowMapDraw = a_in;
 	}
 
@@ -1812,6 +1830,7 @@ namespace ShadowCulling
 #endif
 
 		UpdateMainWorldAccumulator();
+		UpdatePrecipCamera();
 		g_pruneFrame.fetch_add(1, std::memory_order_relaxed);
 		if (const auto left = g_microListFrames.load(std::memory_order_relaxed); left > 0 && g_microListFrames.fetch_sub(1, std::memory_order_relaxed) == 1) {
 			FinishMicroCullList();
