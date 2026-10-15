@@ -152,8 +152,13 @@ namespace ShadowCulling
 		void FinishLightCacheDiag() noexcept
 		{
 			++g_lcFrame;
-			const auto count = g_pointCameraCount.load(std::memory_order_relaxed);
-			const bool on = Config::analysis.load(std::memory_order_relaxed);
+			const auto  count = g_pointCameraCount.load(std::memory_order_relaxed);
+			const bool  on = Config::analysis.load(std::memory_order_relaxed);
+			static bool wasOn = false;
+			if (!on && !wasOn) {
+				return;  // nichts gesammelt (RecordPointMesh nur mit Analyse-Protokoll)
+			}
+			wasOn = on;  // nach dem Ausschalten einmal leeren
 			for (std::uint32_t i = 0; i < count && i < kMaxPointCameras; ++i) {
 				auto&                   d = g_pointDiag[i];
 				std::vector<MeshSample> meshes;
@@ -812,7 +817,9 @@ namespace ShadowCulling
 					}
 					if (g_sunCullAllowed.load(std::memory_order_relaxed) && ShouldCull(Config::shadowCulling, a_visible, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
 						Stats::Count(Stats::Counter::SunCulled);
-						RecordCulled(a_visible, cascade, DistanceToCamera(a_visible.worldBound));
+						if (Config::analysis.load(std::memory_order_relaxed)) {
+							RecordCulled(a_visible, cascade, DistanceToCamera(a_visible.worldBound));
+						}
 						return;
 					}
 					Stats::Count(cascade == 0 ? Stats::Counter::SunCascade0 : cascade == 1 ? Stats::Counter::SunCascade1 : Stats::Counter::SunCascade2Plus);
@@ -1565,6 +1572,14 @@ namespace ShadowCulling
 				return;
 			}
 			f.lastLog = std::chrono::steady_clock::now();
+			if (!Config::analysis.load(std::memory_order_relaxed)) {
+				g_farSkippedStatic.store(0, std::memory_order_relaxed);
+				f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
+				f.hookMissed = f.notBound = 0;
+				g_stableChanged = g_stableReanchor = 0;
+				f.frames = f.cached = f.builds = f.waits = f.normal = 0;
+				return;  // Zeile nur im Analyse-Protokoll
+			}
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
 			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: draws skipped {:.0f} | draw hook missed {} (other target {}) | "

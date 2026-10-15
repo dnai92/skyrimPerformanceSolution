@@ -3,6 +3,7 @@
 
 #include "Config.h"
 #include "DetourHelper.h"
+#include "EngineTimers.h"
 #include "GpuTimer.h"
 #include "InstancedDraw.h"
 #include "LightShadowCache.h"
@@ -543,13 +544,16 @@ namespace InstancingAnalysis
 				Stats::Count(Stats::Counter::SunRenderCalls);
 				Stats::ScopedTimer timer{ Stats::Zone::SunShadowRender };
 				g_inSunShadows.store(true, std::memory_order_relaxed);
-				const auto start = std::chrono::steady_clock::now();
+				const bool timed = Config::analysis.load(std::memory_order_relaxed) || EngineTimers::BetaABRunning();
+				const auto start = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 				GpuTimer::Begin(GpuTimer::kSunShadows);
 				func(a_this, a_index);
 				GpuTimer::End(GpuTimer::kSunShadows);
-				const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
-				g_sunRenderNs += ns;
-				g_sunRenderAbNs += ns;
+				if (timed) {
+					const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
+					g_sunRenderNs += ns;
+					g_sunRenderAbNs += ns;
+				}
 				g_inSunShadows.store(false, std::memory_order_relaxed);
 				ShadowCulling::AfterSunRender();
 			}
@@ -620,7 +624,7 @@ namespace InstancingAnalysis
 				}
 				const auto prev = t_callSite;
 				t_callSite = Site;
-				if (g_inSunShadows.load(std::memory_order_relaxed)) {
+				if (g_inSunShadows.load(std::memory_order_relaxed) && EngineTimers::BetaABRunning()) {
 					++g_sunDrawsAb;
 				}
 				func(a_pass, a_technique, a_alphaTest, a_renderFlags);
