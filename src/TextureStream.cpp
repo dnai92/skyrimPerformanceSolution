@@ -490,27 +490,9 @@ namespace TextureStream
 		// Datei neu geladen). Nur diese werden verkleinert: Mods, die Texturen zur Laufzeit erzeugen oder austauschen
 		// (RaceMenu-Overlays, Haut-/Gesichtstoenung ...), tragen oft trotzdem einen Dateinamen - ein Neuladen aus der
 		// Datei wuerde ihre Aenderung verwerfen (schwarze Gesichter/Texturen gemeldet, 1.0.10).
-		std::mutex                      g_fileTexLock;
-		std::unordered_set<const void*> g_fileTex;
-		std::unordered_set<const void*> g_ourLoadReduced;  // von uns verkleinert geladen (Stufe 3 / Obergrenze)
-		std::atomic<bool>               g_fileTexTracking{ false };  // DDS-Lader-Hook aktiv
-
-		void MarkFileTexture(const void* a_obj)
-		{
-			if (a_obj) {
-				std::scoped_lock lock(g_fileTexLock);
-				g_fileTex.insert(a_obj);
-			}
-		}
-
-		void ForgetFileTexture(const void* a_obj)
-		{
-			if (a_obj) {
-				std::scoped_lock lock(g_fileTexLock);
-				g_fileTex.erase(a_obj);
-				g_ourLoadReduced.erase(a_obj);
-			}
-		}
+		// Erkannt wird allein am Kennzeichen am D3D-Objekt (unten). Bis 1.0.60 zusaetzlich ueber Adress-Mengen, die nie
+		// schrumpften - eine spaeter an derselben Adresse angelegte fremde Textur galt dann als Datei-Textur.
+		std::atomic<bool> g_fileTexTracking{ false };  // DDS-Lader-Hook aktiv
 
 		// Kennzeichen direkt am D3D-Objekt (SetPrivateData): stirbt mit dem Objekt, ueberlebt aber Reset/Vergessen unseres
 		// Zustands. Bis 1.0.55 hing "von uns verkleinert" nur an unserer Tabelle - nach jedem Ladebildschirm (oder 120 s
@@ -542,11 +524,8 @@ namespace TextureStream
 
 		bool ReducedByUsAtLoad(W::ID3D11Resource* a_res)
 		{
-			if (Tag tag; GetTag(a_res, tag)) {
-				return (tag.flags & kTagOurs) != 0;
-			}
-			std::scoped_lock lock(g_fileTexLock);
-			return g_ourLoadReduced.contains(a_res);
+			Tag tag;
+			return GetTag(a_res, tag) && (tag.flags & kTagOurs) != 0;
 		}
 
 		bool IsFileTexture(const RE::BSGraphics::Texture* a_r)
@@ -554,11 +533,8 @@ namespace TextureStream
 			if (!g_fileTexTracking.load(std::memory_order_relaxed)) {
 				return true;  // ohne Lader-Hook keine Merkliste - altes Verhalten
 			}
-			if (Tag tag; GetTag(a_r->texture, tag)) {
-				return (tag.flags & kTagFile) != 0;
-			}
-			std::scoped_lock lock(g_fileTexLock);
-			return g_fileTex.contains(a_r->texture) || g_fileTex.contains(a_r->resourceView);
+			Tag tag;
+			return GetTag(a_r->texture, tag) && (tag.flags & kTagFile) != 0;  // ohne Kennzeichen: nicht von uns erkannt -> nie anfassen
 		}
 
 		// Das Spiel merkt sich je Pixel-Shader-Platz die gebundene Textur und bindet nicht neu, wenn der Zeiger gleich ist.
@@ -587,9 +563,6 @@ namespace TextureStream
 		void Swap(RE::BSGraphics::Texture* a_r, W::ID3D11Texture2D* a_tex, W::ID3D11ShaderResourceView* a_srv, std::uint64_t a_oldBytes,
 			std::uint32_t a_fullW, std::uint32_t a_fullH, std::uint32_t a_fullMips, bool a_ours)
 		{
-			ForgetFileTexture(a_r->texture);
-			ForgetFileTexture(a_r->resourceView);
-			MarkFileTexture(a_tex);  // unser Ersatz stammt aus derselben Datei (Kopie oder Neuladen)
 			SetTag(a_tex, kTagFile | (a_ours ? kTagOurs : 0), a_fullW, a_fullH, a_fullMips);
 			ForgetBoundSrv(a_r->resourceView);
 			DeferRelease(a_r->texture, a_oldBytes);
@@ -600,8 +573,11 @@ namespace TextureStream
 
 		// ---------------- Hintergrund-Thread: Kopf pruefen / neu laden ----------------
 
+		std::atomic<std::uint32_t> g_resetGen{ 0 };  // Reset (Ladebildschirm): aeltere Auftraege gelten nicht mehr
+
 		struct Job
 		{
+			std::uint32_t                      gen = g_resetGen.load(std::memory_order_relaxed);
 			bool                               reload = false;  // false = nur Kopf pruefen
 			RE::BSGraphics::Texture*           r = nullptr;
 			W::ID3D11Resource*                 expectRes = nullptr;
@@ -887,6 +863,8 @@ namespace TextureStream
 						RunJob(res);
 					} catch (const std::exception& e) {
 						res.error = e.what();
+					} catch (...) {
+						res.error = "unknown exception";  // eigener Thread: nichts darf ihn beenden
 					}
 					{
 						std::scoped_lock lock(g_qLock);
@@ -1156,6 +1134,12 @@ namespace TextureStream
 			}
 			out.close();
 			std::error_code ec;
+			if (!out) {
+				std::filesystem::remove(tmp, ec);  // Platte voll / gesperrt: alte Datei behalten, spaeter erneut
+				std::scoped_lock lock(g_sizeLock);
+				g_sizesDirty = true;
+				return;
+			}
 			std::filesystem::rename(tmp, file, ec);
 		}
 
@@ -1254,22 +1238,11 @@ namespace TextureStream
 				// a_out ist das Textur-Objekt der Engine (BSGraphics::Texture, Aufrufer AE 77301 setzt danach +0x20) -
 				// gemerkt wird das darin angelegte D3D-Objekt
 				if (result >= 0 && a_out && *a_out) {
-					const auto tex = static_cast<RE::BSGraphics::Texture*>(*a_out)->texture;
-					MarkFileTexture(tex);
-					SetTag(tex, kTagFile | (changed ? kTagOurs : 0));
-					if (tex) {
-						// Adresse kann von einer frueheren, freigegebenen Textur stammen -> alten Eintrag nicht erben
-						std::scoped_lock lock(g_fileTexLock);
-						if (changed) {
-							g_ourLoadReduced.insert(tex);
-						} else {
-							g_ourLoadReduced.erase(tex);
-						}
-					}
+					SetTag(static_cast<RE::BSGraphics::Texture*>(*a_out)->texture, kTagFile | (changed ? kTagOurs : 0));
 				}
 				// Sicherheitsnetz: schlaegt das Laden mit unserer Groesse fehl, diese Textur nie wieder verkleinert laden
 				// (0.20.5: zwei Ladenschilder mit krummen Massen -> nicht durch 4 teilbar -> ohne Textur)
-				if (changed && result < 0 && !t_loadPath.empty()) {
+				if (changed && result < 0 && !t_loadPath.empty()) try {
 					{
 						std::scoped_lock lock(g_sizeLock);
 						g_neverReduce.insert(t_loadPath);
@@ -1278,6 +1251,7 @@ namespace TextureStream
 					}
 					logger::warn("[TextureStream] loading with maxsize {} failed (0x{:X}) - will never be loaded reduced again: {}", a_maxSize,
 						static_cast<std::uint32_t>(result), t_loadPath);
+				} catch (...) {
 				}
 				return result;
 			}
@@ -1524,7 +1498,7 @@ namespace TextureStream
 				++drop;
 			}
 			// Blockformate: oberste Stufe muss durch 4 teilbar sein
-			while (drop > 0 && st.fi.bc && (((st.curW >> drop) % 4) != 0 || ((st.curH >> drop) % 4) != 0)) {
+			while (drop > 0 && st.fi.bc && ((std::max(1u, st.curW >> drop) % 4) != 0 || (std::max(1u, st.curH >> drop) % 4) != 0)) {
 				--drop;
 			}
 			if (drop == 0) {
@@ -1613,10 +1587,22 @@ namespace TextureStream
 					later.push_back(std::move(res));
 					continue;
 				}
+				if (job.gen != g_resetGen.load(std::memory_order_relaxed)) {
+					// vor einem Reset beauftragt: der Eintrag ist weg, die Adresse evtl. neu vergeben - nur freigeben
+					if (res.tex) {
+						res.tex->Release();
+					}
+					if (res.srv) {
+						res.srv->Release();
+					}
+					continue;
+				}
 				// erst nach 3 s abziehen: so lange braucht die VRAM-Anzeige, bis der neue Speicher darin auftaucht
 				g_upSettle.emplace_back(Clock::now(), job.extraBytes);
-				const auto  it = g_tex.find(job.r);
-				const bool  valid = it != g_tex.end() && it->second.res == job.expectRes && job.r->texture == job.expectRes;
+				const auto it = g_tex.find(job.r);
+				// Erst pruefen, ob wir die Textur noch halten - erst dann job.r anfassen (sonst evtl. freigegebener Speicher)
+				const bool held = it != g_tex.end() && it->second.hold && it->second.hold->rendererTexture == job.r;
+				const bool valid = held && it->second.res == job.expectRes && job.r->texture == job.expectRes && it->second.path == job.path;
 				if (it != g_tex.end()) {
 					it->second.busy = false;  // je Textur laeuft hoechstens ein Auftrag
 				}
@@ -1648,7 +1634,7 @@ namespace TextureStream
 					continue;
 				}
 				// Neu geladen
-				const bool alive = valid && it->second.hold && it->second.hold->rendererTexture == job.r;
+				const bool alive = valid;
 				if (!res.error.empty() || !alive) {
 					if (res.tex) {
 						res.tex->Release();
@@ -2172,7 +2158,7 @@ namespace TextureStream
 
 		std::int32_t ProbeCreateTex2D(W::ID3D11Device* a_self, const W::D3D11_TEXTURE2D_DESC* a_desc, const W::D3D11_SUBRESOURCE_DATA* a_init, W::ID3D11Texture2D** a_out)
 		{
-			if (a_desc && a_init && a_desc->mipLevels > 1 && a_desc->width >= 256) {
+			if (Config::analysis.load(std::memory_order_relaxed) && a_desc && a_init && a_desc->mipLevels > 1 && a_desc->width >= 256) {
 				void*               frames[32]{};
 				const auto          n = RtlCaptureStackBackTrace(1, 32, frames, nullptr);
 				const std::uintptr_t base = REL::Module::get().base();
@@ -2385,6 +2371,7 @@ namespace TextureStream
 		g_lastLoadTicks.store(g_lastLoad.time_since_epoch().count(), std::memory_order_relaxed);
 		g_inflightUp = 0;
 		g_upSettle.clear();
+		g_resetGen.fetch_add(1, std::memory_order_relaxed);
 		logger::info("[TextureStream] Reset ({}):{} held textures and pass released, {} jobs discarded", a_reason, held, jobs);
 	}
 
