@@ -14,6 +14,8 @@ namespace ShadowCulling
 	// Tiefenvorpass: true, wenn der Draw dieses Passes uebersprungen werden soll (nur waehrend Main::RenderDepth)
 	bool ShouldSkipDepthPrepassDraw(const RE::BSRenderPass& a_pass) noexcept;
 	bool InDepthPrepass() noexcept;
+	// Accumulator der Hauptansicht (Weltkamera) - nicht Spiegelungen, Vorschauen, Menue-3D
+	bool IsMainViewAccumulator(const void* a_accumulator) noexcept;
 
 	// Cache der fernen Kaskade: vor bzw. nach BSShadowDirectionalLight::Accumulate (Main-Thread)
 	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept;

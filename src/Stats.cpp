@@ -237,12 +237,9 @@ namespace Stats
 		g_frameNs[static_cast<std::size_t>(a_zone)].fetch_add(a_ns, std::memory_order_relaxed);
 	}
 
-	void Count(Counter a_counter) noexcept
+	void CountSlow(Counter a_counter) noexcept
 	{
 		// Zaehler erscheinen nur im Analyse-Bericht; ohne ihn keine gemeinsamen Atomics je Mesh aus den Culling-Jobs
-		if (!Config::analysis.load(std::memory_order_relaxed)) {
-			return;
-		}
 		g_frameCounters[static_cast<std::size_t>(a_counter)].fetch_add(1, std::memory_order_relaxed);
 	}
 

@@ -1,4 +1,5 @@
 #include "Occlusion.h"
+#include "ShadowCulling.h"
 
 #include "Config.h"
 #include "OcclusionGpu.h"
@@ -807,7 +808,7 @@ namespace Occlusion
 			return false;
 		}
 		const bool skinned = const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData().skinInstance != nullptr;
-		const bool isMain = a_accumulator && a_accumulator == g_mainAcc.load(std::memory_order_relaxed);
+		const bool isMain = ShadowCulling::IsMainViewAccumulator(a_accumulator);  // gleiche Erkennung wie Mikro-/Decal-Culling
 		// Ohne Diagnose zaehlt das Ergebnis nur fuer feste Objekte im Hauptbild - Spiegelungen, Vorschauen und Figuren nicht
 		// erst testen (bis zu occlMaxTiles Kacheln je Objekt)
 		if (!diag && (!cullOn || !isMain || (skinned && Config::occlSkipSkinned.load(std::memory_order_relaxed))) && snap->id != g_listSnapId.load(std::memory_order_relaxed)) {

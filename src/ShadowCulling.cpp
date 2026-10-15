@@ -484,43 +484,25 @@ namespace ShadowCulling
 			if (!a_rule.enabled || a_cascade < a_rule.minCascade || !Config::masterEnabled.load(std::memory_order_relaxed)) {
 				return false;
 			}
-			const float radius = a_bound.radius * a_radiusScale;
-			if (a_bound.radius <= 0.0f || radius >= a_rule.maxRadius) {
+			const float radius = a_bound.radius * a_radiusScale;  // Sonne: ungefaehre Schattenlaenge
+			if (a_bound.radius <= 0.0f || radius >= a_rule.maxRadius || a_rule.minAngularSize <= 0.0f) {
 				return false;
 			}
+			// Abstand d = |Mitte - Kamera| - Radius; weglassen, wenn d > minDistance und radius/d < minAngularSize, also
+			// d > max(minDistance, radius/minAngularSize) - ohne Wurzel je Mesh als Vergleich der Quadrate
 			const float dx = a_bound.center.x - g_camX.load(std::memory_order_relaxed);
 			const float dy = a_bound.center.y - g_camY.load(std::memory_order_relaxed);
 			const float dz = a_bound.center.z - g_camZ.load(std::memory_order_relaxed);
-			const float distance = std::sqrt(dx * dx + dy * dy + dz * dz) - a_bound.radius;
-			if (distance <= a_rule.minDistance) {
-				return false;
-			}
-			return radius / distance < a_rule.minAngularSize;
+			const float reach = a_bound.radius + std::max(a_rule.minDistance, radius / a_rule.minAngularSize);
+			return dx * dx + dy * dy + dz * dz > reach * reach;
 		}
 
 		bool ShouldCull(const Config::CullRule& a_rule, const RE::BSGeometry& a_geom, std::uint32_t a_cascade, float a_radiusScale = 1.0f) noexcept
 		{
-			if (!a_rule.enabled || a_cascade < a_rule.minCascade || !Config::masterEnabled.load(std::memory_order_relaxed)) {
-				return false;
-			}
-
-			const auto& bound = a_geom.worldBound;
-			const float radius = bound.radius * a_radiusScale;  // Sonne: ungefaehre Schattenlaenge
-			if (bound.radius <= 0.0f || radius >= a_rule.maxRadius) {
-				return false;
-			}
 			if (a_rule.skipSkinned && a_geom.GetGeometryRuntimeData().skinInstance) {
 				return false;
 			}
-
-			const float dx = bound.center.x - g_camX.load(std::memory_order_relaxed);
-			const float dy = bound.center.y - g_camY.load(std::memory_order_relaxed);
-			const float dz = bound.center.z - g_camZ.load(std::memory_order_relaxed);
-			const float distance = std::sqrt(dx * dx + dy * dy + dz * dz) - bound.radius;
-			if (distance <= a_rule.minDistance) {
-				return false;
-			}
-			return radius / distance < a_rule.minAngularSize;
+			return ShouldCullBound(a_rule, a_geom.worldBound, a_cascade, a_radiusScale);
 		}
 
 		// Punktlicht: Objekte nahe am Licht werfen grosse, gut sichtbare Schatten, auch wenn sie selbst klein sind
@@ -905,6 +887,11 @@ namespace ShadowCulling
 		};
 		std::array<AccCount, 6>  g_accCounts;
 		std::atomic<const void*> g_mainWorldAcc{ nullptr };
+		// Eindeutiger Weg: der Accumulator, der mit der Weltkamera ("WorldRoot Camera") sammelt (NiAccumulator::camera).
+		// Erst genutzt, wenn der per Mehrheit gefundene Hauptbild-Accumulator diese Kamera nachweislich traegt - dann kann
+		// keine Spiegelung/Vorschau mehr die Wahl kurzzeitig gewinnen. Sonst (andere Kamera durch eine Mod): Mehrheit.
+		std::atomic<std::uint32_t> g_camMatchHits{ 0 }, g_camMatchMisses{ 0 };
+		std::atomic<bool>          g_camMatchOk{ false };
 
 		void NoteAccumulator(const void* a_acc) noexcept
 		{
@@ -912,6 +899,10 @@ namespace ShadowCulling
 			thread_local std::uint32_t tick = 0;
 			if (!a_acc || (++tick & 15) != 0) {
 				return;
+			}
+			if (a_acc == g_mainWorldAcc.load(std::memory_order_relaxed)) {
+				const auto cam = RE::Main::WorldRootCamera();
+				(cam && static_cast<const RE::NiAccumulator*>(a_acc)->camera == cam ? g_camMatchHits : g_camMatchMisses).fetch_add(1, std::memory_order_relaxed);
 			}
 			for (auto& c : g_accCounts) {
 				if (c.acc.load(std::memory_order_relaxed) == a_acc) {
@@ -930,7 +921,14 @@ namespace ShadowCulling
 
 		bool IsMainWorldAccumulator(const void* a_acc) noexcept
 		{
-			return a_acc && a_acc == g_mainWorldAcc.load(std::memory_order_relaxed);
+			if (!a_acc) {
+				return false;
+			}
+			if (g_camMatchOk.load(std::memory_order_relaxed)) {
+				const auto cam = RE::Main::WorldRootCamera();
+				return cam && static_cast<const RE::NiAccumulator*>(a_acc)->camera == cam;
+			}
+			return a_acc == g_mainWorldAcc.load(std::memory_order_relaxed);
 		}
 
 		void UpdateMainWorldAccumulator() noexcept
@@ -954,6 +952,14 @@ namespace ShadowCulling
 				}
 			}
 			g_mainWorldAcc.store(best, std::memory_order_relaxed);
+			// Kamera-Weg freigeben, sobald das Hauptbild nachweislich mit der Weltkamera sammelt (und nie mit einer anderen)
+			const auto hits = g_camMatchHits.exchange(0, std::memory_order_relaxed), misses = g_camMatchMisses.exchange(0, std::memory_order_relaxed);
+			if (hits > 0 || misses > 0) {
+				const bool ok = hits > 0 && misses == 0;
+				if (ok != g_camMatchOk.exchange(ok, std::memory_order_relaxed)) {
+					logger::info("Main view detection: {}", ok ? "by world camera" : "by object count (main view does not use the world camera)");
+				}
+			}
 		}
 
 		// ---- Diagnose: Liste der im Hauptbild weggelassenen Objekte ----
@@ -1350,6 +1356,8 @@ namespace ShadowCulling
 	}
 
 	bool InDepthPrepass() noexcept { return g_inDepthPrepass.load(std::memory_order_relaxed); }
+
+	bool IsMainViewAccumulator(const void* a_accumulator) noexcept { return IsMainWorldAccumulator(a_accumulator); }
 
 	bool ShouldSkipDepthPrepassDraw(const RE::BSRenderPass& a_pass) noexcept
 	{

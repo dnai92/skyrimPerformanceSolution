@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Config.h"
+
 // Eigene, leichtgewichtige Frame-Statistik (unabhaengig von Tracy).
 // Schreibt alle kReportInterval eine Zusammenfassung ins Log und eine Zeile in SPS.csv.
 namespace Stats
@@ -127,7 +129,14 @@ namespace Stats
 
 	void Add(Zone a_zone, std::int64_t a_ns) noexcept;
 	bool Enabled() noexcept;  // Analyse-Protokoll an (Zeitmessung der Bereiche)
-	void Count(Counter a_counter) noexcept;
+	void CountSlow(Counter a_counter) noexcept;
+	// Wird je Mesh/Draw aus den Hooks gerufen: die Abfrage des Analyse-Protokolls inline, der Zaehler nur mit Protokoll
+	inline void Count(Counter a_counter) noexcept
+	{
+		if (Config::analysis.load(std::memory_order_relaxed)) {
+			CountSlow(a_counter);
+		}
+	}
 	void CountNpcUpdate() noexcept;
 	std::uint32_t FrameNpcUpdates() noexcept;  // NPC-Updates des letzten abgeschlossenen Frames (A/B-Messungen)
 	void OnOverstressed() noexcept;
