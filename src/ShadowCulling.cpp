@@ -1389,7 +1389,11 @@ namespace ShadowCulling
 			float         cx = 0.0f, cy = 0.0f, hx = 0.0f, hy = 0.0f, n = 0.0f, f = 0.0f;
 		};
 		StableState   g_stable{};
-		std::uint32_t g_stableChanged = 0, g_stableReanchor = 0;  // fuers [FarShadowCache]-Log
+		std::uint32_t g_stableChanged = 0, g_stableReanchor = 0, g_stableRoll = 0;  // fuers [FarShadowCache]-Log
+		float         g_stableRollMaxDeg = 0.0f;  // groesste Drehung des Engine-Ausschnitts um die Sonnenachse gegen den gehaltenen
+		// Dreht die Engine den Ausschnitt um die Sonnenachse (Blickrichtung), wird neu ausgerichtet statt die umschliessende
+		// Flaeche ueber diesen Faktor hinaus zu vergroessern (groesserer Ausschnitt = groebere Texel, blassere kurze Schatten)
+		constexpr float kMaxCoverArea = 1.15f;
 
 		RE::NiPoint3 Col(const RE::NiMatrix3& a_m, int a_c) noexcept { return { a_m.entry[0][a_c], a_m.entry[1][a_c], a_m.entry[2][a_c] }; }
 		float        Dot3(const RE::NiPoint3& a_a, const RE::NiPoint3& a_b) noexcept { return a_a.x * a_b.x + a_a.y * a_b.y + a_a.z * a_b.z; }
@@ -1418,29 +1422,53 @@ namespace ShadowCulling
 			const RE::NiMatrix3 rotE = cam->world.rotate;
 			const RE::NiPoint3  posE = cam->world.translate;
 			const RE::NiPoint3  dirE = Col(rotE, 0), upE = -Col(rotE, 1), rightE = -Col(rotE, 2);
-			// Engine-Ausschnitt: Mitte als Weltpunkt, halbe Breite/Hoehe, Tiefenbereich
-			const float         exc = 0.5f * (fr.fLeft + fr.fRight), eyc = 0.5f * (fr.fTop + fr.fBottom);
 			const float         ehx = 0.5f * (fr.fRight - fr.fLeft), ehy = 0.5f * (fr.fTop - fr.fBottom);
-			const RE::NiPoint3  centerW = posE + rightE * exc + upE * eyc;
 
 			auto& s = g_stable;
 			bool  changed = false;
+			auto  anchor = [&]() {
+                s = {};
+                s.valid = true;
+                s.rot = rotE;
+                s.pos = posE;
+                changed = true;
+			};
 			if (!s.valid || Dot3(dirE, Col(s.rot, 0)) < std::cos(cfg.maxAngleDeg * 0.017453292f)) {
-				s = {};
-				s.valid = true;
-				s.rot = rotE;
-				s.pos = posE;
+				anchor();
 				++g_stableReanchor;
-				changed = true;
 			}
-			const RE::NiPoint3 dirS = Col(s.rot, 0), upS = -Col(s.rot, 1), rightS = -Col(s.rot, 2);
-			const RE::NiPoint3 rel = centerW - s.pos;
-			const float        x = Dot3(rel, rightS), y = Dot3(rel, upS);
-			const float        depthOff = Dot3(posE - s.pos, dirS);
-			const float        en = fr.fNear + depthOff, ef = fr.fFar + depthOff;
+			// Engine-Quader (8 Ecken) im gehaltenen Rahmen umschliessen. Bis 1.0.61 wurden halbe Breite/Hoehe der Engine
+			// direkt uebernommen - das gilt nur, solange die Engine den Ausschnitt nicht um die Sonnenachse dreht. Dreht sie
+			// ihn mit dem Blick, fehlten je nach Blickrichtung Ecken der fernen Kaskade (Schatten weg, Test 1.0.60/1.0.61).
+			float x0, x1, y0, y1, en, ef;
+			auto  enclose = [&]() {
+                const RE::NiPoint3 dS = Col(s.rot, 0), uS = -Col(s.rot, 1), rS = -Col(s.rot, 2);
+                x0 = y0 = en = std::numeric_limits<float>::max();
+                x1 = y1 = ef = std::numeric_limits<float>::lowest();
+                for (int i = 0; i < 8; ++i) {
+                    const RE::NiPoint3 p = posE + rightE * ((i & 1) ? fr.fRight : fr.fLeft) + upE * ((i & 2) ? fr.fTop : fr.fBottom) +
+                                           dirE * ((i & 4) ? fr.fFar : fr.fNear) - s.pos;
+                    const float px = Dot3(p, rS), py = Dot3(p, uS), pz = Dot3(p, dS);
+                    x0 = std::min(x0, px), x1 = std::max(x1, px);
+                    y0 = std::min(y0, py), y1 = std::max(y1, py);
+                    en = std::min(en, pz), ef = std::max(ef, pz);
+                }
+			};
+			enclose();
+			{
+				const float c = std::clamp(Dot3(upE, -Col(s.rot, 1)), -1.0f, 1.0f);
+				g_stableRollMaxDeg = std::max(g_stableRollMaxDeg, std::acos(c) * 57.29578f);
+			}
+			if ((x1 - x0) * (y1 - y0) > kMaxCoverArea * 4.0f * ehx * ehy) {
+				anchor();  // Engine hat den Ausschnitt um die Sonnenachse gedreht: Drehung uebernehmen statt stark vergroessern
+				++g_stableRoll;
+				enclose();
+			}
+			const float x = 0.5f * (x0 + x1), y = 0.5f * (y0 + y1);
+			const float bhx = 0.5f * (x1 - x0), bhy = 0.5f * (y1 - y0);
 
 			// Groesse: erst bei zu klein oder deutlich zu gross neu (Stufen von extentStep)
-			const float needX = ehx + cfg.margin, needY = ehy + cfg.margin;
+			const float needX = bhx + cfg.margin, needY = bhy + cfg.margin;
 			if (s.hx < needX || s.hx > needX + 2.0f * cfg.margin + cfg.extentStep) {
 				s.hx = QuantUp(needX * cfg.extentFactor, cfg.extentStep);
 				changed = true;
@@ -1450,7 +1478,7 @@ namespace ShadowCulling
 				changed = true;
 			}
 			// Mitte: nur verschieben, wenn der Engine-Ausschnitt nicht mehr hineinpasst - dann auf Texel gerundet
-			if (changed || std::abs(x - s.cx) + ehx > s.hx || std::abs(y - s.cy) + ehy > s.hy) {
+			if (changed || std::abs(x - s.cx) + bhx > s.hx || std::abs(y - s.cy) + bhy > s.hy) {
 				const float texX = 2.0f * s.hx / static_cast<float>(std::max(1, std::abs(desc.port.GetWidth())));
 				const float texY = 2.0f * s.hy / static_cast<float>(std::max(1, std::abs(desc.port.GetHeight())));
 				s.cx = std::round(x / texX) * texX;
@@ -1599,20 +1627,22 @@ namespace ShadowCulling
 				f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 				f.hookMissed = f.notBound = f.changed = 0;
 				f.extrasSum = 0;
-				g_stableChanged = g_stableReanchor = 0;
+				g_stableChanged = g_stableReanchor = g_stableRoll = 0;
+			g_stableRollMaxDeg = 0.0f;
 				f.frames = f.cached = f.builds = f.waits = f.normal = 0;
 				return;  // Zeile nur im Analyse-Protokoll
 			}
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
 			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: draws skipped {:.0f} | draw hook missed {} (other target {}) | "
-						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}) | rebuilt for moved/new objects {} (new drawn per cached frame {:.0f})",
+						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}, turned with view on {}, max turn {:.1f} deg) | rebuilt for moved/new objects {} (new drawn per cached frame {:.0f})",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
-				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, f.changed, static_cast<double>(f.extrasSum) / c);
+				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, g_stableRoll, g_stableRollMaxDeg, f.changed, static_cast<double>(f.extrasSum) / c);
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 			f.hookMissed = f.notBound = f.changed = 0;
 			f.extrasSum = 0;
-			g_stableChanged = g_stableReanchor = 0;
+			g_stableChanged = g_stableReanchor = g_stableRoll = 0;
+			g_stableRollMaxDeg = 0.0f;
 			f.frames = f.cached = f.builds = f.waits = f.normal = 0;
 		}
 
