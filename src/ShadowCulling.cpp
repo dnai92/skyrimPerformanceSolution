@@ -1507,13 +1507,19 @@ namespace ShadowCulling
 			REX::W32::ID3D11Texture2D*            drawTex = nullptr;
 			bool                                  drawDone = false;
 			std::uint64_t                         hookMissed = 0, notBound = 0;
-			// Aenderungserkennung: Summe ueber (Mesh, gerundete Lage) aller unbeweglichen Draws im Aufbau-Frame; weicht sie im
-			// Cache-Frame ab (Objekt kam hinzu, verschwand oder wurde bewegt - Tuer, Havok-Kiste), wird neu aufgebaut
-			std::uint64_t                         staticSum = 0, drawSum = 0, changed = 0;
+			// Inhalt des Caches: unbewegliche Meshes des Aufbau-Frames mit gerundeter Lage. Welche Objekte die Engine fuer die
+			// ferne Kaskade einsammelt, haengt auch von der Blickrichtung ab (Test 1.0.61: eine Summen-Pruefung schlug beim
+			// Drehen staendig an) - im Cache-Frame wird deshalb nur weggelassen, was nachweislich im Cache steckt; Neues wird
+			// normal gezeichnet (wie beim Cache fester Lichter). Bewegt sich ein gespeichertes Mesh, wird neu aufgebaut.
+			std::unordered_map<const RE::BSGeometry*, std::uint64_t> statics;
+			std::uint32_t                         extras = 0;  // Cache-Frame: zusaetzlich gezeichnete Draws (nicht im Cache)
+			bool                                  broken = false;  // Cache-Frame: ein gespeichertes Mesh hat sich bewegt
+			std::uint64_t                         changed = 0, extrasSum = 0;
 			bool                                  gpuHeld = false;  // FarShadowGpu haelt Kopien (bei Abschalten freigeben)
 			std::chrono::steady_clock::time_point lastLog = std::chrono::steady_clock::now();
 		};
 		FarState g_far{};
+		constexpr std::uint32_t kFarMaxExtras = 400;  // mehr neue Draws im Cache-Frame -> neu aufbauen
 
 		bool SameProjection(const Projection& a_a, const Projection& a_b) noexcept
 		{
@@ -1592,6 +1598,7 @@ namespace ShadowCulling
 				g_farSkippedStatic.store(0, std::memory_order_relaxed);
 				f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 				f.hookMissed = f.notBound = f.changed = 0;
+				f.extrasSum = 0;
 				g_stableChanged = g_stableReanchor = 0;
 				f.frames = f.cached = f.builds = f.waits = f.normal = 0;
 				return;  // Zeile nur im Analyse-Protokoll
@@ -1599,11 +1606,12 @@ namespace ShadowCulling
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
 			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: draws skipped {:.0f} | draw hook missed {} (other target {}) | "
-						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}) | static objects changed {}",
+						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}) | rebuilt for moved/new objects {} (new drawn per cached frame {:.0f})",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
-				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, f.changed);
+				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, f.changed, static_cast<double>(f.extrasSum) / c);
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 			f.hookMissed = f.notBound = f.changed = 0;
+			f.extrasSum = 0;
 			g_stableChanged = g_stableReanchor = 0;
 			f.frames = f.cached = f.builds = f.waits = f.normal = 0;
 		}
@@ -1707,7 +1715,11 @@ namespace ShadowCulling
 		}
 		f.drawCtx = ctx;
 		f.drawTex = tex;
-		f.drawSum = 0;
+		f.extras = 0;
+		f.broken = false;
+		if (mode == FarMode::kBuild) {
+			f.statics.clear();
+		}
 		g_farDrawMode = static_cast<int>(mode);
 		return true;
 	}
@@ -1727,11 +1739,12 @@ namespace ShadowCulling
 		case FarMode::kBuild:
 			FarShadowGpu::Save(f.drawCtx, FarShadowGpu::kStatic, f.drawTex, f.slice);   // nur Unbewegliches sichern
 			FarShadowGpu::Restore(f.drawCtx, FarShadowGpu::kPrev, f.drawTex, f.slice);  // sichtbar: vollstaendige Ebene des Vorframes
-			f.staticSum = f.drawSum;
 			break;
 		case FarMode::kCached:
-			if (f.drawSum != f.staticSum) {
-				f.valid = false;  // Unbewegliches hat sich geaendert: naechster Frame baut neu auf
+			f.extrasSum += f.extras;
+			// bewegt, oder so viel Neues, dass die Ersparnis verloren geht: naechster Frame baut neu auf
+			if (f.broken || f.extras > kFarMaxExtras) {
+				f.valid = false;
 				++f.changed;
 			}
 			break;
@@ -1786,18 +1799,35 @@ namespace ShadowCulling
 		}
 		const auto& geom = *a_pass.geometry;
 		const bool  dyn = FarDynamic(geom);
-		if (!dyn) {
-			const auto& t = geom.world.translate;
-			g_far.drawSum += Mix64(reinterpret_cast<std::uintptr_t>(&geom) ^ Mix64(Quant(t.x, 0.25f) ^ (Quant(t.y, 0.25f) << 21) ^ (Quant(t.z, 0.25f) << 42)));
+		if (dyn) {
+			return mode == FarMode::kBuild;  // Aufbau: Cache nur mit Unbeweglichem; Cache-Frame: Bewegliches zeichnen
 		}
-		if (mode == FarMode::kCached && !dyn) {
+		auto&       f = g_far;
+		const auto& w = geom.world;
+		const auto  pose = Mix64(Quant(w.translate.x, 0.25f) ^ (Quant(w.translate.y, 0.25f) << 21) ^ (Quant(w.translate.z, 0.25f) << 42) ^
+                                Mix64(Quant(w.rotate.entry[0][0], 1000.0f) ^ (Quant(w.rotate.entry[1][1], 1000.0f) << 21) ^ (Quant(w.rotate.entry[0][1], 1000.0f) << 42)));
+		try {
+			if (mode == FarMode::kBuild) {
+				f.statics.insert_or_assign(&geom, pose);
+				return false;
+			}
+			const auto it = f.statics.find(&geom);
+			if (it == f.statics.end()) {
+				++f.extras;  // nicht im Cache (neu in Sicht, eingeblendet): normal zeichnen
+				return false;
+			}
+			if (it->second != pose) {
+				f.broken = true;  // bewegt (Tuer, Havok): zeichnen, der Cache enthaelt noch die alte Lage
+				return false;
+			}
+		} catch (...) {
+			f.broken = true;
+			return false;
+		}
+		if (Config::analysis.load(std::memory_order_relaxed)) {
 			g_farSkippedStatic.fetch_add(1, std::memory_order_relaxed);
-			return true;  // steckt im Cache
 		}
-		if (mode == FarMode::kBuild && dyn) {
-			return true;  // Cache nur mit Unbeweglichem
-		}
-		return false;
+		return true;  // steckt im Cache
 	}
 
 	void AfterSunUpdateCamera(RE::BSShadowDirectionalLight* a_light) noexcept
