@@ -1901,9 +1901,14 @@ namespace ShadowCulling
 					continue;
 				}
 #ifdef SPS_VR
+				// Lage und Radius wie in SE/AE mitfuehren: ohne sie rechnete PointShadowScale in VR immer mit 1 und grosse
+				// Wandschatten nah am Licht fielen dem Culling zum Opfer (bis 1.0.60)
+				const auto niLight = light->light.get();
 				for (const auto& desc : light->GetVRRuntimeData().shadowmapDescriptors) {
 					for (const auto& cam : desc.camera) {
 						if (pointCount < kMaxPointCameras && cam) {
+							g_pointLightPos[pointCount] = niLight ? niLight->world.translate : RE::NiPoint3{};
+							g_pointLightRadius[pointCount] = niLight ? niLight->GetLightRuntimeData().radius.x : 0.0f;
 							g_pointCameras[pointCount++].store(cam.get(), std::memory_order_relaxed);
 						}
 					}
