@@ -86,6 +86,10 @@ namespace Config
 		bool enabled = false;  // Standard AUS (BETA)
 	};
 	inline FarShadowCache farShadowCache;  // [FarShadowCache]
+	// Diagnose 1.0.61 (nicht gespeichert): Review-Aenderungen einzeln abschalten, um fehlende ferne Schatten einzugrenzen
+	inline std::atomic<bool> dbgFarNoProjCheck{ false };   // Projektion beim Zeichnen nicht pruefen
+	inline std::atomic<bool> dbgFarSkipAllStatic{ false }; // Cache-Frame: alle festen Objekte weglassen (wie 1.0.60)
+	inline std::atomic<bool> dbgMainViewByVote{ false };   // Hauptbild nur per Mehrheit (wie 1.0.60)
 
 	// Instancing der Sonnenschatten (Schritt 2): gleiche einfache Meshes eines Batches in einem Draw Call
 	struct ShadowInstancing

@@ -351,6 +351,14 @@ namespace Menu
 				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
 
 			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));
+			MenuApi::TextWrapped("%s", T("Test 1.0.61 (not saved): switch off single review changes of the far shadow cache.",
+											"Test 1.0.61 (wird nicht gespeichert): einzelne Review-Änderungen am fernen Schatten-Cache abschalten."));
+			AtomicToggle(T("Test A: no projection check at draw time", "Test A: Projektion beim Zeichnen nicht prüfen"), Config::dbgFarNoProjCheck,
+				T("Like 1.0.60.", "Wie 1.0.60."), false);
+			AtomicToggle(T("Test B: cached frames leave out all static objects", "Test B: im Cache-Frame alle festen Objekte weglassen"), Config::dbgFarSkipAllStatic,
+				T("Like 1.0.60 (no list of what is in the cache).", "Wie 1.0.60 (ohne Liste, was im Cache steckt)."), false);
+			AtomicToggle(T("Test C: main view by object count", "Test C: Hauptbild per Objektzahl erkennen"), Config::dbgMainViewByVote,
+				T("Like 1.0.60 (not by the world camera).", "Wie 1.0.60 (nicht über die Weltkamera)."), false);
 			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
 				T("For testing only, can make whole objects disappear. Default OFF (saved).", "Nur zum Testen, kann ganze Objekte verschwinden lassen. Standard AUS (wird gespeichert)."));
 
