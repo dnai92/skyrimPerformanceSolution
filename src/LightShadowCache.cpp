@@ -53,9 +53,7 @@ namespace LightShadowCache
 			bool                                  unsupported = false;  // Karten in verschiedenen Ebenen
 			bool                                  uncovered = false;    // Aufbau: Draws ausserhalb des Filters (Figur koennte im Cache stecken)
 			REX::W32::ID3D11Texture2D*            tex = nullptr;        // eigene Kopie der Ebene
-			REX::W32::ID3D11Texture2D*            prevTex = nullptr;    // vollstaendige Karte des Vorframes (Aufbau ohne Blinken)
-			std::uint32_t                         prevW = 0, prevH = 0, prevFormat = 0;
-			bool                                  prebuilt = false;     // prevTex im letzten Frame gesichert
+			bool                                  prebuilt = false;     // g_prevTex im letzten Frame gesichert
 			REX::W32::ID3D11Texture2D*            boundTex = nullptr;   // Ebene der 1. Karte in diesem Frame (Vergleich)
 			std::uint32_t                         boundSub = 0;
 			std::uint32_t                         texW = 0, texH = 0, texFormat = 0;
@@ -73,6 +71,12 @@ namespace LightShadowCache
 			bool                                             broken = false;   // bewegt/weggefallen -> neu aufbauen
 		};
 		std::array<LightState, kMaxLights> g_lights;
+		// Vollstaendige Karte des Vorframes (Aufbau ohne Blinken) - nur waehrend Wait/Build eines Lichts gebraucht, deshalb
+		// EINE Kopie fuer alle: immer nur ein Licht baut gleichzeitig auf (g_prevOwner). Bis 1.0.61 je Licht eine eigene
+		// (bei 16 Lichtern und 4096er-Schattenkarten bis ~1 GB VRAM zusaetzlich).
+		REX::W32::ID3D11Texture2D* g_prevTex = nullptr;
+		std::uint32_t              g_prevW = 0, g_prevH = 0, g_prevFormat = 0;
+		const void*                g_prevOwner = nullptr;  // Licht (LightState), das gerade wartet/aufbaut
 		std::atomic<std::uint32_t>         g_frame{ 0 };
 		// Spiel pausiert (F1-Menue, Menues): gezeichnet wird weiter, der Frame-Beginn (Spieler-Update) laeuft aber nicht.
 		// Ohne ihn stimmen die Modi nicht mehr (1.0.28: Lichter gingen im F1-Menue nacheinander aus) -> in solchen
@@ -257,9 +261,8 @@ namespace LightShadowCache
 				a_l.tex->Release();
 				a_l.tex = nullptr;
 			}
-			if (a_l.prevTex) {
-				a_l.prevTex->Release();
-				a_l.prevTex = nullptr;
+			if (g_prevOwner == &a_l) {
+				g_prevOwner = nullptr;
 			}
 			a_l.prebuilt = false;
 			ClearSets(a_l);
@@ -331,7 +334,7 @@ namespace LightShadowCache
 		{
 			a_recreated = false;
 			return EnsureTexture(a_l.tex, a_l.texW, a_l.texH, a_l.texFormat, a_src, a_recreated) &&
-			       EnsureTexture(a_l.prevTex, a_l.prevW, a_l.prevH, a_l.prevFormat, a_src, a_recreated);
+			       EnsureTexture(g_prevTex, g_prevW, g_prevH, g_prevFormat, a_src, a_recreated);
 		}
 
 		// Kopieren bei abgehaengten Render-Zielen (die Schattenkarte ist gerade als Tiefenpuffer gebunden)
@@ -594,7 +597,7 @@ namespace LightShadowCache
 				if (mode == Mode::kWait) {
 					func(a_camera, a_accumulator, a_flags);  // normal, alles
 					if (idx + 1 == descs.size()) {
-						CopyUnbound(l->prevTex, 0, target, sub);  // vollstaendige Karte fuer den Aufbau-Frame sichern
+						CopyUnbound(g_prevTex, 0, target, sub);  // vollstaendige Karte fuer den Aufbau-Frame sichern
 						l->prebuilt = true;
 					}
 					return;
@@ -618,7 +621,7 @@ namespace LightShadowCache
 					if (idx + 1 == descs.size()) {
 						CopyUnbound(l->tex, 0, target, sub);      // nach der letzten Karte: nur Unbewegliche sichern
 						if (DebugMode() != 2) {
-							CopyUnbound(target, sub, l->prevTex, 0);  // sichtbar bleibt die vollstaendige Karte des Vorframes
+							CopyUnbound(target, sub, g_prevTex, 0);  // sichtbar bleibt die vollstaendige Karte des Vorframes
 						}
 						l->built = true;
 					}
@@ -866,7 +869,7 @@ namespace LightShadowCache
 				if (enabled && !l->unsupported) {
 					if (l->valid) {
 						mode = Mode::kCached;
-					} else if (l->stableFrames >= kStableFrames && frame >= l->retryAt) {
+					} else if (l->stableFrames >= kStableFrames && frame >= l->retryAt && (!g_prevOwner || g_prevOwner == l)) {
 						// erst die vollstaendige Karte sichern (kWait), im Frame danach aufbauen (kBuild) - Figuren fehlen dann
 						// nicht, sichtbar ist fuer ein Bild der Stand des Vorframes
 						const auto prev = static_cast<Mode>(l->mode.load(std::memory_order_relaxed));
@@ -878,6 +881,11 @@ namespace LightShadowCache
 						}
 						l->prebuilt = false;
 					}
+				}
+				if (mode == Mode::kWait || mode == Mode::kBuild) {
+					g_prevOwner = l;  // Vorframe-Kopie gehoert bis zum Ende des Aufbaus diesem Licht
+				} else if (g_prevOwner == l) {
+					g_prevOwner = nullptr;
 				}
 				if (mode != Mode::kCached) {
 					g_win.normalMaps += descs.size();
@@ -891,12 +899,21 @@ namespace LightShadowCache
 		for (auto& l : g_lights) {
 			if (l.light.load(std::memory_order_relaxed) && l.lastSeen != frame) {
 				l.mode.store(static_cast<int>(Mode::kNormal), std::memory_order_relaxed);
+				if (g_prevOwner == &l) {
+					g_prevOwner = nullptr;
+				}
 				if (frame - l.lastSeen > 180 || !enabled) {  // ~3 s: Kopien kosten je Licht 2 Ebenen VRAM
 					Drop(l);
 				}
 			} else if (l.light.load(std::memory_order_relaxed) && !enabled) {
 				Drop(l);
 			}
+		}
+		if (!enabled && g_prevTex) {
+			g_prevTex->Release();
+			g_prevTex = nullptr;
+			g_prevW = g_prevH = g_prevFormat = 0;
+			g_prevOwner = nullptr;
 		}
 		++g_win.frames;
 		// Ziel-Diagnose: alle ~5 s zwei Frames lang jede Schattenkarte protokollieren
