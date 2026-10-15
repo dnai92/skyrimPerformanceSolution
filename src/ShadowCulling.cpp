@@ -1051,9 +1051,13 @@ namespace ShadowCulling
 					empty.head = nullptr;
 					return &empty;
 				} else if (passes && passes->head && a_geometry) {
-					std::uint32_t draws = 0;
-					for (auto p = passes->head; p && draws < 64; p = p->next) {
-						++draws;
+					// Anzahl der Draws nur fuer die Verdeckungs-Statistik (Analyse-Protokoll / Messung)
+					std::uint32_t draws = 1;
+					if (Config::analysis.load(std::memory_order_relaxed) || Config::occlusionProbe.load(std::memory_order_relaxed)) {
+						draws = 0;
+						for (auto p = passes->head; p && draws < 64; p = p->next) {
+							++draws;
+						}
 					}
 					// Teile an Figuren (Waffen, Schilde, Trommel auf dem Ruecken) bewegen sich mit der Animation -> nie weglassen
 					if (Occlusion::CountMain(*a_geometry, a_accumulator, draws) && !BelongsToActorNode(a_geometry)) {

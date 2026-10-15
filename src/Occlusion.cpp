@@ -806,6 +806,13 @@ namespace Occlusion
 			}
 			return false;
 		}
+		const bool skinned = const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData().skinInstance != nullptr;
+		const bool isMain = a_accumulator && a_accumulator == g_mainAcc.load(std::memory_order_relaxed);
+		// Ohne Diagnose zaehlt das Ergebnis nur fuer feste Objekte im Hauptbild - Spiegelungen, Vorschauen und Figuren nicht
+		// erst testen (bis zu occlMaxTiles Kacheln je Objekt)
+		if (!diag && (!cullOn || !isMain || (skinned && Config::occlSkipSkinned.load(std::memory_order_relaxed))) && snap->id != g_listSnapId.load(std::memory_order_relaxed)) {
+			return false;
+		}
 		const auto t0 = diag ? Clock::now() : Clock::time_point{};
 		const int  r = Test(*snap, a_geom.worldBound);
 		if (diag) {
@@ -820,8 +827,6 @@ namespace Occlusion
 		if (diag) {
 			s.tested.fetch_add(1, std::memory_order_relaxed);
 		}
-		const bool skinned = const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData().skinInstance != nullptr;
-		const bool isMain = a_accumulator && a_accumulator == g_mainAcc.load(std::memory_order_relaxed);
 		// Verlauf nur fuer feste Objekte im Hauptbild (Figuren: Huelle hinkt der Animation hinterher)
 		const bool twice = isMain && !(skinned && Config::occlSkipSkinned.load(std::memory_order_relaxed)) && UpdateStreak(&a_geom, snap->id, r == 2, a_geom.worldBound.center);
 		if (r != 2) {

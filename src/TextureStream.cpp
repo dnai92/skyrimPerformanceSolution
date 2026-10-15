@@ -1565,8 +1565,26 @@ namespace TextureStream
 			}
 		}
 
+		// Gerade Verkleinertes gilt 3 s lang als frei, gerade Nachgeladenes 3 s als belegt (bis es in der VRAM-Anzeige
+		// angekommen ist). Laeuft mit jeder Uebernahme - auch in pausierten Menues (dort nur PreviewTick, bis 1.0.60 blieb
+		// das Budget dort voll und Vorschauen wurden nicht scharf)
+		void DrainSettled() noexcept
+		{
+			const auto now = Clock::now();
+			while (!g_upSettle.empty() && now - g_upSettle.front().first > 3s) {
+				g_inflightUp -= std::min(g_inflightUp, g_upSettle.front().second);
+				g_upSettle.pop_front();
+			}
+			while (!g_recentFreed.empty() && now - g_recentFreed.front().first > 3s) {
+				g_recentFreedBytes.fetch_sub(std::min(g_recentFreedBytes.load(std::memory_order_relaxed), g_recentFreed.front().second), std::memory_order_relaxed);
+				g_recentFreed.pop_front();
+			}
+			RefreshVramThrottled();
+		}
+
 		void ApplyResults()
 		{
+			DrainSettled();
 			std::scoped_lock state(g_stateLock);
 			std::vector<Result> results;
 			{
@@ -2604,15 +2622,6 @@ namespace TextureStream
 			return;
 		}
 
-		// Gerade Verkleinertes gilt 3 s lang als frei (bis die Freigabe in der VRAM-Anzeige angekommen ist)
-		while (!g_upSettle.empty() && now - g_upSettle.front().first > 3s) {
-			g_inflightUp -= std::min(g_inflightUp, g_upSettle.front().second);
-			g_upSettle.pop_front();
-		}
-		while (!g_recentFreed.empty() && now - g_recentFreed.front().first > 3s) {
-			g_recentFreedBytes.fetch_sub(std::min(g_recentFreedBytes.load(std::memory_order_relaxed), g_recentFreed.front().second), std::memory_order_relaxed);
-			g_recentFreed.pop_front();
-		}
 		// Verkleinern nach Datenmenge: hoechstens ~64 MB frei werdender Speicher pro Frame (mind. eine Textur),
 		// und nicht, solange noch viel alter Speicher auf Freigabe wartet
 		if (!Pressure() && !g_down.empty()) {
