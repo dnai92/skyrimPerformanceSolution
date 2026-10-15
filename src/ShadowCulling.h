@@ -30,6 +30,8 @@ namespace ShadowCulling
 	void SetInShadowMapDraw(bool a_in) noexcept;
 	// Einzelner Schatten-Draw: kleines Figurenteil in der Ferne -> true = weglassen (ActorPartShadowCulling)
 	bool SkipActorPartShadowDraw(const RE::BSRenderPass& a_pass) noexcept;
+	// Ladebildschirm / Hauptmenue: Zustand der Welt (Cache der fernen Kaskade, Hysterese der Figurenschatten) verwerfen
+	void ResetWorld() noexcept;
 	// Nach BSShadowDirectionalLight::UpdateCamera: ferne Kaskade ruhig halten, Modus des Caches festlegen
 	void AfterSunUpdateCamera(RE::BSShadowDirectionalLight* a_light) noexcept;
 	// Diagnose: 30 Frames lang alle im Hauptbild weggelassenen Objekte (Mikro-Culling, ferne Decals) sammeln und als

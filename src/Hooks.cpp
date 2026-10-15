@@ -204,6 +204,7 @@ namespace Hooks
 				if (a_event && a_event->opening && (a_event->menuName == RE::MainMenu::MENU_NAME || a_event->menuName == RE::LoadingMenu::MENU_NAME)) {
 					TextureStream::Reset(a_event->menuName == RE::MainMenu::MENU_NAME ? "main menu" : "loading screen");
 					LightShadowCache::Reset();
+					ShadowCulling::ResetWorld();
 					Occlusion::Reset();
 				}
 				if (a_event && a_event->menuName == RE::LoadingMenu::MENU_NAME) {

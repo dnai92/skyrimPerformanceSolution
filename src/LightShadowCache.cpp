@@ -45,6 +45,8 @@ namespace LightShadowCache
 			float                                 buildRadius = 0;
 			std::uint32_t                         stableFrames = 0;
 			std::uint32_t                         lastSeen = 0;
+			std::uint32_t                         failCount = 0;  // fehlgeschlagene Aufbauten in Folge
+			std::uint32_t                         retryAt = 0;    // erst ab diesem Frame wieder aufbauen
 			bool                                  valid = false;        // Cache-Inhalt passt
 			bool                                  built = false;        // Aufbau-Frame: Kopie gesichert
 			bool                                  drawn = false;        // in diesem Frame gezeichnet
@@ -644,6 +646,11 @@ namespace LightShadowCache
 		logger::info("Hook installed: shadow map draw (ID 107604+0x167) - shadow cache for static lights");
 	}
 
+	bool DrawFilterReady() noexcept
+	{
+		return g_installed && g_drawFilter;
+	}
+
 	void SetDrawFilterInstalled() noexcept
 	{
 		g_drawFilter = true;
@@ -694,21 +701,28 @@ namespace LightShadowCache
 				return false;  // Pruef-Modus: zurueckkopieren, aber alles zeichnen
 			}
 			std::scoped_lock lock(l->lock);
+			const bool diag = Config::analysis.load(std::memory_order_relaxed);
 			if (l->promoted.contains(&geom)) {
-				g_drawnDynamic.fetch_add(1, std::memory_order_relaxed);
+				if (diag) {
+					g_drawnDynamic.fetch_add(1, std::memory_order_relaxed);
+				}
 				return false;
 			}
 			// Beim Aufbau als unbeweglich eingestuft -> IsDynamic (Elternkette bis 32 Ebenen) nicht erneut; bis 1.0.57 lief
 			// es fuer jeden Draw jeder gecachten Karte (zehntausende je Frame)
 			const auto it = l->statics.find(&geom);
 			if (it == l->statics.end() && IsDynamic(geom)) {
-				g_drawnDynamic.fetch_add(1, std::memory_order_relaxed);
+				if (diag) {
+					g_drawnDynamic.fetch_add(1, std::memory_order_relaxed);
+				}
 				return false;
 			}
 			if (it == l->statics.end()) {
 				// neu im Lichtradius: zusaetzlich zeichnen, der Cache bleibt gueltig (zu viele -> neu aufbauen)
 				l->extras.insert(&geom);
-				g_drawnExtra.fetch_add(1, std::memory_order_relaxed);
+				if (diag) {
+					g_drawnExtra.fetch_add(1, std::memory_order_relaxed);
+				}
 				return false;
 			}
 			const auto frame = g_frame.load(std::memory_order_relaxed);
@@ -725,7 +739,9 @@ namespace LightShadowCache
 		} catch (...) {
 			return false;
 		}
-		g_saved.fetch_add(1, std::memory_order_relaxed);
+		if (Config::analysis.load(std::memory_order_relaxed)) {
+			g_saved.fetch_add(1, std::memory_order_relaxed);
+		}
 		return true;
 	}
 	}
@@ -738,6 +754,7 @@ namespace LightShadowCache
 		const auto frame = g_frame.fetch_add(1, std::memory_order_relaxed) + 1;
 		g_onFrameSeen.store(true, std::memory_order_relaxed);
 		g_presentsSinceFrame = 0;
+		g_stalled.store(false, std::memory_order_relaxed);  // bis 1.0.60 erst beim naechsten Present zurueckgesetzt
 		g_sliceUseCount = 0;
 		const bool enabled = g_drawFilter && Config::lightShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed);
 
@@ -754,6 +771,12 @@ namespace LightShadowCache
 				std::scoped_lock lock(l.lock);
 				if (mode == Mode::kBuild) {
 					l.valid = l.built && !l.statics.empty() && !l.unsupported && !l.uncovered;
+					if (l.valid) {
+						l.failCount = 0;
+					} else {
+						l.failCount = std::min(l.failCount + 1, 6u);
+						l.retryAt = frame + (60u << l.failCount);  // 2 s, 4 s ... bis ~64 s Pause bis zum naechsten Versuch
+					}
 					++g_frameBuilds;
 					if (l.uncovered) {
 						++g_win.buildFailed;
@@ -798,6 +821,7 @@ namespace LightShadowCache
 						if (!slot.light.load(std::memory_order_relaxed)) {
 							slot.camCount = 0;
 							slot.stableFrames = 0;
+							slot.failCount = slot.retryAt = 0;
 							slot.valid = slot.unsupported = false;
 							slot.light.store(light, std::memory_order_relaxed);
 							l = &slot;
@@ -842,7 +866,7 @@ namespace LightShadowCache
 				if (enabled && !l->unsupported) {
 					if (l->valid) {
 						mode = Mode::kCached;
-					} else if (l->stableFrames >= kStableFrames) {
+					} else if (l->stableFrames >= kStableFrames && frame >= l->retryAt) {
 						// erst die vollstaendige Karte sichern (kWait), im Frame danach aufbauen (kBuild) - Figuren fehlen dann
 						// nicht, sichtbar ist fuer ein Bild der Stand des Vorframes
 						const auto prev = static_cast<Mode>(l->mode.load(std::memory_order_relaxed));
@@ -867,7 +891,7 @@ namespace LightShadowCache
 		for (auto& l : g_lights) {
 			if (l.light.load(std::memory_order_relaxed) && l.lastSeen != frame) {
 				l.mode.store(static_cast<int>(Mode::kNormal), std::memory_order_relaxed);
-				if (frame - l.lastSeen > 600 || !enabled) {
+				if (frame - l.lastSeen > 180 || !enabled) {  // ~3 s: Kopien kosten je Licht 2 Ebenen VRAM
 					Drop(l);
 				}
 			} else if (l.light.load(std::memory_order_relaxed) && !enabled) {

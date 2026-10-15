@@ -1255,7 +1255,7 @@ namespace ShadowCulling
 		bool FarDynamic(const RE::BSGeometry& a_geom) noexcept
 		{
 			auto& data = const_cast<RE::BSGeometry&>(a_geom).GetGeometryRuntimeData();
-			if (data.skinInstance) {
+			if (data.skinInstance || netimmerse_cast<RE::BSDynamicTriShape*>(const_cast<RE::BSGeometry*>(&a_geom))) {
 				return true;
 			}
 			if (const auto prop = data.shaderProperty.get(); prop && netimmerse_cast<RE::BSEffectShaderProperty*>(prop)) {
@@ -1385,7 +1385,7 @@ namespace ShadowCulling
 
 		void StabilizeFarCascade(RE::BSShadowDirectionalLight* a_light) noexcept
 		{
-			if (!Config::farShadowCache.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+			if (!Config::farShadowCache.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || !LightShadowCache::DrawFilterReady()) {
 				g_stable.valid = false;
 				return;
 			}
@@ -1495,6 +1495,10 @@ namespace ShadowCulling
 			REX::W32::ID3D11Texture2D*            drawTex = nullptr;
 			bool                                  drawDone = false;
 			std::uint64_t                         hookMissed = 0, notBound = 0;
+			// Aenderungserkennung: Summe ueber (Mesh, gerundete Lage) aller unbeweglichen Draws im Aufbau-Frame; weicht sie im
+			// Cache-Frame ab (Objekt kam hinzu, verschwand oder wurde bewegt - Tuer, Havok-Kiste), wird neu aufgebaut
+			std::uint64_t                         staticSum = 0, drawSum = 0, changed = 0;
+			bool                                  gpuHeld = false;  // FarShadowGpu haelt Kopien (bei Abschalten freigeben)
 			std::chrono::steady_clock::time_point lastLog = std::chrono::steady_clock::now();
 		};
 		FarState g_far{};
@@ -1575,7 +1579,7 @@ namespace ShadowCulling
 			if (!Config::analysis.load(std::memory_order_relaxed)) {
 				g_farSkippedStatic.store(0, std::memory_order_relaxed);
 				f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
-				f.hookMissed = f.notBound = 0;
+				f.hookMissed = f.notBound = f.changed = 0;
 				g_stableChanged = g_stableReanchor = 0;
 				f.frames = f.cached = f.builds = f.waits = f.normal = 0;
 				return;  // Zeile nur im Analyse-Protokoll
@@ -1583,11 +1587,11 @@ namespace ShadowCulling
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
 			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: draws skipped {:.0f} | draw hook missed {} (other target {}) | "
-						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {})",
+						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}) | static objects changed {}",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
-				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor);
+				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, f.changed);
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
-			f.hookMissed = f.notBound = 0;
+			f.hookMissed = f.notBound = f.changed = 0;
 			g_stableChanged = g_stableReanchor = 0;
 			f.frames = f.cached = f.builds = f.waits = f.normal = 0;
 		}
@@ -1597,6 +1601,11 @@ namespace ShadowCulling
 		void FarAfterRender() noexcept
 		{
 			if (!Config::farShadowCache.enabled) {
+				if (g_far.gpuHeld) {
+					FarShadowGpu::Reset();  // ~16-64 MB VRAM nicht dauerhaft halten
+					g_far.gpuHeld = false;
+					g_far.valid = g_far.prebuilt = false;
+				}
 				return;
 			}
 			auto&      f = g_far;
@@ -1650,6 +1659,17 @@ namespace ShadowCulling
 		if (kFarCascade >= descs.size() || descs[kFarCascade].camera.get() != a_camera) {
 			return false;
 		}
+		// Waehrend einer Pause laeuft keine neue Entscheidung (Spiel-Frame steht), die Kaskade kann sich aber bewegen
+		// (Freikamera): Cache bzw. Aufbau nur, wenn die Projektion noch zu ihm passt
+		if (mode != FarMode::kWait) {
+			Projection cur{};
+			std::memcpy(cur.worldToCam, a_camera->GetRuntimeData().worldToCam, sizeof(cur.worldToCam));
+			cur.frustum = a_camera->GetRuntimeData2().viewFrustum;
+			if (!SameProjection(cur, mode == FarMode::kCached ? f.build : f.wait)) {
+				f.valid = f.prebuilt = false;
+				return false;
+			}
+		}
 		const auto renderer = RE::BSGraphics::Renderer::GetSingleton();
 		const auto ctx = renderer ? renderer->GetRuntimeData().context : nullptr;
 		if (!ctx) {
@@ -1665,6 +1685,7 @@ namespace ShadowCulling
 		if (!FarShadowGpu::Ensure(tex, recreated)) {
 			return false;
 		}
+		f.gpuHeld = true;
 		if (recreated && mode != FarMode::kWait) {
 			f.valid = f.prebuilt = false;  // neue Kopien sind leer
 			return false;
@@ -1674,6 +1695,7 @@ namespace ShadowCulling
 		}
 		f.drawCtx = ctx;
 		f.drawTex = tex;
+		f.drawSum = 0;
 		g_farDrawMode = static_cast<int>(mode);
 		return true;
 	}
@@ -1693,6 +1715,13 @@ namespace ShadowCulling
 		case FarMode::kBuild:
 			FarShadowGpu::Save(f.drawCtx, FarShadowGpu::kStatic, f.drawTex, f.slice);   // nur Unbewegliches sichern
 			FarShadowGpu::Restore(f.drawCtx, FarShadowGpu::kPrev, f.drawTex, f.slice);  // sichtbar: vollstaendige Ebene des Vorframes
+			f.staticSum = f.drawSum;
+			break;
+		case FarMode::kCached:
+			if (f.drawSum != f.staticSum) {
+				f.valid = false;  // Unbewegliches hat sich geaendert: naechster Frame baut neu auf
+				++f.changed;
+			}
 			break;
 		default:
 			break;
@@ -1743,7 +1772,12 @@ namespace ShadowCulling
 		if ((mode != FarMode::kCached && mode != FarMode::kBuild) || !a_pass.geometry) {
 			return false;
 		}
-		const bool dyn = FarDynamic(*a_pass.geometry);
+		const auto& geom = *a_pass.geometry;
+		const bool  dyn = FarDynamic(geom);
+		if (!dyn) {
+			const auto& t = geom.world.translate;
+			g_far.drawSum += Mix64(reinterpret_cast<std::uintptr_t>(&geom) ^ Mix64(Quant(t.x, 0.25f) ^ (Quant(t.y, 0.25f) << 21) ^ (Quant(t.z, 0.25f) << 42)));
+		}
 		if (mode == FarMode::kCached && !dyn) {
 			g_farSkippedStatic.fetch_add(1, std::memory_order_relaxed);
 			return true;  // steckt im Cache
@@ -1777,6 +1811,20 @@ namespace ShadowCulling
 	void AfterSunRender() noexcept
 	{
 		FarAfterRender();
+		g_cacheLight = nullptr;  // nur bis Render-Ende gueltig; Zellwechsel/Innenraum duerfen keinen alten Zeiger sehen
+	}
+
+	void ResetWorld() noexcept
+	{
+		g_far = {};
+		g_stable.valid = false;
+		g_cacheLight = nullptr;
+		g_farDrawMode = 0;
+		g_farMode.store(static_cast<int>(FarMode::kNormal), std::memory_order_relaxed);
+		FarShadowGpu::Reset();
+		for (auto& s : g_actorShadowState) {
+			s.store(0, std::memory_order_relaxed);
+		}
 	}
 
 	void AfterSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept
