@@ -92,6 +92,20 @@ namespace Occlusion
 			g_currentGen.fetch_add(1, std::memory_order_release);
 		}
 
+		// Weltkamera beim Sammeln (dieser Frame) nah an der Kamera des Tiefenbilds? Waehrend des Sammelns aendert sie sich nicht.
+		bool CameraStillNear(const OwnCam& a_snap) noexcept
+		{
+			const auto cam = RE::Main::WorldRootCamera();
+			if (!cam) {
+				return false;
+			}
+			const auto&        w = cam->world;
+			const RE::NiPoint3 dir{ w.rotate.entry[0][0], w.rotate.entry[1][0], w.rotate.entry[2][0] };
+			const float        dx = w.translate.x - a_snap.pos.x, dy = w.translate.y - a_snap.pos.y, dz = w.translate.z - a_snap.pos.z;
+			const float        move = Config::occlMoveUnits.load(std::memory_order_relaxed);
+			return Dot(dir, a_snap.dir) > std::cos(Config::occlTurnDeg.load(std::memory_order_relaxed) * 0.0174533f) && dx * dx + dy * dy + dz * dz < move * move;
+		}
+
 		// Aktuelles Tiefenbild fuer diesen Thread (haelt das alte bis zum naechsten Wechsel am Leben)
 		const Snapshot* CurrentForThread() noexcept
 		{
@@ -842,7 +856,10 @@ namespace Occlusion
 				s.occSkinned.fetch_add(a_draws, std::memory_order_relaxed);
 			}
 		}
-		const bool willCull = cullOn && twice && snap->cam.gpu && g_cullAllowed.load(std::memory_order_relaxed);
+		// Kamera zusaetzlich im SELBEN Frame gegen das benutzte Tiefenbild pruefen: g_cullAllowed entsteht erst am Ende des
+		// Tiefenvorpasses, also nach dem Sammeln - bei einem Schnitt (Ich-/Schulterperspektive, Teleport, Moebel) blitzten
+		// sonst fuer ein Bild Objekte weg, die vom alten Standpunkt verdeckt waren (Review 1.0.61)
+		const bool willCull = cullOn && twice && snap->cam.gpu && g_cullAllowed.load(std::memory_order_relaxed) && CameraStillNear(snap->cam);
 		if (snap->id == g_listSnapId.load(std::memory_order_relaxed)) {
 			TestInfo    info;
 			Test(*snap, a_geom.worldBound, &info);
