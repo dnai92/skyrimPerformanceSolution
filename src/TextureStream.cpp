@@ -429,7 +429,7 @@ namespace TextureStream
 		// ---------------- Statistik ----------------
 		struct Counters
 		{
-			std::uint32_t downs = 0, ups = 0, upFails = 0, probesBad = 0;
+			std::uint32_t downs = 0, ups = 0, upFails = 0, upExpired = 0, probesBad = 0;
 			std::uint32_t downsSkipped = 0;  // Verkleinern verworfen: veraltet oder inzwischen gebraucht
 			std::uint32_t recognized = 0;    // von uns verkleinert, nach Reset/Vergessen am Kennzeichen wiedererkannt
 			std::uint32_t pingPong = 0;
@@ -588,7 +588,11 @@ namespace TextureStream
 			W::D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
 			std::uint64_t                      extraBytes = 0;  // Neuladen: zusaetzlicher VRAM gegenueber jetzt
 			float                              priority = 0;    // Neuladen: benoetigt / aktuell - die dringendsten zuerst
+			Clock::time_point                  queued = Clock::now();
 		};
+		// Neuladungen, die so lange in der Schlange warten, verfallen: die Textur ist meist nicht mehr in Sicht, und der
+		// Auftrag hielt sie solange fest (Review 1.0.61) - wird sie weiter gebraucht, beauftragt der naechste Durchlauf neu
+		constexpr auto kReloadMaxWait = 8s;
 
 		struct Result
 		{
@@ -599,6 +603,7 @@ namespace TextureStream
 			W::ID3D11ShaderResourceView* srv = nullptr;
 			double                       ms = 0;
 			double                       mb = 0;
+			bool                         expired = false;  // Neuladung zu lange gewartet: nicht ausgefuehrt
 		};
 
 		std::mutex              g_qLock;
@@ -860,7 +865,11 @@ namespace TextureStream
 					Result res;
 					res.job = std::move(job);
 					try {
-						RunJob(res);
+						if (res.job.reload && Clock::now() - res.job.queued > kReloadMaxWait) {
+							res.expired = true;
+						} else {
+							RunJob(res);
+						}
 					} catch (const std::exception& e) {
 						res.error = e.what();
 					} catch (...) {
@@ -1624,6 +1633,10 @@ namespace TextureStream
 				if (it != g_tex.end()) {
 					it->second.busy = false;  // je Textur laeuft hoechstens ein Auftrag
 				}
+				if (res.expired) {
+					++g_stats.upExpired;
+					continue;
+				}
 				if (!job.reload) {
 					if (!valid) {
 						continue;
@@ -2325,8 +2338,8 @@ namespace TextureStream
 				logger::info("[TextureStream]   figures (skinned, current size): {} textures, {:.0f} MB of {:.0f} MB seen | body/face/hair {} ({:.0f} MB), armor/clothing/other {} ({:.0f} MB) | 4K+ {} ({:.0f} MB)",
 					nChar + nOther, mbChar + mbOther, mbAll, nChar, mbChar, nOther, mbOther, nBig, mbBig);
 			}
-			logger::info("[TextureStream]   10 s: downscaled {} (skipped {}) | reloaded {} ({:.0f} MB, avg {:.0f} ms) | load errors {} | ping-pong {} | refilled {} | queue {} | passes {} (avg {:.0f} frames, {:.0f} nodes, {:.2f} ms total)",
-				s.downs, s.downsSkipped, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, s.pingPong, s.refills, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
+			logger::info("[TextureStream]   10 s: downscaled {} (skipped {}) | reloaded {} ({:.0f} MB, avg {:.0f} ms) | load errors {} | expired in queue {} | ping-pong {} | refilled {} | queue {} | passes {} (avg {:.0f} frames, {:.0f} nodes, {:.2f} ms total)",
+				s.downs, s.downsSkipped, s.ups, s.upMB, s.ups ? s.upMs / s.ups : 0.0, s.upFails, s.upExpired, s.pingPong, s.refills, queued, s.passes, s.passes ? double(s.passFrames) / s.passes : 0.0,
 				s.passes ? double(s.passNodes) / s.passes : 0.0, s.passes ? s.passMs / s.passes : 0.0);
 			std::size_t remembered = 0;
 			{
