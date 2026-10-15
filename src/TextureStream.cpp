@@ -506,12 +506,16 @@ namespace TextureStream
 			std::uint32_t magic = kTagMagic;
 			std::uint32_t flags = 0;
 			std::uint32_t fullW = 0, fullH = 0, fullMips = 0;  // 0 = unbekannt (verkleinert geladen, Datei noch nicht geprueft)
+			// Obergrenze einer anderen Mod (Texture Downscaler, maxsize beim Laden). Bis 1.0.61 ging sie verloren, sobald die
+			// Textur als "von uns" galt - nach einem Ladebildschirm wurde dann bis zur Dateigroesse nachgeladen
+			std::uint32_t extCap = 0;
 		};
 
-		void SetTag(W::ID3D11Resource* a_res, std::uint32_t a_flags, std::uint32_t a_fullW = 0, std::uint32_t a_fullH = 0, std::uint32_t a_fullMips = 0) noexcept
+		void SetTag(W::ID3D11Resource* a_res, std::uint32_t a_flags, std::uint32_t a_fullW = 0, std::uint32_t a_fullH = 0, std::uint32_t a_fullMips = 0,
+			std::uint32_t a_extCap = 0) noexcept
 		{
 			if (a_res) {
-				const Tag tag{ kTagMagic, a_flags, a_fullW, a_fullH, a_fullMips };
+				const Tag tag{ kTagMagic, a_flags, a_fullW, a_fullH, a_fullMips, a_extCap };
 				a_res->SetPrivateData(kTagGuid, sizeof(tag), &tag);
 			}
 		}
@@ -561,9 +565,9 @@ namespace TextureStream
 
 		// a_full*: Originalgroesse laut Datei; a_ours: Ersatz ist kleiner als erlaubt (von uns verkleinert)
 		void Swap(RE::BSGraphics::Texture* a_r, W::ID3D11Texture2D* a_tex, W::ID3D11ShaderResourceView* a_srv, std::uint64_t a_oldBytes,
-			std::uint32_t a_fullW, std::uint32_t a_fullH, std::uint32_t a_fullMips, bool a_ours)
+			std::uint32_t a_fullW, std::uint32_t a_fullH, std::uint32_t a_fullMips, bool a_ours, std::uint32_t a_extCap)
 		{
-			SetTag(a_tex, kTagFile | (a_ours ? kTagOurs : 0), a_fullW, a_fullH, a_fullMips);
+			SetTag(a_tex, kTagFile | (a_ours ? kTagOurs : 0), a_fullW, a_fullH, a_fullMips, a_extCap);
 			ForgetBoundSrv(a_r->resourceView);
 			DeferRelease(a_r->texture, a_oldBytes);
 			DeferRelease(a_r->resourceView);
@@ -1238,7 +1242,8 @@ namespace TextureStream
 					g_diagPresetValue.store(static_cast<std::uint32_t>(std::min<std::uint64_t>(a_maxSize, UINT32_MAX)), std::memory_order_relaxed);
 				}
 				t_loadPath.clear();
-				bool changed = false;
+				const auto preset = static_cast<std::uint32_t>(std::min<std::uint64_t>(a_maxSize, UINT32_MAX));
+				bool       changed = false;
 				if (const auto ours = LoadMaxSize(); ours != 0 && (a_maxSize == 0 || ours < a_maxSize)) {
 					a_maxSize = ours;
 					changed = true;
@@ -1247,7 +1252,8 @@ namespace TextureStream
 				// a_out ist das Textur-Objekt der Engine (BSGraphics::Texture, Aufrufer AE 77301 setzt danach +0x20) -
 				// gemerkt wird das darin angelegte D3D-Objekt
 				if (result >= 0 && a_out && *a_out) {
-					SetTag(static_cast<RE::BSGraphics::Texture*>(*a_out)->texture, kTagFile | (changed ? kTagOurs : 0));
+					// mit unserer Groesse geladen: die fremde Vorgabe merken (sonst erkennt sie die Datei-Pruefung, siehe ApplyProbe)
+					SetTag(static_cast<RE::BSGraphics::Texture*>(*a_out)->texture, kTagFile | (changed ? kTagOurs : 0), 0, 0, 0, changed ? preset : 0);
 				}
 				// Sicherheitsnetz: schlaegt das Laden mit unserer Groesse fehl, diese Textur nie wieder verkleinert laden
 				// (0.20.5: zwei Ladenschilder mit krummen Massen -> nicht durch 4 teilbar -> ohne Textur)
@@ -1416,6 +1422,9 @@ namespace TextureStream
 					                  st.path.starts_with("textures\\") && st.path.ends_with(".dds") && IsFileTexture(r);
 					st.eligible = st.eligibleBase && !Excluded(st.path);
 					st.ours = ReducedByUsAtLoad(st.res);
+					if (Tag tag; st.ours && GetTag(st.res, tag)) {
+						st.extCap = tag.extCap;
+					}
 					// Von uns ersetzt (Verkleinern/Neuladen): Originalgroesse steht am Objekt - keine Datei-Pruefung noetig
 					bool known = false;
 					if (Tag tag; st.ours && GetTag(st.res, tag) && tag.fullW >= st.curW && tag.fullH >= st.curH && tag.fullMips >= st.curMips && tag.fullMips > 0) {
@@ -1546,7 +1555,7 @@ namespace TextureStream
 				g_context->CopySubresourceRegion(tex, i, 0, 0, 0, st.res, i + drop, nullptr);
 			}
 			const auto oldBytes = ChainBytes(st.fi, st.curW, st.curH, st.curMips);
-			Swap(r, tex, srv, oldBytes, st.fullW, st.fullH, st.fullMips, true);
+			Swap(r, tex, srv, oldBytes, st.fullW, st.fullH, st.fullMips, true, st.extCap);
 			a_freed = oldBytes - ChainBytes(st.fi, desc.width, desc.height, desc.mipLevels);
 			st.res = tex;
 			st.curW = desc.width;
@@ -1690,7 +1699,7 @@ namespace TextureStream
 					continue;
 				}
 				auto& st = it->second;
-				Swap(job.r, res.tex, res.srv, ChainBytes(st.fi, st.curW, st.curH, st.curMips), job.fullW, job.fullH, job.fullMips, job.skip > 0);
+				Swap(job.r, res.tex, res.srv, ChainBytes(st.fi, st.curW, st.curH, st.curMips), job.fullW, job.fullH, job.fullMips, job.skip > 0, st.extCap);
 				st.res = res.tex;
 				st.curW = std::max(1u, job.fullW >> job.skip);
 				st.curH = std::max(1u, job.fullH >> job.skip);
