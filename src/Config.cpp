@@ -1,4 +1,5 @@
 #include "Config.h"
+#include "EngineTimers.h"
 
 #include "TextureStream.h"
 
@@ -119,6 +120,10 @@ namespace Config
 			f("LightGatherThrottle", "fMinMove", lightGather.minMove);
 			f("LightGatherThrottle", "fMinRadiusChange", lightGather.minRadiusChange);
 			f("LightGatherThrottle", "fMaxAgeMs", lightGather.maxAgeMs);
+			// Entfernte Funktionen nicht mitschleppen (Kaskaden-Cache 1.0.59, Animations-Drossel/Vorpass-Messung 1.0.60)
+			ini.Delete("ShadowCascadeCache", nullptr, true);
+			ini.Delete("AnimThrottle", nullptr, true);
+			ini.Delete("ShadowStableCascade", "bEnabled", true);
 			// Alte Prozent-Schwellen nach der Umrechnung nicht mehr mitschleppen
 			if (textureStream.legacyStartPct < 0.0f && textureStream.legacyGapPct < 0.0f) {
 				ini.Delete("TextureStream", "fBudgetStartPct", true);
@@ -143,8 +148,16 @@ namespace Config
 		std::atomic<std::chrono::steady_clock::rep> g_lastCallTicks{ 0 };
 	}
 
+	namespace
+	{
+		const std::thread::id g_configThread = std::this_thread::get_id();  // Plugin-Start = Main-Thread
+	}
+
 	void ReloadIfIdle()
 	{
+		if (std::this_thread::get_id() != g_configThread) {
+			return;  // Present kann auch aus anderen Threads kommen (Frame Generation, Overlays)
+		}
 		const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
 		if (now - g_lastCallTicks.load(std::memory_order_relaxed) >= std::chrono::duration_cast<std::chrono::steady_clock::duration>(1s).count()) {
 			ReloadIfChanged();
@@ -154,6 +167,12 @@ namespace Config
 	void ReloadIfChanged()
 	{
 		g_lastCallTicks.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+		// A/B-Messung laeuft: ihre voruebergehenden Werte duerfen nicht in SPS_User.ini landen und ein Neuladen wuerde die
+		// Messung verfaelschen - Speichern/Laden/Zuruecksetzen warten bis zum Ende (die Messung stellt die Werte wieder her)
+		if (EngineTimers::BetaABRunning() || EngineTimers::SkylightABRunning()) {
+			return;
+		}
+		try {
 		if (g_reset.exchange(false)) {
 			g_dirty.store(false);
 			std::error_code ec;
@@ -174,6 +193,11 @@ namespace Config
 		if (LastWrite(kPath) != g_lastWrite || LastWrite(kUserPath) != g_lastWriteUser) {
 			logger::info("SPS.ini / SPS_User.ini changed - reloading");
 			Load();
+		}
+		} catch (const std::exception& e) {
+			logger::error("Settings could not be saved/loaded: {}", e.what());  // laeuft im Spiel-Hook: nichts nach aussen werfen
+		} catch (...) {
+			logger::error("Settings could not be saved/loaded");
 		}
 	}
 
@@ -214,7 +238,13 @@ namespace Config
 #ifdef SPS_VR
 		analysis.store(ini.GetBoolValue("General", "bAnalysis", analysis.load()), std::memory_order_relaxed);
 #endif
-		engineProbes = ini.GetBoolValue("General", "bEngineProbes", engineProbes);
+#ifndef SPS_VR
+		static bool firstLoad = true;
+		if (firstLoad) {
+			engineProbes = ini.GetBoolValue("General", "bEngineProbes", engineProbes);  // nur beim Start (Hooks werden dann installiert)
+			firstLoad = false;
+		}
+#endif
 		occlusionCull.store(ini.GetBoolValue("Occlusion", "bCull", occlusionCull.load()), std::memory_order_relaxed);
 		occlTurnDeg.store(std::clamp(static_cast<float>(ini.GetDoubleValue("Occlusion", "fPauseTurnDeg", occlTurnDeg.load())), 0.5f, 20.0f), std::memory_order_relaxed);
 		occlMoveUnits.store(std::clamp(static_cast<float>(ini.GetDoubleValue("Occlusion", "fPauseMove", occlMoveUnits.load())), 0.0f, 512.0f), std::memory_order_relaxed);

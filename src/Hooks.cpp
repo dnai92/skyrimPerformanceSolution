@@ -16,17 +16,24 @@ namespace Hooks
 	namespace
 	{
 		using VM = RE::BSScript::Internal::VirtualMachine;
+		const std::thread::id g_mainThread = std::this_thread::get_id();  // Plugin-Start = Main-Thread
 
 		// Alle ~600 Frames: wo wartet der Main-Thread in SkyrimSE.exe? (RVA -> naechstgelegene Address-Library-ID)
 		void ReportEngineWaits()
 		{
 			static std::uint32_t frames = 0;
 			// Nur mit den Entwickler-Messungen (sonst nichts gesammelt: leere Zeile alle 10 s, Offset2ID-Aufbau = Ruckler)
-			if (!Config::engineProbes || ++frames % 600 != 0 || !Config::analysis.load(std::memory_order_relaxed)) {
+			if (!Config::engineProbes || ++frames % 600 != 0) {
 				return;
 			}
 			std::array<WaitProbe::CallerStat, WaitProbe::kMaxCallers> callers{};
 			const auto n = WaitProbe::TakeCallers(callers.data(), callers.size());
+			if (!Config::analysis.load(std::memory_order_relaxed)) {
+				std::array<WaitProbe::ChainStat, WaitProbe::kMaxChains> drop{};
+				WaitProbe::TakeChains(false, drop.data(), drop.size());
+				WaitProbe::TakeChains(true, drop.data(), drop.size());
+				return;
+			}
 			std::sort(callers.begin(), callers.begin() + n, [](const auto& a, const auto& b) { return a.ns > b.ns; });
 
 			static const REL::Offset2ID offset2id;
@@ -167,6 +174,15 @@ namespace Hooks
 		{
 			static long thunk(void* a_swapChain, std::uint32_t a_syncInterval, std::uint32_t a_flags)
 			{
+				// Nur die Bildausgabe des Spiels (Main-Thread); Frame Generation / Overlays praesentieren teils aus eigenen Threads
+				static const std::thread::id mainThread = g_mainThread;
+				if (std::this_thread::get_id() != mainThread) {
+					static std::atomic<bool> noted{ false };
+					if (!noted.exchange(true)) {
+						logger::info("Present from a second thread (frame generation or overlay) - not used for SPS frame timing");
+					}
+					return func(a_swapChain, a_syncInterval, a_flags);
+				}
 				LightShadowCache::OnPresent();
 				Occlusion::OnPresent();
 				Config::ReloadIfIdle();

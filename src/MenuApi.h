@@ -33,8 +33,8 @@ namespace MenuApi
 
 	inline bool IsInstalled()
 	{
-		std::error_code ec;
-		return std::filesystem::exists("Data/SKSE/Plugins/SKSEMenuFramework.dll", ec);
+		// geladen (nicht nur vorhanden): eine abgeschaltete oder fehlerhafte DLL meldete sonst "Menu registered"
+		return GetModuleHandleW(L"SKSEMenuFramework.dll") != nullptr;
 	}
 
 	inline float Version()
