@@ -86,8 +86,6 @@ namespace Config
 		bool enabled = false;  // Standard AUS (BETA)
 	};
 	inline FarShadowCache farShadowCache;  // [FarShadowCache]
-	// Diagnose 1.0.61 (nicht gespeichert): Review-Aenderungen einzeln abschalten, um fehlende ferne Schatten einzugrenzen
-	inline std::atomic<bool> dbgFarEngineCull{ false };  // Sammelgrenzen der Engine (customCullPlanes) unveraendert lassen
 
 	// Instancing der Sonnenschatten (Schritt 2): gleiche einfache Meshes eines Batches in einem Draw Call
 	struct ShadowInstancing

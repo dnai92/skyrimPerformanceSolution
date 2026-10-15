@@ -782,8 +782,6 @@ namespace ShadowCulling
 			return false;
 		}
 
-		void CountFarCollected(const RE::NiBound& a_bound) noexcept;  // Analyse: ferne Kaskade (weiter unten)
-
 		struct AppendVirtual
 		{
 			static void thunk(RE::BSCullingProcess* a_this, RE::BSGeometry& a_visible, std::int32_t a_alphaGroupIndex)
@@ -792,9 +790,6 @@ namespace ShadowCulling
 				std::uint32_t cascade = 0;
 				switch (Classify(a_this, cascade)) {
 				case Kind::kSun:
-					if (cascade == kFarCascade && Config::analysis.load(std::memory_order_relaxed)) {
-						CountFarCollected(a_visible.worldBound);
-					}
 					if (!a_visible.GetGeometryRuntimeData().skinInstance && ShadowOutsideView(a_visible.worldBound)) {
 						Stats::Count(Stats::Counter::SunViewCulled);
 						return;
@@ -1394,17 +1389,6 @@ namespace ShadowCulling
 			float         cx = 0.0f, cy = 0.0f, hx = 0.0f, hy = 0.0f, n = 0.0f, f = 0.0f;
 		};
 		StableState   g_stable{};
-		bool          g_farPlanesLogged = false;
-		// gehaltener Ausschnitt fuers Analyse-Protokoll (eingesammelt ausserhalb = Sammelgrenzen greifen nicht)
-		struct HeldArea
-		{
-			bool          valid = false;
-			RE::NiMatrix3 rot{};
-			RE::NiPoint3  center{};
-			float         hx = 0.0f, hy = 0.0f;
-		};
-		HeldArea                   g_farHeld{};
-		std::atomic<std::uint64_t> g_farCollected{ 0 }, g_farCollectedOutside{ 0 };
 		std::uint32_t g_stableChanged = 0, g_stableReanchor = 0, g_stableRoll = 0;  // fuers [FarShadowCache]-Log
 		float         g_stableRollMaxDeg = 0.0f;  // groesste Drehung des Engine-Ausschnitts um die Sonnenachse gegen den gehaltenen
 		// Dreht die Engine den Ausschnitt um die Sonnenachse (Blickrichtung), wird neu ausgerichtet statt die umschliessende
@@ -1414,19 +1398,6 @@ namespace ShadowCulling
 		RE::NiPoint3 Col(const RE::NiMatrix3& a_m, int a_c) noexcept { return { a_m.entry[0][a_c], a_m.entry[1][a_c], a_m.entry[2][a_c] }; }
 		float        Dot3(const RE::NiPoint3& a_a, const RE::NiPoint3& a_b) noexcept { return a_a.x * a_b.x + a_a.y * a_b.y + a_a.z * a_b.z; }
 		float        QuantUp(float a_v, float a_step) noexcept { return std::ceil(a_v / a_step) * a_step; }
-
-		void CountFarCollected(const RE::NiBound& a_bound) noexcept
-		{
-			g_farCollected.fetch_add(1, std::memory_order_relaxed);
-			const auto& h = g_farHeld;
-			if (!h.valid) {
-				return;
-			}
-			const RE::NiPoint3 rel = a_bound.center - h.center;
-			if (std::abs(Dot3(rel, -Col(h.rot, 2))) - a_bound.radius > h.hx + 1.0f || std::abs(Dot3(rel, -Col(h.rot, 1))) - a_bound.radius > h.hy + 1.0f) {
-				g_farCollectedOutside.fetch_add(1, std::memory_order_relaxed);
-			}
-		}
 
 		void StabilizeFarCascade(RE::BSShadowDirectionalLight* a_light) noexcept
 		{
@@ -1536,41 +1507,10 @@ namespace ShadowCulling
 			fr.fFar = s.f;
 			RE::NiUpdateData ud{};
 			cam->Update(ud);
-			// Sammelgrenzen: Schattenwerfer fuer den GANZEN gehaltenen Ausschnitt sammeln (die Engine-Huelle umschliesst nur
-			// den aktuellen Sichtbereich - beim Drehen fehlten im Cache Schatten am Rand), aber wie die Engine zur Sonne hin
-			// offen. Bis 1.0.61 wurden die Grenzen ganz abgeschaltet; dann cullte die Nah-Ebene des Ausschnitts hohe
-			// Schattenwerfer zwischen Sonne und Sichtbereich (Haeuser, Baeume) - je nach Blickrichtung fehlten Schatten.
-			// Ebenen nach innen zeigend, Abstand = normal . p - constant (Gamebryo NiPlane).
-			if (desc.cullingProcess && !Config::dbgFarEngineCull.load(std::memory_order_relaxed)) {
-				const RE::NiPoint3 dS = Col(s.rot, 0), uS = -Col(s.rot, 1), rS = -Col(s.rot, 2);
-				const RE::NiPoint3 c = s.pos + rS * s.cx + uS * s.cy;
-				RE::NiFrustumPlanes planes = desc.clipPlanes;
-				auto set = [&](int a_i, const RE::NiPoint3& a_n, float a_constant) {
-					planes.cullingPlanes[a_i].normal = a_n;
-					planes.cullingPlanes[a_i].constant = a_constant;
-				};
-				using P = RE::NiFrustumPlanes::Planes;
-				set(P::kNear, dS, Dot3(dS, s.pos) + s.n);  // inaktiv, nur vollstaendig
-				set(P::kFar, -dS, -Dot3(dS, s.pos) - s.f);
-				set(P::kLeft, rS, Dot3(rS, c) - s.hx);
-				set(P::kRight, -rS, -Dot3(rS, c) - s.hx);
-				set(P::kTop, -uS, -Dot3(uS, c) - s.hy);
-				set(P::kBottom, uS, Dot3(uS, c) - s.hy);
-				constexpr std::uint32_t kMask = (1u << P::kFar) | (1u << P::kLeft) | (1u << P::kRight) | (1u << P::kTop) | (1u << P::kBottom);
-				if (!g_farPlanesLogged && Config::analysis.load(std::memory_order_relaxed)) {
-					g_farPlanesLogged = true;
-					logger::info("[FarShadowCache] engine cull planes: custom {} | active 0x{:X} base 0x{:X} -> held area 0x{:X}", desc.cullingProcess->doCustomCullPlanes,
-						desc.clipPlanes.activePlanes.underlying(), desc.clipPlanes.basePlaneStates, kMask);
-				}
-				planes.activePlanes = static_cast<RE::NiFrustumPlanes::ActivePlane>(kMask);
-				planes.basePlaneStates = kMask;
-				desc.clipPlanes = planes;
-				desc.cullingProcess->customCullPlanes = planes;
-				desc.cullingProcess->doCustomCullPlanes = true;
-				g_farHeld = { true, s.rot, c, s.hx, s.hy };
-			} else {
-				g_farHeld.valid = false;
-			}
+			// Sammelgrenzen der Engine (customCullPlanes, zur Sonne hin offen) bleiben. Bis 1.0.61 wurden sie abgeschaltet, damit
+			// der ganze gehaltene Ausschnitt eingesammelt wird - dann cullte die Nah-Ebene des Ausschnitts hohe Schattenwerfer
+			// zwischen Sonne und Sichtbereich (Haeuser, Baeume): je nach Blickrichtung fehlten Schatten (Test 1.0.61, Test D/F/G).
+			// Was beim Drehen neu in die Grenzen kommt, zeichnet der Cache-Frame zusaetzlich (nicht im Cache -> FarSkipDraw).
 		}
 	}
 
@@ -1683,8 +1623,6 @@ namespace ShadowCulling
 			f.lastLog = std::chrono::steady_clock::now();
 			if (!Config::analysis.load(std::memory_order_relaxed)) {
 				g_farSkippedStatic.store(0, std::memory_order_relaxed);
-				g_farCollected.store(0, std::memory_order_relaxed);
-				g_farCollectedOutside.store(0, std::memory_order_relaxed);
 				f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 				f.hookMissed = f.notBound = f.changed = 0;
 				f.extrasSum = 0;
@@ -1696,10 +1634,9 @@ namespace ShadowCulling
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
 			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: draws skipped {:.0f} | draw hook missed {} (other target {}) | "
-						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}, turned with view on {}, max turn {:.1f} deg) | rebuilt for moved/new objects {} (new drawn per cached frame {:.0f}) | casters collected {:.0f}/frame, outside held area {:.0f}/frame",
+						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}, turned with view on {}, max turn {:.1f} deg) | rebuilt for moved/new objects {} (new drawn per cached frame {:.0f})",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
-				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, g_stableRoll, g_stableRollMaxDeg, f.changed, static_cast<double>(f.extrasSum) / c,
-				static_cast<double>(g_farCollected.exchange(0)) / n, static_cast<double>(g_farCollectedOutside.exchange(0)) / n);
+				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, g_stableRoll, g_stableRollMaxDeg, f.changed, static_cast<double>(f.extrasSum) / c);
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 			f.hookMissed = f.notBound = f.changed = 0;
 			f.extrasSum = 0;

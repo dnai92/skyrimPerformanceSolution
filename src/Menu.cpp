@@ -351,10 +351,6 @@ namespace Menu
 				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
 
 			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));
-			MenuApi::TextWrapped("%s", T("Test (not saved, only with \"Far shadow cache (BETA)\" on).",
-											"Test (wird nicht gespeichert, nur mit \"Ferne Sonnenschatten zwischenspeichern (BETA)\" an)."));
-			AtomicToggle(T("Test F: keep the engine's collection limits", "Test F: Sammelgrenzen der Engine behalten"), Config::dbgFarEngineCull,
-				T("Shadow casters are collected like without the cache.", "Schattenwerfer werden wie ohne Cache eingesammelt."), false);
 			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
 				T("For testing only, can make whole objects disappear. Default OFF (saved).", "Nur zum Testen, kann ganze Objekte verschwinden lassen. Standard AUS (wird gespeichert)."));
 
