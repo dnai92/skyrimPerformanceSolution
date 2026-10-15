@@ -174,13 +174,11 @@ namespace Hooks
 		{
 			static long thunk(void* a_swapChain, std::uint32_t a_syncInterval, std::uint32_t a_flags)
 			{
-				// Nur die Bildausgabe des Spiels (Main-Thread); Frame Generation / Overlays praesentieren teils aus eigenen Threads
+				// Zeitmessung und Erfassung nur fuer die Bildausgabe im Spiel (Main-Thread); Hauptmenue/Ladebildschirm praesentieren aus eigenem Thread
 				static const std::thread::id mainThread = g_mainThread;
 				if (std::this_thread::get_id() != mainThread) {
-					static std::atomic<bool> noted{ false };
-					if (!noted.exchange(true)) {
-						logger::info("Present from a second thread (frame generation or overlay) - not used for SPS frame timing");
-					}
+					// Hauptmenue / Ladebildschirm (eigener Thread): nur Einstellungen speichern, keine Zeitmessung/Erfassung
+					Config::ReloadIfIdle();
 					return func(a_swapChain, a_syncInterval, a_flags);
 				}
 				LightShadowCache::OnPresent();

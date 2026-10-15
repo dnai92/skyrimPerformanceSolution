@@ -150,14 +150,13 @@ namespace Config
 
 	namespace
 	{
-		const std::thread::id g_configThread = std::this_thread::get_id();  // Plugin-Start = Main-Thread
+		// Hauptmenue und Ladebildschirme praesentieren aus einem eigenen Thread (Test 1.0.61) - Speichern/Laden darf von
+		// dort kommen (Menue-Aenderungen im Hauptmenue), aber nie gleichzeitig mit dem Main-Thread
+		std::mutex g_reloadLock;
 	}
 
 	void ReloadIfIdle()
 	{
-		if (std::this_thread::get_id() != g_configThread) {
-			return;  // Present kann auch aus anderen Threads kommen (Frame Generation, Overlays)
-		}
 		const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
 		if (now - g_lastCallTicks.load(std::memory_order_relaxed) >= std::chrono::duration_cast<std::chrono::steady_clock::duration>(1s).count()) {
 			ReloadIfChanged();
@@ -171,6 +170,10 @@ namespace Config
 		// Messung verfaelschen - Speichern/Laden/Zuruecksetzen warten bis zum Ende (die Messung stellt die Werte wieder her)
 		if (EngineTimers::BetaABRunning() || EngineTimers::SkylightABRunning()) {
 			return;
+		}
+		std::unique_lock guard(g_reloadLock, std::try_to_lock);
+		if (!guard.owns_lock()) {
+			return;  // laeuft gerade im anderen Thread
 		}
 		try {
 		if (g_reset.exchange(false)) {
