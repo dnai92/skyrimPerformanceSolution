@@ -14,6 +14,8 @@ namespace ShadowCulling
 	// Tiefenvorpass: true, wenn der Draw dieses Passes uebersprungen werden soll (nur waehrend Main::RenderDepth)
 	bool ShouldSkipDepthPrepassDraw(const RE::BSRenderPass& a_pass) noexcept;
 	bool InDepthPrepass() noexcept;
+	// Draw-Filter der Verdeckung: Draw eines im Hauptbild verdeckten Objekts (Hauptbild oder Tiefenvorpass) -> true = weglassen
+	bool SkipHiddenMainDraw(const RE::BSRenderPass& a_pass) noexcept;
 	// Accumulator der Hauptansicht (Weltkamera) - nicht Spiegelungen, Vorschauen, Menue-3D
 	bool IsMainViewAccumulator(const void* a_accumulator) noexcept;
 

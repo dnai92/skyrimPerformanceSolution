@@ -20,6 +20,12 @@ namespace Occlusion
 	// true = Objekt weglassen (Stufe 2: im Hauptbild zweimal hintereinander verdeckt, Kamera ruhig)
 	bool CountMain(const RE::BSGeometry& a_geom, const void* a_accumulator, std::uint32_t a_draws) noexcept;
 
+	// Weglassen als Draw-Filter: im Hauptbild verdecktes Objekt fuer dieses Bild merken (Sammel-Threads) bzw. pruefen
+	// (Main-Thread beim Zeichnen). Gilt nur fuer das Bild, in dem es gemerkt wurde (Zaehler am Present).
+	void MarkHidden(const RE::BSGeometry* a_geom) noexcept;
+	bool IsHidden(const RE::BSGeometry* a_geom) noexcept;
+	void CountFilterSkip() noexcept;
+
 	// Ladebildschirm / Hauptmenue
 	void Reset() noexcept;
 

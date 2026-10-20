@@ -192,6 +192,27 @@ namespace Occlusion
 			std::atomic<std::uint64_t> window{ 0 };       // Objekte im laufenden 1-s-Fenster (Hauptbild erkennen)
 		};
 		std::uint64_t g_cullBlockedFrames = 0;
+
+		// Draw-Filter: im Hauptbild verdeckte Objekte dieses Bilds. Offene Adressierung ohne Sperre; Eintraege mit altem
+		// Bild-Zaehler gelten als frei. Geht ein Eintrag im Wettlauf verloren, wird das Objekt einfach gezeichnet.
+		struct HiddenSlot
+		{
+			std::atomic<const void*>   key{ nullptr };
+			std::atomic<std::uint32_t> stamp{ 0 };
+		};
+		constexpr std::size_t                     kHiddenSlots = 1u << 14;
+		constexpr std::size_t                     kHiddenProbe = 32;
+		std::array<HiddenSlot, kHiddenSlots>      g_hidden{};
+		std::atomic<std::uint32_t>                g_hiddenStamp{ 1 };
+		std::atomic<std::uint64_t>                g_hiddenMarked{ 0 }, g_hiddenFull{ 0 }, g_filterSkipped{ 0 };
+
+		std::size_t HiddenHash(const void* a_p) noexcept
+		{
+			auto h = reinterpret_cast<std::uintptr_t>(a_p) >> 4;
+			h ^= h >> 17;
+			h *= 0x9E3779B97F4A7C15ull;
+			return static_cast<std::size_t>(h >> 40);
+		}
 		std::atomic<bool> g_dumpRequest{ false };
 		std::uint32_t     g_dumpCount = 0;
 
@@ -468,6 +489,9 @@ namespace Occlusion
 			g_prepassCalls = g_camFail = g_captures = g_ringFull = g_noSrv = g_reads = g_latencySum = 0;
 			if (log) logger::info("[Occlusion]   hiding occluded objects: {} | frames without hiding because the camera moved: {} | settings: pause from {:.1f} deg / {:.0f} units, margin {:.1f} % + {:.0f}, hidden in {} images in a row, max {} tiles, characters {}", Config::occlusionCull.load() && Config::masterEnabled.load() ? "ON" : "off", g_cullBlockedFrames, Config::occlTurnDeg.load(), Config::occlMoveUnits.load(), Config::occlMarginPct.load(), Config::occlMarginUnits.load(), Config::occlStreak.load(), Config::occlMaxTiles.load(), Config::occlSkipSkinned.load() ? "never" : "allowed");
 			g_cullBlockedFrames = 0;
+			if (log) logger::info("[Occlusion]   hiding mode: {} | marked {:.0f}/frame, draws left out at draw time {:.0f}/frame, table full {}",
+				Config::occlDrawFilter.load() ? "draw filter" : "collection (old)", g_hiddenMarked.exchange(0) / frames, g_filterSkipped.exchange(0) / frames,
+				g_hiddenFull.exchange(0));
 			{
 				std::scoped_lock l(g_sampleLock);
 				for (const auto& smp : g_samples) {
@@ -679,9 +703,55 @@ namespace Occlusion
 			++g_gpuSignFrames;
 		}
 	}
+	void MarkHidden(const RE::BSGeometry* a_geom) noexcept
+	{
+		const auto stamp = g_hiddenStamp.load(std::memory_order_relaxed);
+		const auto h = HiddenHash(a_geom);
+		for (std::size_t i = 0; i < kHiddenProbe; ++i) {
+			auto&      s = g_hidden[(h + i) & (kHiddenSlots - 1)];
+			const auto key = s.key.load(std::memory_order_relaxed);
+			if (key == a_geom) {
+				s.stamp.store(stamp, std::memory_order_release);
+				return;
+			}
+			if (s.stamp.load(std::memory_order_relaxed) != stamp) {
+				auto expected = key;
+				if (s.key.compare_exchange_strong(expected, a_geom, std::memory_order_relaxed)) {
+					s.stamp.store(stamp, std::memory_order_release);
+					if (Diag()) {
+						g_hiddenMarked.fetch_add(1, std::memory_order_relaxed);
+					}
+					return;
+				}
+			}
+		}
+		g_hiddenFull.fetch_add(1, std::memory_order_relaxed);  // Tabelle voll: wird gezeichnet
+	}
+
+	bool IsHidden(const RE::BSGeometry* a_geom) noexcept
+	{
+		const auto stamp = g_hiddenStamp.load(std::memory_order_relaxed);
+		const auto h = HiddenHash(a_geom);
+		for (std::size_t i = 0; i < kHiddenProbe; ++i) {
+			const auto& s = g_hidden[(h + i) & (kHiddenSlots - 1)];
+			if (s.key.load(std::memory_order_relaxed) == a_geom) {
+				return s.stamp.load(std::memory_order_acquire) == stamp;
+			}
+		}
+		return false;
+	}
+
+	void CountFilterSkip() noexcept
+	{
+		if (Diag()) {
+			g_filterSkipped.fetch_add(1, std::memory_order_relaxed);
+		}
+	}
+
 	void OnPresent() noexcept
 	{
 		++g_frame;
+		g_hiddenStamp.fetch_add(1, std::memory_order_relaxed);  // Merkliste des Draw-Filters gilt nur fuer ein Bild
 		// Tracy-/Log-Marke bei jeder Aenderung von Schalter/Stellschrauben (Abschnitte einer Aufnahme zuordnen), nur mit Analyse-Protokoll
 		if (Config::analysis.load(std::memory_order_relaxed)) {
 			static std::string       last, pending;

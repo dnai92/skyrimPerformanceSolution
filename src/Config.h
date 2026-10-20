@@ -21,6 +21,9 @@ namespace Config
 	inline std::atomic<std::uint32_t> occlStreak{ 2 };           // so viele Tiefenbilder hintereinander verdeckt
 	inline std::atomic<std::uint32_t> occlMaxTiles{ 4096 };      // groessere Objekte werden nicht geprueft
 	inline std::atomic<bool>          occlSkipSkinned{ true };   // Figuren nie weglassen
+	// Verdeckte Objekte erst beim einzelnen Draw des Hauptbilds weglassen (1.0.65). Bis 1.0.64 meldete SPS sie gar nicht erst
+	// beim Spiel an (leere Pass-Liste) - Verdacht auf den Licht-Absturz bei Markarth (Nexus). false = alter Weg (nur Vergleich)
+	inline std::atomic<bool>          occlDrawFilter{ true };
 
 	// Regel fuer das Kleinobjekt-Culling in einer Schattenkarte. Ein Mesh wird verworfen, wenn ALLE Bedingungen zutreffen.
 	struct CullRule

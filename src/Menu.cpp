@@ -452,6 +452,10 @@ namespace Menu
 				tuneInt(T("Max. size on screen (tiles)##occ", "Max. Größe im Bild (Kacheln)##occ"), Config::occlMaxTiles, 256.0f, 36864.0f, "%.0f",
 					T("Larger objects are not checked (the whole image has 36864 tiles). Higher = big objects like houses can be left out too, the check costs a bit more. Default 4096.",
 						"Größere Objekte werden nicht geprüft (das ganze Bild hat 36864 Kacheln). Höher = auch große Objekte wie Häuser können wegfallen, die Prüfung kostet etwas mehr. Standard 4096."));
+				AtomicToggle(T("Hide at draw time##occ", "Erst beim Zeichnen weglassen##occ"), Config::occlDrawFilter,
+					T("Hidden objects are set up by the game as usual and only their draws are skipped. Off = old way (not drawn at all), only for comparison. Not saved.",
+						"Verdeckte Objekte werden vom Spiel normal angemeldet, nur ihre Draws fallen weg. Aus = alter Weg (gar nicht angemeldet), nur zum Vergleich. Wird nicht gespeichert."),
+					false);
 				AtomicToggle(T("Never hide characters##occ", "Figuren nie weglassen##occ"), Config::occlSkipSkinned,
 					T("Characters and other animated meshes are never left out (their bounds lag behind the animation). Default on.",
 						"Figuren und andere animierte Meshes werden nie weggelassen (ihre Hülle hinkt der Animation hinterher). Standard an."));

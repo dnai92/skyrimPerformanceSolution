@@ -605,6 +605,9 @@ namespace InstancingAnalysis
 			static void thunk(RE::BSRenderPass* a_pass, std::uint32_t a_technique, bool a_alphaTest, std::uint32_t a_renderFlags)
 			{
 				if (a_pass && ShadowCulling::DrawFilterMayApply()) {
+					if (ShadowCulling::SkipHiddenMainDraw(*a_pass)) {
+						return;  // Verdeckung: im Hauptbild verdeckt (normal angemeldet, erst hier weggelassen)
+					}
 					if (ShadowCulling::ShouldSkipDepthPrepassDraw(*a_pass)) {
 						return;  // Tiefenvorpass: kleines, fernes Objekt -> Draw ueberspringen
 					}
