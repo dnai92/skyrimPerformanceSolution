@@ -1,4 +1,5 @@
 #include "ShadowCulling.h"
+#include "VfuncHook.h"
 #include "Features.h"
 
 #include "Config.h"
@@ -1219,11 +1220,11 @@ namespace ShadowCulling
 	void Install()
 	{
 		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSCullingProcess[0] };
-		AppendVirtual::func = vtbl.write_vfunc(0x18, AppendVirtual::thunk);
+		VfuncHook::Write(vtbl, 0x18, AppendVirtual::thunk, AppendVirtual::func);
 		logger::info("Hook installed: BSCullingProcess::AppendVirtual (vfunc 0x18)");
 
 		REL::Relocation<std::uintptr_t> parabolicVtbl{ RE::VTABLE_BSParabolicCullingProcess[0] };
-		AppendVirtualParabolic::func = parabolicVtbl.write_vfunc(0x18, AppendVirtualParabolic::thunk);
+		VfuncHook::Write(parabolicVtbl, 0x18, AppendVirtualParabolic::thunk, AppendVirtualParabolic::func);
 		logger::info("Hook installed: BSParabolicCullingProcess::AppendVirtual (vfunc 0x18)");
 #ifdef SPS_VR
 		// VR: nur das Culling einzelner Meshes (AppendVirtual, vtable-Eintrag offline gegen VR 1.4.15 verglichen: gleich).
@@ -1234,17 +1235,17 @@ namespace ShadowCulling
 
 		// Teilbaeume ueberspringen: Process (vfunc 0x16) der drei Culler-Arten
 		REL::Relocation<std::uintptr_t> geomListVtbl{ RE::VTABLE_BSGeometryListCullingProcess[0] };
-		Process<0, false>::func = vtbl.write_vfunc(0x16, Process<0, false>::thunk);
-		Process<1, true>::func = parabolicVtbl.write_vfunc(0x16, Process<1, true>::thunk);
-		Process<2, false>::func = geomListVtbl.write_vfunc(0x16, Process<2, false>::thunk);
+		VfuncHook::Write(vtbl, 0x16, Process<0, false>::thunk, Process<0, false>::func);
+		VfuncHook::Write(parabolicVtbl, 0x16, Process<1, true>::thunk, Process<1, true>::func);
+		VfuncHook::Write(geomListVtbl, 0x16, Process<2, false>::thunk, Process<2, false>::func);
 		logger::info("Hook installed: Process (vfunc 0x16) for BSCullingProcess, BSParabolicCullingProcess, BSGeometryListCullingProcess");
 	}
 
 	void InstallLate()
 	{
 		REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSLightingShaderProperty[0] };
-		OcclusionRenderPasses::func = vtbl.write_vfunc(0x2D, OcclusionRenderPasses::thunk);
-		LightingRenderPasses::func = vtbl.write_vfunc(0x2A, LightingRenderPasses::thunk);
+		VfuncHook::Write(vtbl, 0x2D, OcclusionRenderPasses::thunk, OcclusionRenderPasses::func);
+		VfuncHook::Write(vtbl, 0x2A, LightingRenderPasses::thunk, LightingRenderPasses::func);
 		logger::info("Hook installed: BSLightingShaderProperty::GetRenderPasses (vfunc 0x2A, after Community Shaders)");
 		logger::info("Hook installed: BSLightingShaderProperty::GetRenderPasses_Occlusion (vfunc 0x2D, after Community Shaders)");
 

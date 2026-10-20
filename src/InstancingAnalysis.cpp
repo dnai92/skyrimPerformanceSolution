@@ -1,4 +1,5 @@
 #include "InstancingAnalysis.h"
+#include "VfuncHook.h"
 #include "Features.h"
 
 #include "Config.h"
@@ -775,14 +776,14 @@ namespace InstancingAnalysis
 	void Install()
 	{
 		REL::Relocation<std::uintptr_t> sunVtbl{ RE::VTABLE_BSShadowDirectionalLight[0] };
-		SunShadowRender::func = sunVtbl.write_vfunc(0xA, SunShadowRender::thunk);
-		SunShadowAccumulate::func = sunVtbl.write_vfunc(0x9, SunShadowAccumulate::thunk);
-		SunUpdateCamera::func = sunVtbl.write_vfunc(0x10, SunUpdateCamera::thunk);
+		VfuncHook::Write(sunVtbl, 0xA, SunShadowRender::thunk, SunShadowRender::func);
+		VfuncHook::Write(sunVtbl, 0x9, SunShadowAccumulate::thunk, SunShadowAccumulate::func);
+		VfuncHook::Write(sunVtbl, 0x10, SunUpdateCamera::thunk, SunUpdateCamera::func);
 		logger::info("Hooks installed: BSShadowDirectionalLight::Accumulate (0x9) / Render (0xA)");
 		REL::Relocation<std::uintptr_t> parabolicVtbl{ RE::VTABLE_BSShadowParabolicLight[0] };
 		REL::Relocation<std::uintptr_t> frustumVtbl{ RE::VTABLE_BSShadowFrustumLight[0] };
-		LightShadowRender<0>::func = parabolicVtbl.write_vfunc(0xA, LightShadowRender<0>::thunk);
-		LightShadowRender<1>::func = frustumVtbl.write_vfunc(0xA, LightShadowRender<1>::thunk);
+		VfuncHook::Write(parabolicVtbl, 0xA, LightShadowRender<0>::thunk, LightShadowRender<0>::func);
+		VfuncHook::Write(frustumVtbl, 0xA, LightShadowRender<1>::thunk, LightShadowRender<1>::func);
 		logger::info("Hooks installed: BSShadowParabolicLight / BSShadowFrustumLight::Render (0xA) - GPU timing");
 
 		// Den Detour braucht nur das Buendeln. Aeltere Community-Shaders-Versionen vertragen ihn nicht (CTD im Hauptmenue),
@@ -804,7 +805,7 @@ namespace InstancingAnalysis
 		}
 
 		REL::Relocation<std::uintptr_t> utilVtbl{ RE::VTABLE_BSUtilityShader[0] };
-		UtilitySetupGeometry::func = utilVtbl.write_vfunc(0x6, UtilitySetupGeometry::thunk);
+		VfuncHook::Write(utilVtbl, 0x6, UtilitySetupGeometry::thunk, UtilitySetupGeometry::func);
 		logger::info("Hook installed: BSUtilityShader::SetupGeometry (vfunc 0x6)");
 
 		// Aufrufstellen von RenderPassImmediately (dieselben wie Community Shaders/LightLimitFix) - nur zur Zuordnung

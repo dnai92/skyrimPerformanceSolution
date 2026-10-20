@@ -1,4 +1,5 @@
 #include "TextureStream.h"
+#include "VfuncHook.h"
 #include "Features.h"
 
 #include "Config.h"
@@ -2445,7 +2446,7 @@ namespace TextureStream
 		// eine dort schon eingetragene fremde Funktion bleibt drin und wird von uns aufgerufen.
 		{
 			REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSShaderResourceManager[0] };
-			CreateRenderData::func = reinterpret_cast<decltype(CreateRenderData::func)>(vtbl.write_vfunc(0xD0 / 8, &CreateRenderData::thunk));
+			VfuncHook::Write(vtbl, 0xD0 / 8, &CreateRenderData::thunk, CreateRenderData::func);
 			logger::info("Hook installed: BSShaderResourceManager::CreateTexture (vtable 0xD0, previously 0x{:X}) - remember texture for DDS loader",
 				reinterpret_cast<std::uintptr_t>(CreateRenderData::func));
 			Features::Report("Load textures at remembered size", "Gleich in gemerkter Größe laden", LoadDDS::func != nullptr,

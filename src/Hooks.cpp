@@ -1,4 +1,5 @@
 #include "Hooks.h"
+#include "VfuncHook.h"
 #include "Occlusion.h"
 
 #include "Config.h"
@@ -83,7 +84,7 @@ namespace Hooks
 		void WriteVfunc(REL::VariantID a_vtable, std::size_t a_index, const char* a_name)
 		{
 			REL::Relocation<std::uintptr_t> vtbl{ a_vtable };
-			T::func = vtbl.write_vfunc(a_index, T::thunk);
+			VfuncHook::Write(vtbl, a_index, T::thunk, T::func);
 			logger::info("Hook installed: {} (vfunc 0x{:X})", a_name, a_index);
 		}
 
@@ -279,7 +280,7 @@ namespace Hooks
 		if (const auto renderer = RE::BSGraphics::Renderer::GetSingleton()) {
 			if (const auto swapChain = renderer->GetRuntimeData().renderWindows[0].swapChain) {
 				REL::Relocation<std::uintptr_t> vtbl{ *reinterpret_cast<std::uintptr_t*>(swapChain) };
-				Present::func = vtbl.write_vfunc(8, Present::thunk);
+				VfuncHook::Write(vtbl, 8, Present::thunk, Present::func);
 				logger::info("Hook installed: IDXGISwapChain::Present (vfunc 8) - wait time");
 			}
 		}
