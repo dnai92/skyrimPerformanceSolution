@@ -712,6 +712,9 @@ namespace Occlusion
 			const auto key = s.key.load(std::memory_order_relaxed);
 			if (key == a_geom) {
 				s.stamp.store(stamp, std::memory_order_release);
+				if (Diag()) {
+					g_hiddenMarked.fetch_add(1, std::memory_order_relaxed);
+				}
 				return;
 			}
 			if (s.stamp.load(std::memory_order_relaxed) != stamp) {
