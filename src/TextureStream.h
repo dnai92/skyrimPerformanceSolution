@@ -22,6 +22,10 @@
 // Kette: NiSourceTexture-Ladefunktion ID 108531 (+0x44) -> ID 77301 (+0x62) -> ID 77533.
 namespace TextureStream
 {
+	// Texture Downscaler erkennen (kPostLoad, alle SKSE-Plugins geladen) - mit ihm bleibt das Streaming aus, ausser erlaubt
+	void DetectOtherDownscaler();
+	// true = Texture Downscaler geladen und Streaming deshalb aus
+	bool OtherDownscalerBlocks() noexcept;
 	// Lade-Hooks + gemerkte Groessen (beim Laden des Plugins)
 	void Install();
 

@@ -539,8 +539,13 @@ namespace Menu
 		void __stdcall RenderTextures()
 		{
 			if (TextureStream::OtherDownscalerLoaded()) {
-				MenuApi::TextWrapped("%s", T("Texture Downscaler is installed. SPS keeps the sizes it loads and only shrinks further when VRAM gets tight. If textures look wrong, switch off texture streaming here.",
-												"Texture Downscaler ist installiert. SPS behält die Größen, die er lädt, und verkleinert nur weiter, wenn der VRAM knapp wird. Sehen Texturen falsch aus, hier das Textur-Streaming ausschalten."));
+				MenuApi::TextWrapped("%s", T("Texture Downscaler is installed. Together with it textures could turn black once SPS started to shrink them, so texture streaming stays off unless you allow it here.",
+												"Texture Downscaler ist installiert. Zusammen mit ihm konnten Texturen schwarz werden, sobald SPS sie verkleinert. Deshalb bleibt das Textur-Streaming aus, solange du es hier nicht erlaubst."));
+				Toggle(T("Stream textures with Texture Downscaler##ts", "Mit Texture Downscaler trotzdem streamen##ts"), Config::textureStream.allowWithDownscaler,
+					T("Only if you have no black or broken textures with both. Default OFF (saved).", "Nur, wenn bei dir mit beiden keine schwarzen oder kaputten Texturen auftreten. Standard AUS (wird gespeichert)."));
+				if (TextureStream::OtherDownscalerBlocks()) {
+					MenuApi::TextWrapped("%s", T("Texture streaming is currently off because of Texture Downscaler.", "Textur-Streaming ist wegen Texture Downscaler gerade aus."));
+				}
 			}
 			Toggle(T("Downscale distant textures##ts", "Ferne Texturen verkleinern##ts"), Config::textureStream.enabled,
 				T("Textures of far objects (also behind you) are shrunk in VRAM and reloaded at full size from disk when you come closer. Files are never changed. Off = everything goes back to full size.",

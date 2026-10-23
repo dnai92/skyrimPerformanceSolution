@@ -986,9 +986,11 @@ namespace TextureStream
 			return a_path.find("actors\\character\\") != std::string_view::npos;
 		}
 
+		bool BlockedByOtherDownscaler() noexcept;
+
 		bool Active() noexcept
 		{
-			return Config::textureStream.enabled && Config::masterEnabled.load(std::memory_order_relaxed);
+			return Config::textureStream.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && !BlockedByOtherDownscaler();
 		}
 
 		// benoetigte Kantenlaenge fuer eine Bildschirmgroesse, unabhaengig von Schaltern (fuer gemerkte Groessen)
@@ -1171,7 +1173,7 @@ namespace TextureStream
 			}
 			const bool remembered = Config::textureStream.loadReduced && LoadPressure();
 			const auto cap = g_userCapLoad.load(std::memory_order_relaxed);
-			if (!Config::textureStream.enabled || !Config::masterEnabled.load(std::memory_order_relaxed) || (!remembered && cap == 0)) {
+			if (!Active() || (!remembered && cap == 0)) {
 				g_diagOff.fetch_add(1, std::memory_order_relaxed);
 				return 0;
 			}
@@ -2424,7 +2426,12 @@ namespace TextureStream
 
 	namespace
 	{
-		bool g_otherDownscaler = false;
+		std::atomic<bool> g_otherDownscaler{ false };
+
+		bool BlockedByOtherDownscaler() noexcept
+		{
+			return g_otherDownscaler.load(std::memory_order_relaxed) && !Config::textureStream.allowWithDownscaler;
+		}
 	}
 
 	bool OtherDownscalerLoaded() noexcept
@@ -2432,15 +2439,30 @@ namespace TextureStream
 		return g_otherDownscaler;
 	}
 
+	bool OtherDownscalerBlocks() noexcept { return BlockedByOtherDownscaler(); }
+
+	void DetectOtherDownscaler()
+	{
+		const bool found = REX::W32::GetModuleHandleW(L"TextureDownscaler.dll") != nullptr;
+		if (found == g_otherDownscaler.exchange(found)) {
+			return;  // schon gemeldet
+		}
+		if (found) {
+			if (Config::textureStream.allowWithDownscaler) {
+				logger::warn("TextureStream: Texture Downscaler (TextureDownscaler.dll) is loaded and streaming is allowed together with it "
+							 "(bAllowWithTextureDownscaler) - if textures turn black, switch that off again.");
+			} else {
+				logger::warn("TextureStream: Texture Downscaler (TextureDownscaler.dll) is loaded - texture streaming stays off (black textures "
+							 "were reported with both). Can be allowed in the SPS menu (bAllowWithTextureDownscaler).");
+			}
+		}
+	}
+
 	void InstallLate()
 	{
 		// Texture Downscaler (Nexus 187049) greift in denselben DDS-Lader ein und deckelt jede Textur fest: SPS kann
 		// gedeckelte Texturen beim Naeherkommen nicht mehr voll laden, Nutzer meldeten Texturfehler mit beiden
-		g_otherDownscaler = REX::W32::GetModuleHandleW(L"TextureDownscaler.dll") != nullptr;
-		if (g_otherDownscaler) {
-			logger::warn("TextureStream: Texture Downscaler (TextureDownscaler.dll) is loaded - SPS keeps the sizes it loads and only shrinks further when "
-						 "VRAM gets tight. If textures look wrong, switch off texture streaming in the SPS menu.");
-		}
+		DetectOtherDownscaler();
 		// BSShaderResourceManager-vtable Eintrag 0xD0 (Renderer-Textur aus NiSourceTexture anlegen; aufgerufen aus
 		// AE ID 70716 / SE dieselbe Klasse, ebenfalls 0xD0 - offline geprueft) umbiegen. Nach anderen Mods (kDataLoaded):
 		// eine dort schon eingetragene fremde Funktion bleibt drin und wird von uns aufgerufen.

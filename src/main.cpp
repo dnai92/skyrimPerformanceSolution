@@ -17,6 +17,7 @@ namespace
 	void OnMessage(SKSE::MessagingInterface::Message* a_msg)
 	{
 		if (a_msg->type == SKSE::MessagingInterface::kPostLoad) {
+			TextureStream::DetectOtherDownscaler();  // vor dem ersten DDS-Laden mit gemerkter Groesse (Stufe 3)
 			// Messwerkzeug: biegt Warte-Funktionen von FSMP/CBPC/Spiel um. Nur mit Entwickler-Schalter bEngineProbes
 			// (INI, beim Start) - im Normalbetrieb sollen fremde Mods nicht durch SPS laufen (Haenger-Analyse Rifton 1.0.6).
 			if (!Config::engineProbes) {

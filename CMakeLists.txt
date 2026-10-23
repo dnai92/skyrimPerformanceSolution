@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SPS
-	VERSION 1.0.65
+	VERSION 1.0.66
 	LANGUAGES CXX
 )
 

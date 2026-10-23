@@ -152,6 +152,9 @@ namespace Config
 		bool        enabled = true;       // Stufe 1: ferne Texturen im VRAM verkleinern / bei Annaeherung neu laden
 		bool        analysis = false;     // ausfuehrlicher 10-s-Bericht im Log (sonst eine Zeile pro Minute)
 		bool        loadReduced = true;   // Stufe 3: gemerkte Groesse schon beim Laden anwenden
+		// Mit Texture Downscaler (TextureDownscaler.dll) bleibt das Streaming aus, solange das nicht ausdruecklich erlaubt ist:
+		// alle Meldungen schwarzer Texturen (1.0.63-1.0.65) hatten Texture Downscaler, sie begannen, sobald SPS verkleinerte
+		bool        allowWithDownscaler = false;
 		bool        budgetMode = true;    // nur verkleinern, wenn der VRAM knapp wird (Windows-Budget des Prozesses)
 		// Fester Puffer statt Prozent (1.0.47): Spruenge (Tueren, neue Zellen, Umdrehen) sind unabhaengig von der Kartengroesse
 		// etwa 0,5-1,5 GB - mit 85 % blieben auf 24-GB-Karten 3,6 GB ungenutzt

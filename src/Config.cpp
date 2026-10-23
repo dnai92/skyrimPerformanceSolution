@@ -87,6 +87,7 @@ namespace Config
 			b("TextureStream", "bEnabled", textureStream.enabled);
 			b("TextureStream", "bAnalysis", textureStream.analysis);
 			b("TextureStream", "bLoadReduced", textureStream.loadReduced);
+			b("TextureStream", "bAllowWithTextureDownscaler", textureStream.allowWithDownscaler);
 			b("TextureStream", "bBudgetMode", textureStream.budgetMode);
 			f("TextureStream", "fReserveMB", textureStream.reserveMB);
 			b("TextureStream", "bRefill", textureStream.refill);
@@ -364,6 +365,7 @@ namespace Config
 		ts.enabled = ini.GetBoolValue("TextureStream", "bEnabled", ts.enabled);
 		ts.analysis = ini.GetBoolValue("TextureStream", "bAnalysis", ts.analysis);
 		ts.loadReduced = ini.GetBoolValue("TextureStream", "bLoadReduced", ts.loadReduced);
+		ts.allowWithDownscaler = ini.GetBoolValue("TextureStream", "bAllowWithTextureDownscaler", ts.allowWithDownscaler);
 		ts.budgetMode = ini.GetBoolValue("TextureStream", "bBudgetMode", ts.budgetMode);
 		ts.refill = ini.GetBoolValue("TextureStream", "bRefill", ts.refill);
 		ts.refillGapMB = std::clamp(static_cast<float>(ini.GetDoubleValue("TextureStream", "fRefillGapMB", ts.refillGapMB)), 256.0f, 4096.0f);
