@@ -395,22 +395,33 @@ namespace Occlusion
 				const float mx = a_camNow->x - c.pos.x, my = a_camNow->y - c.pos.y, mz = a_camNow->z - c.pos.z;
 				const float move = std::sqrt(mx * mx + my * my + mz * mz);
 				if (move > 0.5f) {
-					float zNear = 1e30f;
-					for (int v = v0; v <= v1; ++v) {
-						const auto row = static_cast<std::size_t>(v) * OcclusionGpu::kWidth;
-						for (int u = u0; u <= u1; ++u) {
-							const float zTile = BufToZ(c, c.reversed ? hi[row + u] : lo[row + u]);
-							if (zTile > 0.0f) {
-								zNear = std::min(zNear, zTile);
+					const float sx = c.gpu ? c.sx : 2.0f / (c.r - c.l);
+					const float sy = c.gpu ? c.sy : 2.0f / (c.t - c.b);
+					// am Bildrand verschiebt sich ein Punkt staerker als in der Mitte (1 + x^2 bezogen auf die Projektion)
+					const float edgeX = 1.0f + std::max(minX * minX, maxX * maxX) / (sx * sx);
+					const float edgeY = 1.0f + std::max(minY * minY, maxY * maxY) / (sy * sy);
+					// zweimal: die naechste Verdeckung kann auch knapp neben dem Objekt liegen (Pfeilerkante) - im
+					// zweiten Durchgang wird im schon vergroesserten Bereich gesucht
+					int du = 0, dv = 0;
+					for (int pass = 0; pass < 2; ++pass) {
+						float zNear = 1e30f;
+						for (int v = std::max(0, v0 - dv); v <= std::min(H - 1, v1 + dv); ++v) {
+							const auto row = static_cast<std::size_t>(v) * OcclusionGpu::kWidth;
+							for (int u = std::max(0, u0 - du); u <= std::min(W - 1, u1 + du); ++u) {
+								const float zTile = BufToZ(c, c.reversed ? hi[row + u] : lo[row + u]);
+								if (zTile > 0.0f) {
+									zNear = std::min(zNear, zTile);
+								}
 							}
 						}
-					}
-					if (zNear < 1e29f) {
+						if (!(zNear < 1e29f)) {
+							break;
+						}
 						const float ang = move / std::max(zNear, 1.0f);
-						const float sx = c.gpu ? c.sx : 2.0f / (c.r - c.l);
-						const float sy = c.gpu ? c.sy : 2.0f / (c.t - c.b);
-						const int   du = static_cast<int>(std::ceil(ang * sx * 0.5f * W)) + 1;
-						const int   dv = static_cast<int>(std::ceil(ang * sy * 0.5f * H)) + 1;
+						du = std::max(du, static_cast<int>(std::ceil(ang * sx * edgeX * 0.5f * W)) + 2);
+						dv = std::max(dv, static_cast<int>(std::ceil(ang * sy * edgeY * 0.5f * H)) + 2);
+					}
+					if (du || dv) {
 						u0 -= du;
 						u1 += du;
 						v0 -= dv;
