@@ -24,9 +24,6 @@ namespace Config
 	// Verdeckte Objekte erst beim einzelnen Draw des Hauptbilds weglassen (1.0.65). Bis 1.0.64 meldete SPS sie gar nicht erst
 	// beim Spiel an (leere Pass-Liste) - Verdacht auf den Licht-Absturz bei Markarth (Nexus). false = alter Weg (nur Vergleich)
 	inline std::atomic<bool>          occlDrawFilter{ true };
-	// Draw-Filter: im Hauptbild nur Objekte weglassen, die schon vor dem Tiefenvorpass als verdeckt markiert waren
-	// (sonst steht ihre Tiefe im Bild, die Farbe fehlt -> Loch in Hintergrundfarbe). Test 1.0.66, nicht gespeichert.
-	inline std::atomic<bool>          occlEarlyMarksOnly{ true };
 
 	// Regel fuer das Kleinobjekt-Culling in einer Schattenkarte. Ein Mesh wird verworfen, wenn ALLE Bedingungen zutreffen.
 	struct CullRule

@@ -756,7 +756,6 @@ namespace ShadowCulling
 			{
 				g_drawFilterScopes.fetch_add(1, std::memory_order_relaxed);
 				g_inDepthPrepass.store(true, std::memory_order_relaxed);
-				Occlusion::OnPrepassStart();
 				Occlusion::OnDepthPrepassBegin();
 				GpuTimer::Begin(GpuTimer::kDepthPrepass);
 				func(a_arg1, a_arg2);
@@ -1303,11 +1302,10 @@ namespace ShadowCulling
 
 	bool SkipHiddenMainDraw(const RE::BSRenderPass& a_pass) noexcept
 	{
-		const bool prepass = g_inDepthPrepass.load(std::memory_order_relaxed);
-		if (!a_pass.geometry || !(g_inMainWorld.load(std::memory_order_relaxed) || prepass)) {
+		if (!a_pass.geometry || !(g_inMainWorld.load(std::memory_order_relaxed) || g_inDepthPrepass.load(std::memory_order_relaxed))) {
 			return false;
 		}
-		if (Occlusion::IsHidden(a_pass.geometry, prepass)) {
+		if (Occlusion::IsHidden(a_pass.geometry)) {
 			Occlusion::CountFilterSkip();
 			return true;
 		}

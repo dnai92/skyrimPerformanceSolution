@@ -199,13 +199,7 @@ namespace Occlusion
 		{
 			std::atomic<const void*>   key{ nullptr };
 			std::atomic<std::uint32_t> stamp{ 0 };
-			std::atomic<bool>          late{ false };  // erst nach Beginn des Tiefenvorpasses markiert
 		};
-		// Tiefenvorpass dieses Bilds hat begonnen (Main-Thread setzt bei Beginn, Present setzt zurueck)
-		std::atomic<bool>                         g_prepassStarted{ false };
-		// Messung: Markierungen vor / nach Beginn des Vorpasses, Draws verspaetet markierter Objekte im Hauptbild
-		// weggelassen bzw. trotzdem gezeichnet, Draws im Vorpass weggelassen
-		std::atomic<std::uint64_t>                g_marksEarly{ 0 }, g_marksLate{ 0 }, g_lateSkipped{ 0 }, g_lateKept{ 0 }, g_prepassSkipped{ 0 };
 		constexpr std::size_t                     kHiddenSlots = 1u << 14;
 		constexpr std::size_t                     kHiddenProbe = 32;
 		std::array<HiddenSlot, kHiddenSlots>      g_hidden{};
@@ -577,14 +571,6 @@ namespace Occlusion
 				Config::occlDrawFilter.load() ? "draw filter" : "collection (old)", g_hiddenMarked.exchange(0) / frames, g_filterSkipped.exchange(0) / frames,
 				g_hiddenFull.exchange(0));
 			{
-				// Messung 1.0.66: Markierungen nach Beginn des Tiefenvorpasses -> Tiefe im Bild, Farbe fehlt (Loch)
-				const auto early = g_marksEarly.exchange(0), late = g_marksLate.exchange(0);
-				const auto lateSkip = g_lateSkipped.exchange(0), lateKept = g_lateKept.exchange(0), preSkip = g_prepassSkipped.exchange(0);
-				if (log) logger::info("[Occlusion]   mark timing: before prepass {:.0f}/frame, after prepass start {:.0f}/frame ({:.1f} %) | main view draws of late marks: left out {:.0f}/frame, drawn anyway {:.0f}/frame | prepass draws left out {:.0f}/frame | early marks only {}",
-					early / frames, late / frames, early + late ? 100.0 * late / (early + late) : 0.0, lateSkip / frames, lateKept / frames, preSkip / frames,
-					Config::occlEarlyMarksOnly.load() ? "on" : "off");
-			}
-			{
 				std::scoped_lock l(g_sampleLock);
 				for (const auto& smp : g_samples) {
 					if (log) logger::info("[Occlusion]     hidden: {}", smp);
@@ -798,20 +784,11 @@ namespace Occlusion
 	void MarkHidden(const RE::BSGeometry* a_geom) noexcept
 	{
 		const auto stamp = g_hiddenStamp.load(std::memory_order_relaxed);
-		const bool late = g_prepassStarted.load(std::memory_order_relaxed);
-		(late ? g_marksLate : g_marksEarly).fetch_add(1, std::memory_order_relaxed);
 		const auto h = HiddenHash(a_geom);
 		for (std::size_t i = 0; i < kHiddenProbe; ++i) {
 			auto&      s = g_hidden[(h + i) & (kHiddenSlots - 1)];
 			const auto key = s.key.load(std::memory_order_relaxed);
 			if (key == a_geom) {
-				// schon in diesem Bild vor dem Vorpass markiert -> bleibt "frueh" (der Vorpass hat es dann ausgelassen)
-				const bool already = s.stamp.load(std::memory_order_acquire) == stamp;
-				if (!already) {
-					s.late.store(late, std::memory_order_relaxed);
-				} else if (!late) {
-					s.late.store(false, std::memory_order_relaxed);
-				}
 				s.stamp.store(stamp, std::memory_order_release);
 				if (Diag()) {
 					g_hiddenMarked.fetch_add(1, std::memory_order_relaxed);
@@ -821,7 +798,6 @@ namespace Occlusion
 			if (s.stamp.load(std::memory_order_relaxed) != stamp) {
 				auto expected = key;
 				if (s.key.compare_exchange_strong(expected, a_geom, std::memory_order_relaxed)) {
-					s.late.store(late, std::memory_order_relaxed);
 					s.stamp.store(stamp, std::memory_order_release);
 					if (Diag()) {
 						g_hiddenMarked.fetch_add(1, std::memory_order_relaxed);
@@ -833,38 +809,18 @@ namespace Occlusion
 		g_hiddenFull.fetch_add(1, std::memory_order_relaxed);  // Tabelle voll: wird gezeichnet
 	}
 
-	bool IsHidden(const RE::BSGeometry* a_geom, bool a_prepass) noexcept
+	bool IsHidden(const RE::BSGeometry* a_geom) noexcept
 	{
 		const auto stamp = g_hiddenStamp.load(std::memory_order_relaxed);
 		const auto h = HiddenHash(a_geom);
 		for (std::size_t i = 0; i < kHiddenProbe; ++i) {
 			const auto& s = g_hidden[(h + i) & (kHiddenSlots - 1)];
 			if (s.key.load(std::memory_order_relaxed) == a_geom) {
-				if (s.stamp.load(std::memory_order_acquire) != stamp) {
-					return false;
-				}
-				const bool late = s.late.load(std::memory_order_relaxed);
-				if (a_prepass) {
-					if (late) {
-						return false;  // waehrend des Vorpasses markiert - Vorpass und Hauptbild sollen gleich entscheiden
-					}
-					g_prepassSkipped.fetch_add(1, std::memory_order_relaxed);
-					return true;
-				}
-				if (late) {
-					if (Config::occlEarlyMarksOnly.load(std::memory_order_relaxed)) {
-						g_lateKept.fetch_add(1, std::memory_order_relaxed);
-						return false;  // Tiefe steht schon im Bild -> zeichnen, sonst Loch
-					}
-					g_lateSkipped.fetch_add(1, std::memory_order_relaxed);
-				}
-				return true;
+				return s.stamp.load(std::memory_order_acquire) == stamp;
 			}
 		}
 		return false;
 	}
-
-	void OnPrepassStart() noexcept { g_prepassStarted.store(true, std::memory_order_relaxed); }
 
 	void CountFilterSkip() noexcept
 	{
@@ -877,7 +833,6 @@ namespace Occlusion
 	{
 		++g_frame;
 		g_hiddenStamp.fetch_add(1, std::memory_order_relaxed);  // Merkliste des Draw-Filters gilt nur fuer ein Bild
-		g_prepassStarted.store(false, std::memory_order_relaxed);
 		// Tracy-/Log-Marke bei jeder Aenderung von Schalter/Stellschrauben (Abschnitte einer Aufnahme zuordnen), nur mit Analyse-Protokoll
 		if (Config::analysis.load(std::memory_order_relaxed)) {
 			static std::string       last, pending;

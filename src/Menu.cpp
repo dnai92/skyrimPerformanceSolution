@@ -456,10 +456,6 @@ namespace Menu
 					T("Hidden objects are set up by the game as usual and only their draws are skipped. Off = old way (not drawn at all), only for comparison. Not saved.",
 						"Verdeckte Objekte werden vom Spiel normal angemeldet, nur ihre Draws fallen weg. Aus = alter Weg (gar nicht angemeldet), nur zum Vergleich. Wird nicht gespeichert."),
 					false);
-				AtomicToggle(T("Only marks from before the depth pass##occ", "Nur vor dem Tiefenvorpass markierte##occ"), Config::occlEarlyMarksOnly,
-					T("Test 1.0.66: with hiding at draw time, only leave out objects found hidden before the depth pre-pass. Objects found later already have their depth in the image, leaving out their colour would show a hole. Not saved.",
-						"Test 1.0.66: beim Weglassen erst beim Zeichnen nur Objekte auslassen, die schon vor dem Tiefenvorpass als verdeckt galten. Bei später erkannten steht die Tiefe schon im Bild, ohne Farbe entstünde ein Loch. Wird nicht gespeichert."),
-					false);
 				AtomicToggle(T("Never hide characters##occ", "Figuren nie weglassen##occ"), Config::occlSkipSkinned,
 					T("Characters and other animated meshes are never left out (their bounds lag behind the animation). Default on.",
 						"Figuren und andere animierte Meshes werden nie weggelassen (ihre Hülle hinkt der Animation hinterher). Standard an."));

@@ -23,12 +23,8 @@ namespace Occlusion
 	// Weglassen als Draw-Filter: im Hauptbild verdecktes Objekt fuer dieses Bild merken (Sammel-Threads) bzw. pruefen
 	// (Main-Thread beim Zeichnen). Gilt nur fuer das Bild, in dem es gemerkt wurde (Zaehler am Present).
 	void MarkHidden(const RE::BSGeometry* a_geom) noexcept;
-	// a_prepass: Draw im Tiefenvorpass (sonst Hauptbild). Erst nach Beginn des Vorpasses markierte Objekte laesst der
-	// Vorpass nie aus, das Hauptbild nur ohne occlEarlyMarksOnly (Messung 1.0.66)
-	bool IsHidden(const RE::BSGeometry* a_geom, bool a_prepass) noexcept;
+	bool IsHidden(const RE::BSGeometry* a_geom) noexcept;
 	void CountFilterSkip() noexcept;
-	// Main::RenderDepth beginnt (vor jedem Draw des Vorpasses, unabhaengig vom Verdeckungs-Schalter)
-	void OnPrepassStart() noexcept;
 
 	// Ladebildschirm / Hauptmenue
 	void Reset() noexcept;
