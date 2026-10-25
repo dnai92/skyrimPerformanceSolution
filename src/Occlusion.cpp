@@ -401,9 +401,24 @@ namespace Occlusion
 					const float edgeX = 1.0f + std::max(minX * minX, maxX * maxX) / (sx * sx);
 					const float edgeY = 1.0f + std::max(minY * minY, maxY * maxY) / (sy * sy);
 					// zweimal: die naechste Verdeckung kann auch knapp neben dem Objekt liegen (Pfeilerkante) - im
-					// zweiten Durchgang wird im schon vergroesserten Bereich gesucht
+					// zweiten Durchgang wird im schon vergroesserten Bereich gesucht. Kostengrenze: in Bewegung nur Bereiche
+					// bis kParallaxTiles pruefen, sonst gilt das Objekt als sichtbar (vor einem nahen Pfosten wurden sonst
+					// je Objekt Tausende Kacheln durchsucht -> Einbruch beim Laufen, 1.0.66-Test)
+					constexpr std::uint32_t kParallaxTiles = 512;
+					const auto area = [&](int a_du, int a_dv) {
+						return static_cast<std::uint32_t>((u1 - u0 + 1 + 2 * a_du) * (v1 - v0 + 1 + 2 * a_dv));
+					};
+					if (area(0, 0) > kParallaxTiles) {
+						return 1;
+					}
 					int du = 0, dv = 0;
 					for (int pass = 0; pass < 2; ++pass) {
+						if (u0 - du < 0 || v0 - dv < 0 || u1 + du > W - 1 || v1 + dv > H - 1) {
+							return 1;  // die Kante kann aus dem bekannten Bild gewandert sein
+						}
+						if (area(du, dv) > kParallaxTiles) {
+							return 1;  // zu viel Bewegung fuer eine sichere Aussage
+						}
 						float zNear = 1e30f;
 						for (int v = std::max(0, v0 - dv); v <= std::min(H - 1, v1 + dv); ++v) {
 							const auto row = static_cast<std::size_t>(v) * OcclusionGpu::kWidth;
@@ -429,7 +444,7 @@ namespace Occlusion
 						if (u0 < 0 || v0 < 0 || u1 > W - 1 || v1 > H - 1) {
 							return 1;  // die Kante kann aus dem bekannten Bild gewandert sein
 						}
-						if (static_cast<std::uint32_t>((u1 - u0 + 1) * (v1 - v0 + 1)) > Config::occlMaxTiles.load(std::memory_order_relaxed)) {
+						if (static_cast<std::uint32_t>((u1 - u0 + 1) * (v1 - v0 + 1)) > kParallaxTiles) {
 							return 1;  // zu viel Bewegung fuer eine sichere Aussage
 						}
 					}
