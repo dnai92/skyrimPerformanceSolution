@@ -315,8 +315,22 @@ namespace Occlusion
 			float zFarMin = 0, zFarMax = 0;  // fernste Tiefe der Kacheln als Entfernung, kleinster/groesster Wert
 		};
 
+		// Sichttiefe eines Pufferwerts (Kachel); <= 0 = Himmel/ungueltig
+		float BufToZ(const OwnCam& a_c, float a_buf) noexcept
+		{
+			if (a_c.reversed ? a_buf <= a_c.depthMin : a_buf >= a_c.depthMax) {
+				return 0.0f;
+			}
+			const float d = (a_buf - a_c.depthMin) / (a_c.depthMax - a_c.depthMin);
+			const float den = d - a_c.depthA;
+			return den != 0.0f ? a_c.depthB / den : 0.0f;
+		}
+
 		// 1 = sichtbar, 2 = verdeckt, 3 = zu gross (nicht geprueft)
-		int Test(const Snapshot& a_s, const RE::NiBound& a_b, TestInfo* a_info = nullptr) noexcept
+		// a_camNow: Kamera des Frames, in dem weggelassen wuerde. Das Tiefenbild ist 1-3 Bilder alt; hat sich die Kamera
+		// seitdem verschoben, wandert eine nahe Verdeckung auf dem Bild deutlich weiter als das Objekt dahinter (Parallaxe).
+		// Ohne Ausgleich tauchte beim Laufen um eine Ecke oder einen Pfeiler kurz der Himmel auf (1.0.66).
+		int Test(const Snapshot& a_s, const RE::NiBound& a_b, TestInfo* a_info = nullptr, const RE::NiPoint3* a_camNow = nullptr) noexcept
 		{
 			const auto& c = a_s.cam;
 			float       x, y, z;
@@ -358,20 +372,58 @@ namespace Occlusion
 				minY = std::min(minY, py);
 				maxY = std::max(maxY, py);
 			}
-			constexpr float W = static_cast<float>(OcclusionGpu::kWidth), H = static_cast<float>(OcclusionGpu::kHeight);
+			constexpr int W = static_cast<int>(OcclusionGpu::kWidth), H = static_cast<int>(OcclusionGpu::kHeight);
 			// eine Kachel Rand: Bild ist 1-2 Frames alt
-			const int u0 = std::max(0, static_cast<int>(std::floor((minX * 0.5f + 0.5f) * W)) - 1);
-			const int u1 = std::min(static_cast<int>(W) - 1, static_cast<int>(std::floor((maxX * 0.5f + 0.5f) * W)) + 1);
-			const int v0 = std::max(0, static_cast<int>(std::floor((0.5f - maxY * 0.5f) * H)) - 1);
-			const int v1 = std::min(static_cast<int>(H) - 1, static_cast<int>(std::floor((0.5f - minY * 0.5f) * H)) + 1);
-			if (u0 > u1 || v0 > v1) {
-				return 1;  // ausserhalb des alten Bildausschnitts - nichts bekannt
+			int u0 = static_cast<int>(std::floor((minX * 0.5f + 0.5f) * W)) - 1;
+			int u1 = static_cast<int>(std::floor((maxX * 0.5f + 0.5f) * W)) + 1;
+			int v0 = static_cast<int>(std::floor((0.5f - maxY * 0.5f) * H)) - 1;
+			int v1 = static_cast<int>(std::floor((0.5f - minY * 0.5f) * H)) + 1;
+			// Reicht das Objekt ueber den Rand des alten Bilds hinaus, ist der Teil draussen unbekannt (beim Drehen kommt er
+			// ins Bild) - bis 1.0.66 wurde nur der Teil im Bild geprueft und das Objekt fehlte kurz am Bildrand
+			if (u0 < 0 || v0 < 0 || u1 > W - 1 || v1 > H - 1) {
+				return 1;
 			}
 			if (static_cast<std::uint32_t>((u1 - u0 + 1) * (v1 - v0 + 1)) > Config::occlMaxTiles.load(std::memory_order_relaxed)) {
 				return 3;
 			}
 			const auto& lo = a_s.rb.minDepth;
 			const auto& hi = a_s.rb.maxDepth;
+			// Parallaxe seit dem Tiefenbild: eine Verdeckung in Tiefe zNear verschiebt sich um ~ Weg / zNear (Bogenmass)
+			// gegenueber dem Objekt -> Pruefbereich um so viele Kacheln vergroessern (naechste Tiefe im Bereich = groesste
+			// Verschiebung). Das Objekt muss dann auch dort verdeckt sein, wohin die Kante gewandert sein kann.
+			if (a_camNow) {
+				const float mx = a_camNow->x - c.pos.x, my = a_camNow->y - c.pos.y, mz = a_camNow->z - c.pos.z;
+				const float move = std::sqrt(mx * mx + my * my + mz * mz);
+				if (move > 0.5f) {
+					float zNear = 1e30f;
+					for (int v = v0; v <= v1; ++v) {
+						const auto row = static_cast<std::size_t>(v) * OcclusionGpu::kWidth;
+						for (int u = u0; u <= u1; ++u) {
+							const float zTile = BufToZ(c, c.reversed ? hi[row + u] : lo[row + u]);
+							if (zTile > 0.0f) {
+								zNear = std::min(zNear, zTile);
+							}
+						}
+					}
+					if (zNear < 1e29f) {
+						const float ang = move / std::max(zNear, 1.0f);
+						const float sx = c.gpu ? c.sx : 2.0f / (c.r - c.l);
+						const float sy = c.gpu ? c.sy : 2.0f / (c.t - c.b);
+						const int   du = static_cast<int>(std::ceil(ang * sx * 0.5f * W)) + 1;
+						const int   dv = static_cast<int>(std::ceil(ang * sy * 0.5f * H)) + 1;
+						u0 -= du;
+						u1 += du;
+						v0 -= dv;
+						v1 += dv;
+						if (u0 < 0 || v0 < 0 || u1 > W - 1 || v1 > H - 1) {
+							return 1;  // die Kante kann aus dem bekannten Bild gewandert sein
+						}
+						if (static_cast<std::uint32_t>((u1 - u0 + 1) * (v1 - v0 + 1)) > Config::occlMaxTiles.load(std::memory_order_relaxed)) {
+							return 1;  // zu viel Bewegung fuer eine sichere Aussage
+						}
+					}
+				}
+			}
 			const float marginK = 1.0f + Config::occlMarginPct.load(std::memory_order_relaxed) * 0.01f;
 			const float marginU = Config::occlMarginUnits.load(std::memory_order_relaxed);
 			if (a_info) {
@@ -902,7 +954,10 @@ namespace Occlusion
 			return false;
 		}
 		const auto t0 = diag ? Clock::now() : Clock::time_point{};
-		const int  r = Test(*snap, a_geom.worldBound);
+		// Kamera dieses Frames (aendert sich waehrend des Sammelns nicht) - fuer den Parallaxe-Ausgleich im Test
+		const auto         worldCam = RE::Main::WorldRootCamera();
+		const RE::NiPoint3 camNow = worldCam ? worldCam->world.translate : snap->cam.pos;
+		const int          r = Test(*snap, a_geom.worldBound, nullptr, &camNow);
 		if (diag) {
 			g_testNs.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count()), std::memory_order_relaxed);
 		}
@@ -935,7 +990,7 @@ namespace Occlusion
 		const bool willCull = cullOn && twice && snap->cam.gpu && g_cullAllowed.load(std::memory_order_relaxed) && CameraStillNear(snap->cam);
 		if (snap->id == g_listSnapId.load(std::memory_order_relaxed)) {
 			TestInfo    info;
-			Test(*snap, a_geom.worldBound, &info);
+			Test(*snap, a_geom.worldBound, &info, &camNow);
 			const auto& b = a_geom.worldBound;
 			auto        line = std::format("{};{};{};{};{};{:.0f};{:.0f};{:.0f};{:.0f};{:.3f};{:.3f};{:.0f};{:.0f};{};{};{};{};{:.0f};{:.0f}",
 					   willCull ? 1 : 0, isMain ? 1 : 0, skinned ? 1 : 0, a_geom.name.c_str() ? a_geom.name.c_str() : "", RefInfo(a_geom), b.center.x, b.center.y, b.center.z, b.radius,
@@ -951,7 +1006,7 @@ namespace Occlusion
 				std::scoped_lock l(g_sampleLock);
 				if (g_samples.size() < 12) {
 					TestInfo info;
-					Test(*snap, a_geom.worldBound, &info);
+					Test(*snap, a_geom.worldBound, &info, &camNow);
 					const auto& b = a_geom.worldBound;
 					g_samples.push_back(std::format("'{}' center ({:.0f}, {:.0f}, {:.0f}) radius {:.0f} | screen ({:.2f}, {:.2f}) depth {:.0f}, nearest {:.0f} | tiles x {}-{} y {}-{} | farthest depth in tiles {:.0f}-{:.0f} | image {} frames old",
 						a_geom.name.c_str() ? a_geom.name.c_str() : "", b.center.x, b.center.y, b.center.z, b.radius, info.x, info.y, info.z, info.wn,
