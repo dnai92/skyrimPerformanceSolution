@@ -1303,8 +1303,13 @@ namespace ShadowCulling
 			} else {
 				logger::warn("Hide occluded objects: Main::RenderWorld call site differs - hiding at collection (old way)");
 			}
+			// +0xD3 in SE, AE 1.6 und 1.7 (Faster Objects). Ziel muss Main::Begin sein oder ausserhalb von SkyrimSE.exe liegen
+			// (ein anderes Plugin hat die Stelle schon umgeschrieben - verketten). Ein anderer Spiel-Aufruf: nicht anfassen.
 			const REL::Relocation<std::uintptr_t> begin{ RELOCATION_ID(35560, 36559), 0xD3 };
-			if (Features::IsCall(begin.address())) {
+			const auto                            text = REL::Module::get().segment(REL::Segment::textx);
+			const auto                            target = Features::IsCall(begin.address()) ? begin.address() + 5 + *reinterpret_cast<const std::int32_t*>(begin.address() + 1) : 0;
+			const bool                            inGame = target >= text.address() && target < text.address() + text.size();
+			if (target && (target == REL::Relocation<std::uintptr_t>{ RELOCATION_ID(35562, 36561) }.address() || !inGame)) {
 				MainBegin::func = SKSE::GetTrampoline().write_call<5>(begin.address(), MainBegin::thunk);
 				logger::info("Hook installed: Main::Begin call site - occlusion pyramid starts before the main view is collected");
 			} else {

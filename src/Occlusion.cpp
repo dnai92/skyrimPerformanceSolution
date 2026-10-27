@@ -55,6 +55,10 @@ namespace Occlusion
 			// Aufloesung nur ein Teil (links oben). Ohne das passten Tiefenbild und Objekte nicht zusammen ->
 			// sichtbare Objekte wurden weggelassen (grau-blaue Flaechen).
 			float         vp[4]{};                   // Viewport des Tiefenvorpasses (x, y, Breite, Hoehe)
+			// Spielerfigur (oder Reittier) beim Tiefenbild: bewegt sich mit der Kamera und darf beim Umrechnen nicht als feste
+			// Verdeckung an der alten Stelle liegen bleiben
+			RE::NiPoint3  playerC{};
+			float         playerR = 0.0f;
 			float         resW = 1.0f, resH = 1.0f;  // dynamische Aufloesung der Engine
 		};
 
@@ -153,7 +157,17 @@ namespace Occlusion
 			auto&            e = sh.map[a_geom];
 			const auto       need = Config::occlStreak.load(std::memory_order_relaxed);
 			if (e.lastId == a_snapId) {
-				return a_occluded && e.count >= need;  // mehrere Passes desselben Objekts im selben Frame
+				// mehrere Passes desselben Objekts im selben Frame - oder dasselbe Bild noch einmal (Rueckleseweg hing): ein
+				// inzwischen bewegtes Objekt verliert seinen Zaehler (es koennte hinter seiner eigenen alten Lage stecken)
+				const float mx = a_center.x - e.x, my = a_center.y - e.y, mz = a_center.z - e.z;
+				if (mx * mx + my * my + mz * mz > 1.0f) {
+					e.count = 0;
+					e.x = a_center.x;
+					e.y = a_center.y;
+					e.z = a_center.z;
+					return false;
+				}
+				return a_occluded && e.count >= need;
 			}
 			const float dx = a_center.x - e.x, dy = a_center.y - e.y, dz = a_center.z - e.z;
 			const bool  moved = e.lastId != 0 && dx * dx + dy * dy + dz * dz > 1.0f;
@@ -295,6 +309,7 @@ namespace Occlusion
 		// Main-Thread-Zaehler
 		std::uint64_t g_prepassCalls = 0, g_camFail = 0, g_captures = 0, g_ringFull = 0, g_noSrv = 0, g_reads = 0, g_latencySum = 0;
 		float         g_camFailErrSum = 0.0f;
+		std::uint64_t g_poseMismatch = 0;  // Main-Thread: Tiefenbilder verworfen, weil Kamera-Lage und GPU-Matrix nicht zusammenpassten
 		const char*   g_camLayout = "unknown";
 		// GPU-Matrix vom Beginn des Tiefenvorpasses (Main-Thread)
 		CamSnap       g_beginCam{};
@@ -658,6 +673,48 @@ namespace Occlusion
 						src.pts[i * 4 + 3] = z;
 					}
 				}
+				// Was sich mit der Kamera bewegt, wuerde umgerechnet neben seiner echten Lage als Verdeckung liegen bleiben (Review
+				// 1.0.68: Schulterkamera beim seitlichen Laufen oder Reiten - ferne Objekte neben der Figur fehlten). Deshalb frei:
+				// alles naeher als 128 Einheiten (Ich-Perspektive: Arme, Waffe, Zauber) und die Spielerfigur bzw. das Reittier
+				// samt allem davor in ihrem Bildbereich.
+				for (auto& z : src.z) {
+					if (z > 0.0f && z < 128.0f) {
+						z = 0.0f;
+					}
+				}
+				if (c.playerR > 0.0f) {
+					const float r = c.playerR;
+					float       minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f, wFar = 0.0f;
+					bool        inFront = true;
+					for (int i = 0; i < 8 && inFront; ++i) {
+						const RE::NiPoint3 q{ c.playerC.x + ((i & 1) ? r : -r), c.playerC.y + ((i & 2) ? r : -r), c.playerC.z + ((i & 4) ? r : -r) };
+						float              clip[4];
+						Mul(c.gm, q, clip);
+						if (!(clip[3] > 1.0f)) {
+							inFront = false;  // Figur reicht bis an die Kamera: die 128-Grenze oben deckt den nahen Teil ab
+							break;
+						}
+						minX = std::min(minX, clip[0] / clip[3]);
+						maxX = std::max(maxX, clip[0] / clip[3]);
+						minY = std::min(minY, clip[1] / clip[3]);
+						maxY = std::max(maxY, clip[1] / clip[3]);
+						wFar = std::max(wFar, clip[3]);
+					}
+					if (inFront) {
+						const int u0 = std::max(0, static_cast<int>(std::floor((minX * 0.5f + 0.5f) * kGW)) - 2);
+						const int u1 = std::min(static_cast<int>(kGW) - 1, static_cast<int>(std::floor((maxX * 0.5f + 0.5f) * kGW)) + 2);
+						const int v0 = std::max(0, static_cast<int>(std::floor((0.5f - maxY * 0.5f) * kGH)) - 2);
+						const int v1 = std::min(static_cast<int>(kGH) - 1, static_cast<int>(std::floor((0.5f - minY * 0.5f) * kGH)) + 2);
+						for (int v = v0; v <= v1; ++v) {
+							for (int u = u0; u <= u1; ++u) {
+								auto& z = src.z[static_cast<std::size_t>(v) * kGW + u];
+								if (z > 0.0f && z <= wFar) {
+									z = 0.0f;
+								}
+							}
+						}
+					}
+				}
 				src.snapId = a_s.id;
 			}
 			std::vector<float> l0(static_cast<std::size_t>(kGW) * kGH);
@@ -826,7 +883,9 @@ namespace Occlusion
 			RE::NiPoint3                    pos{};
 			RE::NiMatrix3                   rot{};
 			RE::NiFrustum                   fr{};
+			std::uint32_t                   resetGen = 0;
 		};
+		std::atomic<std::uint32_t>  g_resetGen{ 0 };  // Ladebildschirm: angefangene Aufbauten verwerfen
 		std::mutex                  g_buildLock;
 		std::condition_variable     g_buildCv;
 		std::optional<BuildRequest> g_buildReq;
@@ -865,6 +924,9 @@ namespace Occlusion
 				const auto t0 = Clock::now();
 				try {
 					auto p = BuildPyramid(*r.snap, r.pos, r.rot, r.fr);
+					if (r.resetGen != g_resetGen.load(std::memory_order_acquire)) {
+						continue;  // Welt inzwischen gewechselt
+					}
 					g_pyr.store(std::move(p));
 					g_pyrGen.fetch_add(1, std::memory_order_release);
 				} catch (...) {
@@ -894,7 +956,7 @@ namespace Occlusion
 				a_snapId = snap->id;
 			}
 			const auto key = CameraKey(w.translate, w.rotate, a_snapId);
-			if (g_buildKey.exchange(key, std::memory_order_relaxed) == key) {
+			if (g_buildKey.load(std::memory_order_relaxed) == key || g_buildKey.exchange(key, std::memory_order_relaxed) == key) {
 				return;
 			}
 			if (!snap) {
@@ -909,7 +971,7 @@ namespace Occlusion
 					std::thread(Builder).detach();
 					g_builderStarted = true;
 				}
-				g_buildReq = BuildRequest{ std::move(snap), w.translate, w.rotate, cam->GetRuntimeData2().viewFrustum };
+				g_buildReq = BuildRequest{ std::move(snap), w.translate, w.rotate, cam->GetRuntimeData2().viewFrustum, g_resetGen.load(std::memory_order_relaxed) };
 			} catch (...) {
 				return;
 			}
@@ -1002,7 +1064,7 @@ namespace Occlusion
 		void VisibleMark(const void* a_geom, std::uint32_t a_frame) noexcept
 		{
 			const auto h = VisHash(a_geom);
-			const auto until = a_frame + 1 + static_cast<std::uint32_t>((h >> 32) % 8);
+			const auto until = a_frame + 2 + static_cast<std::uint32_t>((h >> 32) % 8);  // uebersprungen: Frames a_frame+1 .. until-1
 			g_vis[h & (kVisSlots - 1)].store(((h >> 32) << 32) | until, std::memory_order_relaxed);
 		}
 
@@ -1121,6 +1183,10 @@ namespace Occlusion
 					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_kickLate.exchange(0), g_kickBegin.exchange(0), g_gatedFrames, g_visSkipped.exchange(0) / frames,
 					g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
 				g_gatedFrames = 0;
+				if (log && g_poseMismatch) {
+					logger::info("[Occlusion]   depth images not used because camera pose and GPU matrix differed: {}", g_poseMismatch);
+				}
+				g_poseMismatch = 0;
 			}
 			if (log) logger::info("[Occlusion]   hiding mode: {} | marked {:.0f}/frame, draws left out at draw time {:.0f}/frame, table full {}",
 				Config::occlDrawFilter.load() ? "draw filter" : "collection (old)", g_hiddenMarked.exchange(0) / frames, g_filterSkipped.exchange(0) / frames,
@@ -1259,6 +1325,12 @@ namespace Occlusion
 			own.resW = std::clamp(gs->GetRuntimeData().dynamicResolutionWidthRatio, 0.1f, 1.0f);
 			own.resH = std::clamp(gs->GetRuntimeData().dynamicResolutionHeightRatio, 0.1f, 1.0f);
 		}
+		if (const auto player = RE::PlayerCharacter::GetSingleton()) {
+			const auto pp = player->GetPosition();
+			const bool mounted = player->IsOnMount();
+			own.playerR = mounted ? 256.0f : 128.0f;
+			own.playerC = { pp.x, pp.y, pp.z + (mounted ? 128.0f : 64.0f) };
+		}
 
 		// Weglassen nur, wenn sich die Kamera seit dem geltenden Tiefenbild kaum bewegt hat (< 2 Grad, < 64 Einheiten)
 		{
@@ -1333,8 +1405,15 @@ namespace Occlusion
 			Mul(own.gm, p, rc);
 			float ox, oy, oz;
 			Project(own, p, ox, oy, oz);
-			g_learnMaxErr = std::max({ g_learnMaxErr, std::abs(rc[0] / rc[3] - ox), std::abs(rc[1] / rc[3] - oy) });
+			const float err = std::max(std::abs(rc[0] / rc[3] - ox), std::abs(rc[1] / rc[3] - oy));
+			g_learnMaxErr = std::max(g_learnMaxErr, err);
 			++g_gpuSignFrames;
+			// Umrechnung und Test setzen voraus, dass Kamera-Lage (Ende des Vorpasses) und GPU-Matrix (Beginn) zum selben Blick
+			// gehoeren - sonst verschoeben sich alle Verdeckungen. Im Test immer < 0,0005; deutlich mehr: Bild nicht benutzen.
+			if (!(err < 0.002f)) {
+				own.gpu = false;
+				++g_poseMismatch;
+			}
 		}
 	}
 	void MarkHidden(const RE::BSGeometry* a_geom) noexcept
@@ -1666,6 +1745,11 @@ namespace Occlusion
 		g_cullAllowed.store(false);
 		OcclusionGpu::Reset();
 		ClearStreaks();
+		g_resetGen.fetch_add(1, std::memory_order_release);
+		{
+			std::scoped_lock l(g_buildLock);
+			g_buildReq.reset();
+		}
 		g_pyr.store(nullptr);
 		g_pyrGen.fetch_add(1, std::memory_order_release);
 		g_buildKey.store(0, std::memory_order_relaxed);
@@ -1677,14 +1761,16 @@ namespace Occlusion
 
 	void OnViewCamera() noexcept
 	{
-		if (Active() && Config::occlReproject.load(std::memory_order_relaxed) && Config::occlusionCull.load(std::memory_order_relaxed)) {
+		if (Active() && Config::occlReproject.load(std::memory_order_relaxed) && Config::occlusionCull.load(std::memory_order_relaxed) &&
+			Config::masterEnabled.load(std::memory_order_relaxed) && g_testFrame.load(std::memory_order_relaxed)) {
 			RequestPyramid();
 		}
 	}
 
 	void OnFrameBegin() noexcept
 	{
-		if (Active() && Config::occlReproject.load(std::memory_order_relaxed) && Config::occlusionCull.load(std::memory_order_relaxed)) {
+		if (Active() && Config::occlReproject.load(std::memory_order_relaxed) && Config::occlusionCull.load(std::memory_order_relaxed) &&
+			Config::masterEnabled.load(std::memory_order_relaxed) && g_testFrame.load(std::memory_order_relaxed)) {
 			if (Diag()) {
 				g_kickBegin.fetch_add(1, std::memory_order_relaxed);
 			}
