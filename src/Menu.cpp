@@ -275,6 +275,8 @@ namespace Menu
 				T("Small objects are left out of the skylighting occlusion map.", "Kleine Objekte werden in der Himmelslicht-Karte weggelassen."));
 			Toggle(T("Decal culling", "Ferne Bodendetails weglassen"), Config::decalCulling.enabled,
 				T("Small decals (footprints, blood, dirt) far away are not drawn.", "Kleine Bodendetails (Fußspuren, Blut, Schmutz) in der Ferne werden nicht gezeichnet."));
+			AtomicToggle(T("Hide occluded objects", "Verdeckte Objekte weglassen"), Config::occlusionCull,
+				T("Objects completely hidden behind walls, houses or terrain are not drawn. Fine-tuning on the page Lights and scene.", "Objekte, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Feineinstellung auf der Seite Licht und Szene."));
 			Toggle(T("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern"), Config::lightShadowCache.enabled,
 				T("Shadows of lights that do not move are kept, only characters and moving things are redrawn. Mainly for interiors. Switch off if shadows near fires pulse.",
 					"Schatten von Lichtern, die sich nicht bewegen, werden aufbewahrt, nur Figuren und Bewegliches werden neu gezeichnet. Vor allem für Innenräume. Ausschalten, falls Schatten an Feuern pulsieren."));
@@ -300,8 +302,6 @@ namespace Menu
 			Toggle(T("Far shadow cache (BETA)", "Ferne Sonnenschatten zwischenspeichern (BETA)"), Config::farShadowCache.enabled,
 				T("Static objects (houses, rocks, trees) are drawn into the far sun shadows only when the sun or the view moves on; in between only characters and moving things are drawn. Outdoors this saves around 1,000 to 1,500 draw calls per frame and helps most on systems limited by draw calls. Far shadows shimmer less and follow the sun in small steps. Anniversary Edition only. Switch off if far shadows flicker or are missing.",
 					"Unbewegliche Objekte (Häuser, Felsen, Bäume) werden nur dann in die fernen Sonnenschatten gezeichnet, wenn Sonne oder Blick weiterwandern; dazwischen nur Figuren und Bewegliches. Spart draußen etwa 1.000 bis 1.500 Draw Calls pro Frame und hilft vor allem Systemen, die an Draw Calls hängen. Ferne Schatten flimmern weniger und folgen der Sonne in kleinen Schritten. Nur Anniversary Edition. Ausschalten, falls ferne Schatten flackern oder fehlen."));
-			AtomicToggle(T("Hide occluded objects (BETA)", "Verdeckte Objekte weglassen (BETA)"), Config::occlusionCull,
-				T("Objects completely hidden behind walls, houses or terrain are not drawn. Fine-tuning on the page Beta.", "Objekte, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Feineinstellung auf der Seite Beta."));
 
 			MenuApi::SeparatorText(T("Settings", "Einstellungen"));
 			if (MenuApi::Button(T("Reset to defaults", "Auf Standard zurücksetzen"))) {
@@ -410,15 +410,13 @@ namespace Menu
 				"Schreibt das aktuelle Tiefenbild des Verdeckungs-Tests neben SPS.log (SPS_OcclusionDepth_N.pgm). Gleichzeitig einen Screenshot machen."));
 		}
 
-		// Beta: fertige, aber noch wenig erprobte Funktionen, Standard AUS
-		void __stdcall RenderBeta()
+		// Verdeckte Objekte weglassen (bis 1.0.67 Beta auf eigener Seite, seit 1.0.68 Standard an, Seite Licht und Szene)
+		void OcclusionSettings()
 		{
-			MenuApi::TextWrapped("%s", T("Beta features work, but have not been tested on many setups yet. All are off by default. Please report what you notice on Nexus, ideally with SPS.log.",
-											"Beta-Funktionen funktionieren, sind aber noch auf wenigen Systemen erprobt. Alle sind standardmäßig aus. Auffälligkeiten bitte auf Nexus melden, am besten mit SPS.log."));
-			MenuApi::SeparatorText(T("Hide occluded objects (BETA)", "Verdeckte Objekte weglassen (BETA)"));
+			MenuApi::SeparatorText(T("Hide occluded objects", "Verdeckte Objekte weglassen"));
 			AtomicToggle(T("Enabled##occ", "Aktiv##occ"), Config::occlusionCull,
-				T("Objects in the main view that are completely hidden behind walls, houses or terrain are not drawn. A small depth image of the previous frame, moved to the current view, decides what is hidden. Shadows, reflections and water are never affected. Saves draw calls in cities, the effect on FPS depends on your setup. Watch for objects popping in. Default OFF.",
-					"Objekte im Hauptbild, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Ein kleines Tiefenbild des vorigen Bildes, umgerechnet auf den aktuellen Blick, entscheidet, was verdeckt ist. Schatten, Spiegelungen und Wasser sind nie betroffen. Spart Draw Calls in Städten, wie viel FPS das bringt, hängt vom System ab. Auf aufploppende Objekte achten. Standard AUS."));
+				T("Objects in the main view that are completely hidden behind walls, houses or terrain are not drawn. A small depth image of the previous frame, moved to the current view, decides what is hidden. Shadows, reflections and water are never affected. Saves draw calls in cities, the effect on FPS depends on your setup. Switch off if objects pop in. Default ON.",
+					"Objekte im Hauptbild, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Ein kleines Tiefenbild des vorigen Bildes, umgerechnet auf den aktuellen Blick, entscheidet, was verdeckt ist. Schatten, Spiegelungen und Wasser sind nie betroffen. Spart Draw Calls in Städten, wie viel FPS das bringt, hängt vom System ab. Ausschalten, falls Objekte aufploppen. Standard AN."));
 			if (Occlusion::BottledHiZActive()) {
 				MenuApi::TextWrapped("%s", T("Bottled Shaders HiZ Occlusion Culling is active and already hides occluded objects. SPS stays off unless you allow it here (both would test every object).",
 												"Die HiZ-Verdeckung von Bottled Shaders ist aktiv und lässt verdeckte Objekte bereits weg. SPS bleibt aus, solange du es hier nicht erlaubst (beide würden jedes Objekt prüfen)."));
@@ -697,6 +695,8 @@ namespace Menu
 			Slider(T("Min. object radius##sky", "Min. Objektradius##sky"), Config::skylightingCulling.minRadius, 32.0f, 512.0f, "%.0f",
 				T("Objects smaller than this are left out.", "Kleinere Objekte werden weggelassen."));
 
+			OcclusionSettings();
+
 			MenuApi::SeparatorText(T("Decal culling", "Ferne Bodendetails weglassen"));
 			Toggle(T("Enabled##decal", "Aktiv##decal"), Config::decalCulling.enabled,
 				T("Small decals far away are not drawn.", "Kleine Bodendetails in der Ferne werden nicht gezeichnet."));
@@ -754,8 +754,10 @@ namespace Menu
 				T("Lights and scene > Skylighting culling", "Licht und Szene > Himmelslicht: kleine Objekte weglassen"));
 			HelpEntry(T("Characters walking past a torch are lit a moment late", "An einer Fackel vorbeilaufende Figuren werden einen Moment zu spät beleuchtet"),
 				T("Lights and scene > Light assignment throttle (or lower 'Max. age')", "Licht und Szene > Licht-Zuordnung drosseln (oder 'Max. Alter' senken)"));
-			HelpEntry(T("Whole objects disappear, or tiny objects pop in", "Ganze Objekte verschwinden, oder winzige Objekte ploppen auf"),
-				T("Overview > Beta: Main view micro culling or Hide occluded objects (off by default)", "Übersicht > Beta: Winzige Objekte im Bild weglassen oder Verdeckte Objekte weglassen (standardmäßig aus)"));
+			HelpEntry(T("Whole objects disappear for a moment or pop in", "Ganze Objekte fehlen kurz oder ploppen auf"),
+				T("Lights and scene > Hide occluded objects", "Licht und Szene > Verdeckte Objekte weglassen"));
+			HelpEntry(T("Tiny far objects pop in", "Winzige ferne Objekte ploppen auf"),
+				T("Overview > Beta: Main view micro culling (off by default)", "Übersicht > Beta: Winzige Objekte im Bild weglassen (standardmäßig aus)"));
 
 			MenuApi::SeparatorText(T("Reporting a bug", "Fehler melden"));
 			MenuApi::TextWrapped("%s", T("Please attach SPS.log (Documents\\My Games\\Skyrim Special Edition\\SKSE) and say where it happened and which switch makes it go away.",
@@ -781,7 +783,6 @@ namespace Menu
 		MenuApi::AddSectionItem(kSection + T("Texture streaming", "Textur-Streaming"), RenderTextures);
 		MenuApi::AddSectionItem(kSection + T("Lights and scene", "Licht und Szene"), RenderScene);
 		MenuApi::AddSectionItem(kSection + T("Help with visual issues", "Hilfe bei Bildfehlern"), RenderHelp);
-		MenuApi::AddSectionItem(kSection + "Beta", RenderBeta);
 		MenuApi::AddSectionItem(kSection + "Debug", RenderDebug);
 		logger::info("Menu registered in SKSE Menu Framework (version {:.1f})", MenuApi::Version());
 	}

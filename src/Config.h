@@ -8,12 +8,12 @@ namespace Config
 	inline bool                       engineProbes = false;  // nur INI, nur beim Start: WaitProbe + Engine-Zeitmessung (Entwickler)
 	inline std::atomic<bool>          analysis{ false };  // Diagnose-Auswertungen (Instancing-Analyse, Decal-/Culled-Listen, Kamera-Zaehler). Kosten Hauptthread-Zeit -> Standard AUS
 	inline std::atomic<std::uint32_t> toggleKey{ 0xC9 };  // DirectInput-Scancode, 0xC9 = Bild auf (Page Up)
-	// Verdeckte Objekte weglassen (Beta, Standard AUS). [Occlusion] bCull und die Stellschrauben werden im Menue
+	// Verdeckte Objekte weglassen (seit 1.0.68 Standard AN, vorher Beta). [Occlusion] bCull und die Stellschrauben werden im Menue
 	// gespeichert. Messen und Tiefenquelle (0 = Kopie nach dem Tiefenvorpass, 1 = Haupt-Tiefenpuffer) sind Diagnose
 	// auf der Debug-Seite, nur fuer die laufende Sitzung.
 	inline std::atomic<bool>          occlusionProbe{ false };
 	inline std::atomic<std::uint32_t> occlusionDepthSource{ 0 };
-	inline std::atomic<bool>          occlusionCull{ false };
+	inline std::atomic<bool>          occlusionCull{ true };
 	inline std::atomic<float>         occlTurnDeg{ 2.0f };       // Weglassen pausiert ab dieser Drehung seit dem Tiefenbild
 	inline std::atomic<float>         occlMoveUnits{ 64.0f };    // ... oder ab dieser Bewegung
 	inline std::atomic<float>         occlMarginPct{ 2.0f };     // Sicherheitsabstand hinter der Verdeckung in %

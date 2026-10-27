@@ -31,8 +31,8 @@ so you can compare with and without the plugin at any time.
 | **Small character parts cast no shadow** *(BETA)* | Rings, earrings, eyes, teeth and small armor parts of characters a few meters away cast no shadow (sun and torches). Only the single shadow draw is left out, everything is still collected as usual. AE only. | OFF |
 | **Skylighting culling** | Small objects are left out of the Community Shaders skylighting / precipitation occlusion map. | ON |
 | **Decal culling** | Footprint-sized decals (radius < 32, e.g. Dynamic Footprints) farther than ~21 m are not drawn. Larger decals such as plaster patches on walls stay. | ON |
+| **Hide occluded objects** | Objects in the main view that are completely hidden behind walls, houses or terrain are not drawn. A small depth image of the previous frame is moved to the current view on a helper thread (Hi-Z max pyramid), so it also works while turning and walking. Objects found visible are re-tested every 1-8 frames, and when it hides less than 5 % of what it tests it only tests 4 of 32 frames. Works with DLSS, FSR and dynamic resolution. Stays off while Bottled Shaders' own HiZ Occlusion Culling is active; Faster Objects pauses its own Hi-Z when this is on. | ON |
 | **Shadow instancing** *(BETA)* | Identical simple meshes in the sun shadow pass are drawn with one instanced draw call. Small gain, AE only, takes effect after a game restart. | OFF |
-| **Hide occluded objects** *(BETA)* | Objects in the main view that are completely hidden behind walls, houses or terrain (depth of the previous frame) are not drawn. Works with DLSS, FSR and dynamic resolution. | OFF |
 | **Main view micro culling** *(BETA)* | Tiny far objects are not drawn at all; only in the main world view, never in previews or menus. | OFF |
 | **Far shadow cache** *(BETA)* | Static objects (houses, rocks, trees) are drawn into the far sun shadow cascade only when the sun or the view moves on; in between only characters and moving things are drawn. The cascade is held still for this, so far shadows also shimmer less; the game's own limits for collecting shadow casters stay active, so tall objects between sun and view keep their shadows in every view direction. Outdoors about 60 % fewer sun shadow draw calls (~850 per frame) and ~0.4 ms less CPU time for sun shadows. AE only. | OFF |
 | **Light assignment throttle** | Moving lights (torches, flickering lights) only re-search the geometry they light when they actually moved — the engine does this for every dynamic light every frame. | ON |
@@ -171,6 +171,9 @@ If SPS helps your game run better, you can buy me a coffee on [Ko-fi](https://ko
 
 The modding exception only allows SPS to work together with Skyrim, SKSE, Windows and hardware SDKs; it follows the
 license of CommonLibSSE NG, which SPS is built on.
+
+The occlusion test (Hi-Z pyramid, reprojection into the current view, yield gate, visible object table, Bottled Shaders
+detection) follows ideas from [Faster Objects](https://github.com/1001Bits/Faster-Objects) by Asciim0v (GPL-3.0).
 
 Please link to the official Nexus Mods page instead of re-uploading the mod. If you redistribute or modify it,
 the GPL requires you to keep the copyright notices, credit the original and publish your changes as source code under
