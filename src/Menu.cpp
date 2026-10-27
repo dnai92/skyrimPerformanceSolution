@@ -417,8 +417,17 @@ namespace Menu
 											"Beta-Funktionen funktionieren, sind aber noch auf wenigen Systemen erprobt. Alle sind standardmäßig aus. Auffälligkeiten bitte auf Nexus melden, am besten mit SPS.log."));
 			MenuApi::SeparatorText(T("Hide occluded objects (BETA)", "Verdeckte Objekte weglassen (BETA)"));
 			AtomicToggle(T("Enabled##occ", "Aktiv##occ"), Config::occlusionCull,
-				T("Objects in the main view that are completely hidden behind walls, houses or terrain are not drawn. A small depth image of the previous frame decides what is hidden. Shadows, reflections and water are never affected. Pauses while the camera turns or moves fast. Saves draw calls in cities, the effect on FPS depends on your setup. Watch for objects popping in. Default OFF.",
-					"Objekte im Hauptbild, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Ein kleines Tiefenbild des vorigen Bildes entscheidet, was verdeckt ist. Schatten, Spiegelungen und Wasser sind nie betroffen. Pausiert, wenn sich die Kamera schnell dreht oder bewegt. Spart Draw Calls in Städten, wie viel FPS das bringt, hängt vom System ab. Auf aufploppende Objekte achten. Standard AUS."));
+				T("Objects in the main view that are completely hidden behind walls, houses or terrain are not drawn. A small depth image of the previous frame, moved to the current view, decides what is hidden. Shadows, reflections and water are never affected. Saves draw calls in cities, the effect on FPS depends on your setup. Watch for objects popping in. Default OFF.",
+					"Objekte im Hauptbild, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Ein kleines Tiefenbild des vorigen Bildes, umgerechnet auf den aktuellen Blick, entscheidet, was verdeckt ist. Schatten, Spiegelungen und Wasser sind nie betroffen. Spart Draw Calls in Städten, wie viel FPS das bringt, hängt vom System ab. Auf aufploppende Objekte achten. Standard AUS."));
+			if (Occlusion::BottledHiZActive()) {
+				MenuApi::TextWrapped("%s", T("Bottled Shaders HiZ Occlusion Culling is active and already hides occluded objects. SPS stays off unless you allow it here (both would test every object).",
+												"Die HiZ-Verdeckung von Bottled Shaders ist aktiv und lässt verdeckte Objekte bereits weg. SPS bleibt aus, solange du es hier nicht erlaubst (beide würden jedes Objekt prüfen)."));
+				AtomicToggle(T("Hide with Bottled Shaders HiZ anyway##occ", "Trotz Bottled-Shaders-HiZ weglassen##occ"), Config::occlAllowWithBottled,
+					T("Only for comparisons. Default off.", "Nur für Vergleiche. Standard aus."));
+			}
+			AtomicToggle(T("Follow the camera##occ", "Der Kamera folgen##occ"), Config::occlReproject,
+				T("The depth image is moved to the current view on a helper thread, so objects are also hidden while turning and walking. Off = old way (pauses while the camera moves, see the pause settings). Default on.",
+					"Das Tiefenbild wird in einem Hilfsthread auf den aktuellen Blick umgerechnet, so wird auch beim Drehen und Laufen weggelassen. Aus = alter Weg (pausiert, solange sich die Kamera bewegt, siehe Pause-Einstellungen). Standard an."));
 			MenuApi::TextWrapped("%s", T("Fine-tuning (only change if you know why):", "Feineinstellung (nur ändern, wenn du weißt warum):"));
 			{
 				const auto tune = [](const char* a_label, std::atomic<float>& a_v, float a_min, float a_max, const char* a_fmt, const char* a_tip) {
@@ -438,10 +447,10 @@ namespace Menu
 					Tip(a_tip);
 				};
 				tune(T("Pause from camera turn##occ", "Pause ab Kameradrehung##occ"), Config::occlTurnDeg, 0.5f, 20.0f, "%.1f°",
-					T("Hiding pauses while the camera has turned more than this since the depth image. Higher = hides more often, but objects may pop in when turning fast. Default 2.",
-						"Weglassen pausiert, solange sich die Kamera seit dem Tiefenbild weiter gedreht hat. Höher = öfter weglassen, beim schnellen Drehen können aber Objekte aufploppen. Standard 2."));
+					T("Only with Follow the camera off. Hiding pauses while the camera has turned more than this since the depth image. Higher = hides more often, but objects may pop in when turning fast. Default 2.",
+						"Nur mit Der Kamera folgen aus. Weglassen pausiert, solange sich die Kamera seit dem Tiefenbild weiter gedreht hat. Höher = öfter weglassen, beim schnellen Drehen können aber Objekte aufploppen. Standard 2."));
 				tune(T("Pause from movement##occ", "Pause ab Bewegung##occ"), Config::occlMoveUnits, 0.0f, 512.0f, "%.0f",
-					T("Same for moving (game units, 64 = about 1 m). Default 64.", "Dasselbe für Bewegung (Spieleinheiten, 64 = etwa 1 m). Standard 64."));
+					T("Only with Follow the camera off. Same for moving (game units, 64 = about 1 m). Default 64.", "Nur mit Der Kamera folgen aus. Dasselbe für Bewegung (Spieleinheiten, 64 = etwa 1 m). Standard 64."));
 				tune(T("Safety margin %##occ", "Sicherheitsabstand %##occ"), Config::occlMarginPct, 0.0f, 20.0f, "%.1f %%",
 					T("An object only counts as hidden if it is this much farther away than what covers it. Default 2.", "Ein Objekt gilt nur als verdeckt, wenn es um so viel weiter weg ist als das, was davor liegt. Standard 2."));
 				tune(T("Safety margin units##occ", "Sicherheitsabstand Einheiten##occ"), Config::occlMarginUnits, 0.0f, 256.0f, "%.0f",
@@ -450,8 +459,8 @@ namespace Menu
 					T("How many depth images in a row an object must be hidden before it is left out. 1 = immediately. Default 2.",
 						"In so vielen Tiefenbildern hintereinander muss ein Objekt verdeckt sein, bevor es weggelassen wird. 1 = sofort. Standard 2."));
 				tuneInt(T("Max. size on screen (tiles)##occ", "Max. Größe im Bild (Kacheln)##occ"), Config::occlMaxTiles, 256.0f, 36864.0f, "%.0f",
-					T("Larger objects are not checked (the whole image has 36864 tiles). Higher = big objects like houses can be left out too, the check costs a bit more. Default 4096.",
-						"Größere Objekte werden nicht geprüft (das ganze Bild hat 36864 Kacheln). Höher = auch große Objekte wie Häuser können wegfallen, die Prüfung kostet etwas mehr. Standard 4096."));
+					T("Only with Follow the camera off (otherwise every size is checked cheaply). Larger objects are not checked (the whole image has 36864 tiles). Higher = big objects like houses can be left out too, the check costs a bit more. Default 4096.",
+						"Nur mit Der Kamera folgen aus (sonst wird jede Größe günstig geprüft). Größere Objekte werden nicht geprüft (das ganze Bild hat 36864 Kacheln). Höher = auch große Objekte wie Häuser können wegfallen, die Prüfung kostet etwas mehr. Standard 4096."));
 				AtomicToggle(T("Hide at draw time##occ", "Erst beim Zeichnen weglassen##occ"), Config::occlDrawFilter,
 					T("Hidden objects are set up by the game as usual and only their draws are skipped. Off = old way (not drawn at all), only for comparison. Not saved.",
 						"Verdeckte Objekte werden vom Spiel normal angemeldet, nur ihre Draws fallen weg. Aus = alter Weg (gar nicht angemeldet), nur zum Vergleich. Wird nicht gespeichert."),
@@ -467,6 +476,7 @@ namespace Menu
 					Config::occlStreak.store(2);
 					Config::occlMaxTiles.store(4096);
 					Config::occlSkipSkinned.store(true);
+					Config::occlReproject.store(true);
 					Config::MarkDirty();
 				}
 			}

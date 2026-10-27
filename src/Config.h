@@ -21,6 +21,12 @@ namespace Config
 	inline std::atomic<std::uint32_t> occlStreak{ 2 };           // so viele Tiefenbilder hintereinander verdeckt
 	inline std::atomic<std::uint32_t> occlMaxTiles{ 4096 };      // groessere Objekte werden nicht geprueft
 	inline std::atomic<bool>          occlSkipSkinned{ true };   // Figuren nie weglassen
+	// Tiefenbild in die Kamera des aktuellen Frames umrechnen (Hi-Z-Pyramide, Hilfsthread): weglassen auch beim Drehen und
+	// Laufen. false = alter Weg (Kachel-Scan im alten Bild, Pause ab occlTurnDeg/occlMoveUnits)
+	inline std::atomic<bool>          occlReproject{ true };
+	// Bottled Shaders hat eine eigene HiZ-Verdeckung - beide zusammen pruefen jedes Objekt doppelt. Ist sie aktiv, bleibt
+	// unsere aus, ausser hier erlaubt.
+	inline std::atomic<bool>          occlAllowWithBottled{ false };
 	// Verdeckte Objekte erst beim einzelnen Draw des Hauptbilds weglassen (1.0.65). Bis 1.0.64 meldete SPS sie gar nicht erst
 	// beim Spiel an (leere Pass-Liste) - Verdacht auf den Licht-Absturz bei Markarth (Nexus). false = alter Weg (nur Vergleich)
 	inline std::atomic<bool>          occlDrawFilter{ true };

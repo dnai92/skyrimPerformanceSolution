@@ -4,7 +4,12 @@
 #include "Config.h"
 #include "OcclusionGpu.h"
 
+#include <condition_variable>
+#include <fstream>
 #include <memory>
+#include <regex>
+#include <sstream>
+#include <thread>
 
 namespace Occlusion
 {
@@ -33,6 +38,7 @@ namespace Occlusion
 		struct OwnCam
 		{
 			RE::NiPoint3  pos{}, dir{}, up{}, right{};
+			RE::NiMatrix3 rot{};  // Lage der Weltkamera (Spalte 0 = Blick) - fuers Umrechnen in die Kamera eines spaeteren Frames
 			float         l = -1.0f, r = 1.0f, t = 1.0f, b = -1.0f;
 			float         depthA = 0.0f, depthB = 0.0f;  // Tiefe(NDC) = A + B / z
 			bool          reversed = false;
@@ -480,6 +486,525 @@ namespace Occlusion
 			return 2;
 		}
 
+		// ---------------- Hi-Z: Tiefenbild in die Kamera dieses Frames umgerechnet, als Max-Pyramide ----------------
+		// Ideen aus Faster Objects (Asciim0v, GPL-3, github.com/1001Bits/Faster-Objects): Max-Mipmaps statt Kachel-Scan (jedes
+		// Objekt liest hoechstens 4x4 Texel, egal wie gross), das alte Tiefenbild in die aktuelle Kamera umrechnen (weglassen
+		// auch beim Drehen und Laufen statt Pause), Aufbau auf einem Hilfsthread, Matrizen in double (Weltkoordinaten bis
+		// ~10^5 - in float lagen Verdeckungen dort um Prozente zu nah), Ertragsbremse und seltenere Pruefung Sichtbarer.
+		using Mat4d = std::array<std::array<double, 4>, 4>;
+		constexpr std::uint32_t kGW = OcclusionGpu::kWidth, kGH = OcclusionGpu::kHeight;
+		constexpr float         kFree = std::numeric_limits<float>::infinity();  // keine Verdeckung bekannt
+
+		Mat4d MatMul(const Mat4d& a_a, const Mat4d& a_b) noexcept
+		{
+			Mat4d r{};
+			for (int i = 0; i < 4; ++i) {
+				for (int j = 0; j < 4; ++j) {
+					for (int k = 0; k < 4; ++k) {
+						r[i][j] += a_a[i][k] * a_b[k][j];
+					}
+				}
+			}
+			return r;
+		}
+
+		bool MatInvert(const Mat4d& a_in, Mat4d& a_out) noexcept
+		{
+			Mat4d a = a_in;
+			a_out = {};
+			for (int i = 0; i < 4; ++i) {
+				a_out[i][i] = 1.0;
+			}
+			for (int c = 0; c < 4; ++c) {
+				int piv = c;
+				for (int r = c + 1; r < 4; ++r) {
+					if (std::abs(a[r][c]) > std::abs(a[piv][c])) {
+						piv = r;
+					}
+				}
+				if (!(std::abs(a[piv][c]) > 1e-12)) {
+					return false;
+				}
+				std::swap(a[c], a[piv]);
+				std::swap(a_out[c], a_out[piv]);
+				const double inv = 1.0 / a[c][c];
+				for (int j = 0; j < 4; ++j) {
+					a[c][j] *= inv;
+					a_out[c][j] *= inv;
+				}
+				for (int r = 0; r < 4; ++r) {
+					if (r != c && a[r][c] != 0.0) {
+						const double f = a[r][c];
+						for (int j = 0; j < 4; ++j) {
+							a[r][j] -= f * a[c][j];
+							a_out[r][j] -= f * a_out[c][j];
+						}
+					}
+				}
+			}
+			return true;
+		}
+
+		// Welt -> Clip einer gemerkten GPU-Matrix (gleiche Konvention wie Mul(CamSnap))
+		Mat4d WorldToClip(const CamSnap& a_c) noexcept
+		{
+			Mat4d m{};
+			for (int i = 0; i < 4; ++i) {
+				for (int j = 0; j < 4; ++j) {
+					m[i][j] = a_c.colVec ? a_c.m[i][j] : a_c.m[j][i];
+				}
+			}
+			if (a_c.relative) {
+				for (int i = 0; i < 4; ++i) {
+					m[i][3] -= m[i][0] * a_c.posAdjust.x + m[i][1] * a_c.posAdjust.y + m[i][2] * a_c.posAdjust.z;
+				}
+			}
+			return m;
+		}
+
+		struct Pyramid
+		{
+			std::uint32_t                   snapId = 0;
+			RE::NiPoint3                    camPos{};
+			RE::NiMatrix3                   camRot{};
+			float                           clip[4][4]{};  // Weltpunkt minus camPos -> Clip der Kamera dieses Frames
+			std::vector<std::vector<float>> lv;           // je Stufe: Sichttiefe der fernsten Stelle, kFree = frei; leer = nicht weglassen
+			std::vector<std::uint32_t>      w, h;
+		};
+		std::atomic<std::shared_ptr<const Pyramid>> g_pyr;
+		std::atomic<std::uint64_t>                  g_pyrGen{ 1 };
+
+		bool SameCamera(const RE::NiPoint3& a_p1, const RE::NiMatrix3& a_r1, const RE::NiPoint3& a_p2, const RE::NiMatrix3& a_r2) noexcept
+		{
+			return std::memcmp(&a_p1, &a_p2, sizeof(a_p1)) == 0 && std::memcmp(&a_r1, &a_r2, sizeof(a_r1)) == 0;
+		}
+
+		std::shared_ptr<const Pyramid> BuildPyramid(const Snapshot& a_s, const RE::NiPoint3& a_pos, const RE::NiMatrix3& a_rot, const RE::NiFrustum& a_fr)
+		{
+			auto        p = std::make_shared<Pyramid>();
+			const auto& c = a_s.cam;
+			p->snapId = a_s.id;
+			p->camPos = a_pos;
+			p->camRot = a_rot;
+			if (!c.gpu) {
+				return p;
+			}
+			// Grenzen der Umrechnung: stark gedreht, weit gelaufen oder anderes Sichtfeld (Zoom, Dialog) -> nichts weglassen
+			const RE::NiPoint3 dir{ a_rot.entry[0][0], a_rot.entry[1][0], a_rot.entry[2][0] };
+			const float        mx = a_pos.x - c.pos.x, my = a_pos.y - c.pos.y, mz = a_pos.z - c.pos.z;
+			const float        tol = 0.005f * (c.r - c.l);
+			if (Dot(dir, c.dir) < 0.5f || mx * mx + my * my + mz * mz > 2048.0f * 2048.0f || std::abs(a_fr.fLeft - c.l) > tol || std::abs(a_fr.fRight - c.r) > tol ||
+				std::abs(a_fr.fTop - c.t) > tol || std::abs(a_fr.fBottom - c.b) > tol) {
+				return p;
+			}
+			const Mat4d world = WorldToClip(c.gm);
+			Mat4d       inv;
+			if (!MatInvert(world, inv)) {
+				return p;
+			}
+			// Punkt relativ zur neuen Kamera -> gleicher Punkt relativ zur alten: q = altPos + R_alt * R_neu^T * (p - neuPos)
+			Mat4d a{};
+			for (int i = 0; i < 3; ++i) {
+				for (int j = 0; j < 3; ++j) {
+					for (int k = 0; k < 3; ++k) {
+						a[i][j] += static_cast<double>(c.rot.entry[i][k]) * a_rot.entry[j][k];
+					}
+				}
+			}
+			const double np[3]{ a_pos.x, a_pos.y, a_pos.z }, op[3]{ c.pos.x, c.pos.y, c.pos.z };
+			for (int i = 0; i < 3; ++i) {
+				a[i][3] = op[i] - (a[i][0] * np[0] + a[i][1] * np[1] + a[i][2] * np[2]);
+			}
+			a[3][3] = 1.0;
+			const Mat4d cur = MatMul(world, a);  // Welt -> Clip der aktuellen Kamera
+			Mat4d       eye{};
+			for (int i = 0; i < 4; ++i) {
+				eye[i][i] = 1.0;
+			}
+			eye[0][3] = a_pos.x;
+			eye[1][3] = a_pos.y;
+			eye[2][3] = a_pos.z;
+			const Mat4d rel = MatMul(cur, eye);
+			for (int i = 0; i < 4; ++i) {
+				for (int j = 0; j < 4; ++j) {
+					p->clip[i][j] = static_cast<float>(rel[i][j]);
+				}
+			}
+			const auto&        farBuf = c.reversed ? a_s.rb.minDepth : a_s.rb.maxDepth;  // fernster Wert je Kachel
+			std::vector<float> l0(static_cast<std::size_t>(kGW) * kGH);
+			if (SameCamera(a_pos, a_rot, c.pos, c.rot)) {
+				for (std::size_t i = 0; i < l0.size(); ++i) {
+					const float z = BufToZ(c, farBuf[i]);
+					l0[i] = z > 0.0f ? z : kFree;
+				}
+			} else {
+				// Kachelmitte mit fernster Tiefe vom alten in den neuen Clip-Raum; Treffer behalten den fernsten Wert
+				const Mat4d k = MatMul(cur, inv);
+				float       kf[4][4];
+				for (int i = 0; i < 4; ++i) {
+					for (int j = 0; j < 4; ++j) {
+						kf[i][j] = static_cast<float>(k[i][j]);
+					}
+				}
+				std::fill(l0.begin(), l0.end(), -1.0f);
+				for (std::uint32_t v = 0; v < kGH; ++v) {
+					const float y = 1.0f - (static_cast<float>(v) + 0.5f) / kGH * 2.0f;
+					for (std::uint32_t u = 0; u < kGW; ++u) {
+						const float buf = farBuf[static_cast<std::size_t>(v) * kGW + u];
+						const float z = BufToZ(c, buf);
+						if (!(z > 0.0f)) {
+							continue;
+						}
+						const float x = (static_cast<float>(u) + 0.5f) / kGW * 2.0f - 1.0f;
+						const float d = (buf - c.depthMin) / (c.depthMax - c.depthMin);
+						const float in[4]{ x * z, y * z, d * z, z };
+						const float cw = kf[3][0] * in[0] + kf[3][1] * in[1] + kf[3][2] * in[2] + kf[3][3] * in[3];
+						if (!(cw > 16.0f)) {
+							continue;
+						}
+						const float cx = (kf[0][0] * in[0] + kf[0][1] * in[1] + kf[0][2] * in[2] + kf[0][3] * in[3]) / cw;
+						const float cy = (kf[1][0] * in[0] + kf[1][1] * in[1] + kf[1][2] * in[2] + kf[1][3] * in[3]) / cw;
+						const float fu = (cx * 0.5f + 0.5f) * kGW, fv = (0.5f - cy * 0.5f) * kGH;
+						if (!(fu >= 0.0f && fu < static_cast<float>(kGW) && fv >= 0.0f && fv < static_cast<float>(kGH))) {
+							continue;
+						}
+						auto& t = l0[static_cast<std::size_t>(fv) * kGW + static_cast<std::size_t>(fu)];
+						t = std::max(t, cw);
+					}
+				}
+				// nicht getroffen = unbekannt (frei); danach je Texel der fernste Wert der 3x3-Nachbarschaft (Luecken beim
+				// Naeherkommen, Versatz innerhalb einer Kachel)
+				for (auto& t : l0) {
+					if (t < 0.0f) {
+						t = kFree;
+					}
+				}
+				std::vector<float> tmp(l0.size());
+				for (std::uint32_t v = 0; v < kGH; ++v) {
+					const auto row = static_cast<std::size_t>(v) * kGW;
+					for (std::uint32_t u = 0; u < kGW; ++u) {
+						float m = l0[row + u];
+						if (u > 0) {
+							m = std::max(m, l0[row + u - 1]);
+						}
+						if (u + 1 < kGW) {
+							m = std::max(m, l0[row + u + 1]);
+						}
+						tmp[row + u] = m;
+					}
+				}
+				for (std::uint32_t v = 0; v < kGH; ++v) {
+					for (std::uint32_t u = 0; u < kGW; ++u) {
+						float m = tmp[static_cast<std::size_t>(v) * kGW + u];
+						if (v > 0) {
+							m = std::max(m, tmp[static_cast<std::size_t>(v - 1) * kGW + u]);
+						}
+						if (v + 1 < kGH) {
+							m = std::max(m, tmp[static_cast<std::size_t>(v + 1) * kGW + u]);
+						}
+						l0[static_cast<std::size_t>(v) * kGW + u] = m;
+					}
+				}
+			}
+			// Max-Mipmaps: jede Stufe haelt die fernste Tiefe ihrer (bis zu) 2x2 Texel der Stufe darunter
+			std::uint32_t w = kGW, h = kGH;
+			p->lv.push_back(std::move(l0));
+			p->w.push_back(w);
+			p->h.push_back(h);
+			while (w > 1 || h > 1) {
+				const std::uint32_t nw = (w + 1) / 2, nh = (h + 1) / 2;
+				const auto&         prev = p->lv.back();
+				std::vector<float>  next(static_cast<std::size_t>(nw) * nh);
+				for (std::uint32_t y = 0; y < nh; ++y) {
+					for (std::uint32_t x = 0; x < nw; ++x) {
+						const std::uint32_t x0 = 2 * x, y0 = 2 * y, x1 = std::min(x0 + 1, w - 1), y1 = std::min(y0 + 1, h - 1);
+						next[static_cast<std::size_t>(y) * nw + x] = std::max(std::max(prev[static_cast<std::size_t>(y0) * w + x0], prev[static_cast<std::size_t>(y0) * w + x1]),
+							std::max(prev[static_cast<std::size_t>(y1) * w + x0], prev[static_cast<std::size_t>(y1) * w + x1]));
+					}
+				}
+				w = nw;
+				h = nh;
+				p->lv.push_back(std::move(next));
+				p->w.push_back(w);
+				p->h.push_back(h);
+			}
+			return p;
+		}
+
+		// 1 = sichtbar, 2 = verdeckt (wie Test)
+		int TestPyramid(const Pyramid& a_p, const RE::NiBound& a_b) noexcept
+		{
+			if (a_p.lv.empty()) {
+				return 1;
+			}
+			const auto proj = [&](float a_x, float a_y, float a_z, float& a_nx, float& a_ny, float& a_w) {
+				const auto& m = a_p.clip;
+				a_w = m[3][0] * a_x + m[3][1] * a_y + m[3][2] * a_z + m[3][3];
+				const float iw = a_w != 0.0f ? 1.0f / a_w : 0.0f;
+				a_nx = (m[0][0] * a_x + m[0][1] * a_y + m[0][2] * a_z + m[0][3]) * iw;
+				a_ny = (m[1][0] * a_x + m[1][1] * a_y + m[1][2] * a_z + m[1][3]) * iw;
+			};
+			const float dx = a_b.center.x - a_p.camPos.x, dy = a_b.center.y - a_p.camPos.y, dz = a_b.center.z - a_p.camPos.z;
+			const float rad = std::max(a_b.radius, 0.0f);
+			float       nx, ny, z;
+			proj(dx, dy, dz, nx, ny, z);
+			const float wn = z - rad;
+			if (!(wn > 16.0f)) {
+				return 1;
+			}
+			float minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f;
+			for (int i = 0; i < 8; ++i) {
+				float px, py, pw;
+				proj(dx + ((i & 1) ? rad : -rad), dy + ((i & 2) ? rad : -rad), dz + ((i & 4) ? rad : -rad), px, py, pw);
+				if (!(pw > 1.0f)) {
+					return 1;
+				}
+				minX = std::min(minX, px);
+				maxX = std::max(maxX, px);
+				minY = std::min(minY, py);
+				maxY = std::max(maxY, py);
+			}
+			constexpr int W = static_cast<int>(kGW), H = static_cast<int>(kGH);
+			int           u0 = static_cast<int>(std::floor((minX * 0.5f + 0.5f) * W)) - 1;
+			int           u1 = static_cast<int>(std::floor((maxX * 0.5f + 0.5f) * W)) + 1;
+			int           v0 = static_cast<int>(std::floor((0.5f - maxY * 0.5f) * H)) - 1;
+			int           v1 = static_cast<int>(std::floor((0.5f - minY * 0.5f) * H)) + 1;
+			if (u1 < 0 || v1 < 0 || u0 > W - 1 || v0 > H - 1) {
+				return 1;  // ausserhalb des Bilds - zeichnet das Spiel ohnehin nicht
+			}
+			// Die Pyramide gilt fuer die Kamera dieses Frames: Teile ausserhalb des Bilds sind nicht zu sehen
+			u0 = std::max(u0, 0);
+			v0 = std::max(v0, 0);
+			u1 = std::min(u1, W - 1);
+			v1 = std::min(v1, H - 1);
+			std::size_t lvl = 0;
+			while (lvl + 1 < a_p.lv.size() && (((u1 >> lvl) - (u0 >> lvl)) > 3 || ((v1 >> lvl) - (v0 >> lvl)) > 3)) {
+				++lvl;
+			}
+			const float marginK = 1.0f + Config::occlMarginPct.load(std::memory_order_relaxed) * 0.01f;
+			const float marginU = Config::occlMarginUnits.load(std::memory_order_relaxed);
+			const auto& t = a_p.lv[lvl];
+			const auto  tw = a_p.w[lvl];
+			for (int v = v0 >> lvl; v <= (v1 >> lvl); ++v) {
+				for (int u = u0 >> lvl; u <= (u1 >> lvl); ++u) {
+					// fernste Verdeckung des Bereichs; die naechste Stelle der Kugel muss klar dahinter liegen (frei = sichtbar)
+					if (!(wn > t[static_cast<std::size_t>(v) * tw + u] * marginK + marginU)) {
+						return 1;
+					}
+				}
+			}
+			return 2;
+		}
+
+		// Aufbau auf einem Hilfsthread: angestossen, sobald die Kamera des Frames feststeht (Sonnenschatten-Kamera) oder
+		// spaetestens vom ersten Objekt des Frames. Bis die Pyramide zur Kamera passt, wird nichts weggelassen.
+		struct BuildRequest
+		{
+			std::shared_ptr<const Snapshot> snap;
+			RE::NiPoint3                    pos{};
+			RE::NiMatrix3                   rot{};
+			RE::NiFrustum                   fr{};
+		};
+		std::mutex                  g_buildLock;
+		std::condition_variable     g_buildCv;
+		std::optional<BuildRequest> g_buildReq;
+		bool                        g_builderStarted = false;
+		std::atomic<std::uint64_t>  g_buildKey{ 0 };  // zuletzt angefordert (Kamera + Tiefenbild)
+		std::atomic<std::uint64_t>  g_buildNs{ 0 }, g_builds{ 0 }, g_notReady{ 0 };
+
+		std::uint64_t CameraKey(const RE::NiPoint3& a_pos, const RE::NiMatrix3& a_rot, std::uint32_t a_snapId) noexcept
+		{
+			std::uint64_t h = 0xCBF29CE484222325ull ^ a_snapId;
+			const auto    mix = [&](const void* a_p, std::size_t a_n) {
+                const auto* b = static_cast<const std::uint8_t*>(a_p);
+                for (std::size_t i = 0; i < a_n; ++i) {
+                    h = (h ^ b[i]) * 0x100000001B3ull;
+                }
+			};
+			mix(&a_pos, sizeof(a_pos));
+			mix(&a_rot, sizeof(a_rot));
+			return h;
+		}
+
+		void Builder()
+		{
+			for (;;) {
+				BuildRequest r;
+				{
+					std::unique_lock l(g_buildLock);
+					g_buildCv.wait(l, [] { return g_buildReq.has_value(); });
+					r = std::move(*g_buildReq);
+					g_buildReq.reset();
+				}
+				const auto cur = g_pyr.load();
+				if (cur && cur->snapId == r.snap->id && SameCamera(cur->camPos, cur->camRot, r.pos, r.rot)) {
+					continue;
+				}
+				const auto t0 = Clock::now();
+				try {
+					auto p = BuildPyramid(*r.snap, r.pos, r.rot, r.fr);
+					g_pyr.store(std::move(p));
+					g_pyrGen.fetch_add(1, std::memory_order_release);
+				} catch (...) {
+					continue;  // kein Speicher: ohne Pyramide wird nichts weggelassen
+				}
+				g_buildNs.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count()), std::memory_order_relaxed);
+				g_builds.fetch_add(1, std::memory_order_relaxed);
+			}
+		}
+
+		// Fuer die Weltkamera (wie sie jetzt steht) und das neueste Tiefenbild anfordern - doppelte Anforderungen fallen weg
+		// a_snapId: Tiefenbild, das der Aufrufer kennt (0 = selbst holen). Erst nach der Doppel-Pruefung wird der shared_ptr
+		// geladen - er kostet eine Sperre und wird sonst je Objekt geholt (bis 1.0.57 genau dieses Problem).
+		void RequestPyramid(std::uint32_t a_snapId = 0) noexcept
+		{
+			const auto cam = RE::Main::WorldRootCamera();
+			if (!cam) {
+				return;
+			}
+			const auto&                     w = cam->world;
+			std::shared_ptr<const Snapshot> snap;
+			if (!a_snapId) {
+				snap = g_current.load();
+				if (!snap) {
+					return;
+				}
+				a_snapId = snap->id;
+			}
+			const auto key = CameraKey(w.translate, w.rotate, a_snapId);
+			if (g_buildKey.exchange(key, std::memory_order_relaxed) == key) {
+				return;
+			}
+			if (!snap) {
+				snap = g_current.load();
+				if (!snap) {
+					return;
+				}
+			}
+			try {
+				std::scoped_lock l(g_buildLock);
+				if (!g_builderStarted) {
+					std::thread(Builder).detach();
+					g_builderStarted = true;
+				}
+				g_buildReq = BuildRequest{ std::move(snap), w.translate, w.rotate, cam->GetRuntimeData2().viewFrustum };
+			} catch (...) {
+				return;
+			}
+			g_buildCv.notify_one();
+		}
+
+		// Pyramide fuer diesen Thread; nullptr, wenn sie nicht zur Kamera dieses Frames passt (dann neu anfordern)
+		const Pyramid* PyramidForThread(const RE::NiPoint3& a_pos, const RE::NiMatrix3& a_rot) noexcept
+		{
+			thread_local std::shared_ptr<const Pyramid> pyr;
+			thread_local std::uint64_t                  gen = 0;
+			const auto                                  now = g_pyrGen.load(std::memory_order_acquire);
+			if (now != gen) {
+				pyr = g_pyr.load();
+				gen = now;
+			}
+			if (!pyr || !SameCamera(pyr->camPos, pyr->camRot, a_pos, a_rot)) {
+				return nullptr;
+			}
+			return pyr.get();
+		}
+
+		// ---------------- Ertragsbremse und seltenere Pruefung sichtbarer Objekte (ebenfalls nach Faster Objects) ----------
+		// Laesst das Pruefen kaum etwas weg (unter 5 % der Pruefungen ueber 120 Frames), wird nur noch in 4 von 32 Frames
+		// geprueft; ein Frame, der genug weglaesst, schaltet zurueck auf jeden Frame. Kostet sonst ohne Nutzen (Weisslauf-Markt).
+		struct YieldGate
+		{
+			static constexpr float         kMinYield = 0.05f;
+			static constexpr std::uint32_t kInterval = 32, kBurst = 4, kLowFrames = 120, kMinTests = 64;
+			std::uint32_t                  low = 0, frame = 0;
+			bool                           Step(std::uint32_t a_tested, std::uint32_t a_culled) noexcept
+			{
+				++frame;
+				if (a_tested >= kMinTests) {
+					if (static_cast<float>(a_culled) >= kMinYield * static_cast<float>(a_tested)) {
+						low = 0;
+					} else if (low < kLowFrames) {
+						++low;
+					}
+				}
+				return low < kLowFrames || frame % kInterval < kBurst;
+			}
+		};
+		YieldGate                  g_gate;               // Main-Thread
+		std::atomic<bool>          g_testFrame{ true };  // in diesem Frame pruefen
+		std::atomic<std::uint32_t> g_frameNo{ 1 };       // Frame-Zaehler fuer die Sammel-Threads
+		std::atomic<std::uint32_t> g_yieldTested{ 0 }, g_yieldCulled{ 0 };
+		std::uint64_t              g_gatedFrames = 0;  // Main-Thread, fuer den Bericht
+		std::atomic<std::uint64_t> g_visSkipped{ 0 };
+
+		// Zaehler je Thread sammeln, nur gelegentlich auf die gemeinsamen Zaehler (sonst eine Cache-Zeile fuer ~2000 Objekte)
+		void CountYield(bool a_culled) noexcept
+		{
+			thread_local std::uint32_t frame = 0, tested = 0, culled = 0;
+			const auto                 now = g_frameNo.load(std::memory_order_relaxed);
+			if (now != frame || tested >= 32) {
+				if (tested) {
+					g_yieldTested.fetch_add(tested, std::memory_order_relaxed);
+					g_yieldCulled.fetch_add(culled, std::memory_order_relaxed);
+				}
+				frame = now;
+				tested = culled = 0;
+			}
+			++tested;
+			culled += a_culled;
+		}
+
+		// Sichtbar gefundene Objekte erst nach 1 bis 8 Frames wieder pruefen (feste Phase je Objekt, verteilt die Pruefungen).
+		// Zeichnen ist immer richtig: eine ausgelassene Pruefung kostet nur Weglassen, nie ein fehlendes Objekt. Ein Wort je
+		// Platz (Schluessel | Frame, bis zu dem uebersprungen wird), ohne Sperre; Kollisionen pruefen nur oefter.
+		constexpr std::size_t                             kVisSlots = 1u << 14;
+		std::array<std::atomic<std::uint64_t>, kVisSlots> g_vis{};
+
+		std::uint64_t VisHash(const void* a_p) noexcept
+		{
+			auto h = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(a_p));
+			h ^= h >> 33;
+			h *= 0xFF51AFD7ED558CCDull;
+			h ^= h >> 33;
+			return h;
+		}
+
+		bool VisibleSkip(const void* a_geom, std::uint32_t a_frame) noexcept
+		{
+			const auto h = VisHash(a_geom);
+			const auto e = g_vis[h & (kVisSlots - 1)].load(std::memory_order_relaxed);
+			return (e >> 32) == (h >> 32) && static_cast<std::int32_t>(static_cast<std::uint32_t>(e) - a_frame) > 0;
+		}
+
+		void VisibleMark(const void* a_geom, std::uint32_t a_frame) noexcept
+		{
+			const auto h = VisHash(a_geom);
+			const auto until = a_frame + 1 + static_cast<std::uint32_t>((h >> 32) % 8);
+			g_vis[h & (kVisSlots - 1)].store(((h >> 32) << 32) | until, std::memory_order_relaxed);
+		}
+
+		// ---------------- Bottled Shaders (Community-Shaders-Fork, gleiche CommunityShaders.dll) ----------------
+		// Eigene "HiZ Occlusion Culling": installiert, wenn Shaders\Features\HiZOcclusion.ini existiert (gibt es nur bei
+		// Bottled), aktiv, solange nicht unter "Disable at Boot" und enableHiZCulling nicht false (SettingsUser ueber
+		// SettingsDefault). Ihr Weglassen greift nur auf AE vor 1.7.99. Erkennung wie bei Faster Objects.
+		std::atomic<bool> g_bottledHiZ{ false };
+
+		std::optional<bool> JsonBool(const std::string& a_text, const char* a_key)
+		{
+			const std::regex re(std::string("\"") + a_key + "\"\\s*:\\s*(true|false)");
+			std::smatch      m;
+			if (std::regex_search(a_text, m, re)) {
+				return m[1] == "true";
+			}
+			return std::nullopt;
+		}
+
+		bool BottledBlocks() noexcept
+		{
+			return g_bottledHiZ.load(std::memory_order_relaxed) && !Config::occlAllowWithBottled.load(std::memory_order_relaxed);
+		}
+
 		AccStats& Slot(const void* a_acc) noexcept
 		{
 			for (auto& s : g_acc) {
@@ -503,7 +1028,8 @@ namespace Occlusion
 #ifdef SPS_VR
 			return false;  // zwei Augen, eigene Tiefen-/Matrix-Wege - nicht erprobt
 #endif
-			return Config::occlusionProbe.load(std::memory_order_relaxed) || (Config::occlusionCull.load(std::memory_order_relaxed) && Config::masterEnabled.load(std::memory_order_relaxed));
+			return Config::occlusionProbe.load(std::memory_order_relaxed) ||
+			       (Config::occlusionCull.load(std::memory_order_relaxed) && Config::masterEnabled.load(std::memory_order_relaxed) && !BottledBlocks());
 		}
 
 		// Ausgewerteter Bereich des Tiefenpuffers: Viewport des Vorpasses; ist der so gross wie der ganze Puffer, die
@@ -567,6 +1093,13 @@ namespace Occlusion
 			g_prepassCalls = g_camFail = g_captures = g_ringFull = g_noSrv = g_reads = g_latencySum = 0;
 			if (log) logger::info("[Occlusion]   hiding occluded objects: {} | frames without hiding because the camera moved: {} | settings: pause from {:.1f} deg / {:.0f} units, margin {:.1f} % + {:.0f}, hidden in {} images in a row, max {} tiles, characters {}", Config::occlusionCull.load() && Config::masterEnabled.load() ? "ON" : "off", g_cullBlockedFrames, Config::occlTurnDeg.load(), Config::occlMoveUnits.load(), Config::occlMarginPct.load(), Config::occlMarginUnits.load(), Config::occlStreak.load(), Config::occlMaxTiles.load(), Config::occlSkipSkinned.load() ? "never" : "allowed");
 			g_cullBlockedFrames = 0;
+			{
+				const auto builds = g_builds.exchange(0), ns = g_buildNs.exchange(0);
+				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | Bottled Shaders HiZ {}",
+					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_gatedFrames, g_visSkipped.exchange(0) / frames,
+					g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
+				g_gatedFrames = 0;
+			}
 			if (log) logger::info("[Occlusion]   hiding mode: {} | marked {:.0f}/frame, draws left out at draw time {:.0f}/frame, table full {}",
 				Config::occlDrawFilter.load() ? "draw filter" : "collection (old)", g_hiddenMarked.exchange(0) / frames, g_filterSkipped.exchange(0) / frames,
 				g_hiddenFull.exchange(0));
@@ -659,6 +1192,7 @@ namespace Occlusion
 		auto& own = g_snaps[g_nextTag % kSnaps];
 		own = {};
 		own.pos = camPos;
+		own.rot = rot;
 		own.dir = { rot.entry[0][0], rot.entry[1][0], rot.entry[2][0] };
 		own.up = { rot.entry[0][1] * g_upSign, rot.entry[1][1] * g_upSign, rot.entry[2][1] * g_upSign };
 		own.right = { rot.entry[0][2] * g_rightSign, rot.entry[1][2] * g_rightSign, rot.entry[2][2] * g_rightSign };
@@ -833,6 +1367,12 @@ namespace Occlusion
 	{
 		++g_frame;
 		g_hiddenStamp.fetch_add(1, std::memory_order_relaxed);  // Merkliste des Draw-Filters gilt nur fuer ein Bild
+		g_frameNo.fetch_add(1, std::memory_order_relaxed);
+		{
+			const bool test = g_gate.Step(g_yieldTested.exchange(0, std::memory_order_relaxed), g_yieldCulled.exchange(0, std::memory_order_relaxed));
+			g_gatedFrames += !test;
+			g_testFrame.store(test, std::memory_order_relaxed);
+		}
 		// Tracy-/Log-Marke bei jeder Aenderung von Schalter/Stellschrauben (Abschnitte einer Aufnahme zuordnen), nur mit Analyse-Protokoll
 		if (Config::analysis.load(std::memory_order_relaxed)) {
 			static std::string       last, pending;
@@ -950,8 +1490,9 @@ namespace Occlusion
 #ifdef SPS_VR
 		return false;
 #endif
-		const bool cullOn = Config::occlusionCull.load(std::memory_order_relaxed) && Config::masterEnabled.load(std::memory_order_relaxed);
-		if (!Config::occlusionProbe.load(std::memory_order_relaxed) && !cullOn) {
+		const bool cullOn = Config::occlusionCull.load(std::memory_order_relaxed) && Config::masterEnabled.load(std::memory_order_relaxed) && !BottledBlocks();
+		const bool probe = Config::occlusionProbe.load(std::memory_order_relaxed);
+		if (!probe && !cullOn) {
 			return false;
 		}
 		const bool diag = Diag();
@@ -979,11 +1520,49 @@ namespace Occlusion
 		if (!diag && (!cullOn || !isMain || (skinned && Config::occlSkipSkinned.load(std::memory_order_relaxed))) && snap->id != g_listSnapId.load(std::memory_order_relaxed)) {
 			return false;
 		}
+		// Ertragsbremse und seltenere Pruefung Sichtbarer nur beim Weglassen im Hauptbild (Messen prueft alles)
+		const bool fast = cullOn && isMain && !probe;
+		const auto frameNo = g_frameNo.load(std::memory_order_relaxed);
+		if (fast) {
+			if (!g_testFrame.load(std::memory_order_relaxed)) {
+				return false;
+			}
+			if (VisibleSkip(&a_geom, frameNo)) {
+				if (diag) {
+					g_visSkipped.fetch_add(1, std::memory_order_relaxed);
+				}
+				return false;
+			}
+		}
 		const auto t0 = diag ? Clock::now() : Clock::time_point{};
-		// Kamera dieses Frames (aendert sich waehrend des Sammelns nicht) - fuer den Parallaxe-Ausgleich im Test
+		// Kamera dieses Frames (aendert sich waehrend des Sammelns nicht)
 		const auto         worldCam = RE::Main::WorldRootCamera();
 		const RE::NiPoint3 camNow = worldCam ? worldCam->world.translate : snap->cam.pos;
-		const int          r = Test(*snap, a_geom.worldBound, nullptr, &camNow);
+		const bool         reproject = Config::occlReproject.load(std::memory_order_relaxed);
+		const Pyramid*     pyr = nullptr;
+		std::uint32_t      streakId = snap->id;
+		int                r;
+		if (reproject) {
+			// Tiefenbild in der Kamera dieses Frames; passt die Pyramide noch nicht, diesmal nichts weglassen
+			pyr = worldCam ? PyramidForThread(worldCam->world.translate, worldCam->world.rotate) : nullptr;
+			if (!pyr) {
+				RequestPyramid(snap->id);
+				if (diag) {
+					g_notReady.fetch_add(1, std::memory_order_relaxed);
+				}
+				return false;
+			}
+			// Neueres Tiefenbild da (z. B. in Innenraeumen ohne Sonnen-Kamera, oder im Stand): neu aufbauen lassen, bis dahin
+			// mit dieser Pyramide pruefen. Sonst bliebe die Nummer im Stand gleich und kein Objekt waere je "zweimal verdeckt".
+			if (pyr->snapId != snap->id) {
+				RequestPyramid(snap->id);
+			}
+			r = TestPyramid(*pyr, a_geom.worldBound);
+			streakId = pyr->snapId;
+		} else {
+			// alter Weg: Kachel-Scan im Bild der alten Kamera mit Parallaxe-Ausgleich
+			r = Test(*snap, a_geom.worldBound, nullptr, &camNow);
+		}
 		if (diag) {
 			g_testNs.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count()), std::memory_order_relaxed);
 		}
@@ -997,8 +1576,12 @@ namespace Occlusion
 			s.tested.fetch_add(1, std::memory_order_relaxed);
 		}
 		// Verlauf nur fuer feste Objekte im Hauptbild (Figuren: Huelle hinkt der Animation hinterher)
-		const bool twice = isMain && !(skinned && Config::occlSkipSkinned.load(std::memory_order_relaxed)) && UpdateStreak(&a_geom, snap->id, r == 2, a_geom.worldBound.center);
+		const bool twice = isMain && !(skinned && Config::occlSkipSkinned.load(std::memory_order_relaxed)) && UpdateStreak(&a_geom, streakId, r == 2, a_geom.worldBound.center);
 		if (r != 2) {
+			if (fast) {
+				VisibleMark(&a_geom, frameNo);
+				CountYield(false);
+			}
 			return false;
 		}
 		if (diag) {
@@ -1013,7 +1596,12 @@ namespace Occlusion
 		// Kamera zusaetzlich im SELBEN Frame gegen das benutzte Tiefenbild pruefen: g_cullAllowed entsteht erst am Ende des
 		// Tiefenvorpasses, also nach dem Sammeln - bei einem Schnitt (Ich-/Schulterperspektive, Teleport, Moebel) blitzten
 		// sonst fuer ein Bild Objekte weg, die vom alten Standpunkt verdeckt waren (Review 1.0.61)
-		const bool willCull = cullOn && twice && snap->cam.gpu && g_cullAllowed.load(std::memory_order_relaxed) && CameraStillNear(snap->cam);
+		// Mit Umrechnung gilt das Bild fuer die Kamera dieses Frames - keine Pause beim Drehen oder Laufen noetig
+		const bool willCull = cullOn && twice && snap->cam.gpu &&
+		                      (reproject ? !pyr->lv.empty() : g_cullAllowed.load(std::memory_order_relaxed) && CameraStillNear(snap->cam));
+		if (fast) {
+			CountYield(willCull);
+		}
 		if (snap->id == g_listSnapId.load(std::memory_order_relaxed)) {
 			TestInfo    info;
 			Test(*snap, a_geom.worldBound, &info, &camNow);
@@ -1053,5 +1641,61 @@ namespace Occlusion
 		g_cullAllowed.store(false);
 		OcclusionGpu::Reset();
 		ClearStreaks();
+		g_pyr.store(nullptr);
+		g_pyrGen.fetch_add(1, std::memory_order_release);
+		g_buildKey.store(0, std::memory_order_relaxed);
+		for (auto& v : g_vis) {
+			v.store(0, std::memory_order_relaxed);
+		}
+		DetectOtherCullers();
 	}
+
+	void OnViewCamera() noexcept
+	{
+		if (Active() && Config::occlReproject.load(std::memory_order_relaxed) && Config::occlusionCull.load(std::memory_order_relaxed)) {
+			RequestPyramid();
+		}
+	}
+
+	void DetectOtherCullers() noexcept
+	{
+		bool on = false;
+		try {
+			if (REX::W32::GetModuleHandleW(L"CommunityShaders.dll") && std::filesystem::exists("Data/Shaders/Features/HiZOcclusion.ini")) {
+				bool disabled = false, culling = true;
+				for (const char* path : { "Data/SKSE/Plugins/CommunityShaders/SettingsDefault.json", "Data/SKSE/Plugins/CommunityShaders/SettingsUser.json" }) {
+					std::ifstream f(path);
+					if (!f) {
+						continue;
+					}
+					std::stringstream ss;
+					ss << f.rdbuf();
+					const auto text = ss.str();
+					if (const auto v = JsonBool(text, "HiZOcclusion")) {
+						disabled = *v;  // "Disable at Boot"
+					}
+					if (const auto v = JsonBool(text, "enableHiZCulling")) {
+						culling = *v;
+					}
+				}
+				on = !disabled && culling && REL::Module::IsAE() && REL::Module::get().version() < REL::Version(1, 7, 99, 0);
+			}
+		} catch (...) {
+			on = false;
+		}
+		static bool logged = false;
+		if (on != g_bottledHiZ.exchange(on) || !logged) {
+			logged = true;
+			if (on) {
+				logger::warn("[Occlusion] Bottled Shaders HiZ Occlusion Culling is active - SPS {}", Config::occlAllowWithBottled.load() ?
+					"hides occluded objects anyway (bAllowWithBottledHiZ), both test every object" : "Hide occluded objects stays off (allow in the menu or with bAllowWithBottledHiZ)");
+			}
+			// Faster Objects (SkyrimPrecombines.dll) pausiert sein Hi-Z selbst, wenn unser Weglassen an ist - nur vermerken
+			if (REX::W32::GetModuleHandleW(L"SkyrimPrecombines.dll")) {
+				logger::info("[Occlusion] Faster Objects (SkyrimPrecombines.dll) is loaded - its Hi-Z culling pauses while SPS Hide occluded objects is on, its precombines stay");
+			}
+		}
+	}
+
+	bool BottledHiZActive() noexcept { return g_bottledHiZ.load(std::memory_order_relaxed); }
 }

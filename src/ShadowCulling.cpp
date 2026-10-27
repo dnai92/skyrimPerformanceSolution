@@ -1881,6 +1881,7 @@ namespace ShadowCulling
 		}
 		StabilizeFarCascade(a_light);
 		FarDecide(a_light);
+		Occlusion::OnViewCamera();
 	}
 
 	void BeforeSunAccumulate(RE::BSShadowDirectionalLight* a_light) noexcept

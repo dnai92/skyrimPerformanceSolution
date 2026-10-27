@@ -29,6 +29,13 @@ namespace Occlusion
 	// Ladebildschirm / Hauptmenue
 	void Reset() noexcept;
 
+	// Kamera des Frames steht fest (nach UpdateCamera der Sonne, Main-Thread): Pyramide im Hilfsthread anstossen
+	void OnViewCamera() noexcept;
+
+	// Bottled Shaders mit eigener HiZ-Verdeckung erkennen (Daten geladen, Ladebildschirm)
+	void DetectOtherCullers() noexcept;
+	bool BottledHiZActive() noexcept;
+
 	// Debug: beim naechsten Frame das aktuelle Tiefenbild als Bild in den SKSE-Log-Ordner schreiben
 	void RequestDepthDump() noexcept;
 }

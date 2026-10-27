@@ -107,6 +107,8 @@ namespace Config
 			f("Occlusion", "iHiddenInARow", static_cast<float>(occlStreak.load()));
 			f("Occlusion", "iMaxTiles", static_cast<float>(occlMaxTiles.load()));
 			b("Occlusion", "bNeverCharacters", occlSkipSkinned.load());
+			b("Occlusion", "bReproject", occlReproject.load());
+			b("Occlusion", "bAllowWithBottledHiZ", occlAllowWithBottled.load());
 			b("TextureStream", "bStreamCharacters", textureStream.streamCharacters);
 			{
 				const long mask = static_cast<long>(::TextureStream::GetDebugInclude());
@@ -270,7 +272,9 @@ namespace Config
 		occlStreak.store(static_cast<std::uint32_t>(std::clamp(ini.GetDoubleValue("Occlusion", "iHiddenInARow", occlStreak.load()), 1.0, 4.0) + 0.5), std::memory_order_relaxed);
 		occlMaxTiles.store(static_cast<std::uint32_t>(std::clamp(ini.GetDoubleValue("Occlusion", "iMaxTiles", occlMaxTiles.load()), 256.0, 36864.0) + 0.5), std::memory_order_relaxed);
 		occlSkipSkinned.store(ini.GetBoolValue("Occlusion", "bNeverCharacters", occlSkipSkinned.load()), std::memory_order_relaxed);
-		logger::info("Occlusion (beta): hiding {} | pause from {:.1f} deg / {:.0f} units | margin {:.1f} % + {:.0f} | hidden in {} images in a row | max {} tiles | characters {}", occlusionCull.load() ? "ON" : "OFF", occlTurnDeg.load(), occlMoveUnits.load(), occlMarginPct.load(), occlMarginUnits.load(), occlStreak.load(), occlMaxTiles.load(), occlSkipSkinned.load() ? "never" : "allowed");
+		occlReproject.store(ini.GetBoolValue("Occlusion", "bReproject", occlReproject.load()), std::memory_order_relaxed);
+		occlAllowWithBottled.store(ini.GetBoolValue("Occlusion", "bAllowWithBottledHiZ", occlAllowWithBottled.load()), std::memory_order_relaxed);
+		logger::info("Occlusion (beta): hiding {} | reproject {} | pause from {:.1f} deg / {:.0f} units | margin {:.1f} % + {:.0f} | hidden in {} images in a row | max {} tiles | characters {}", occlusionCull.load() ? "ON" : "OFF", occlReproject.load() ? "on" : "off", occlTurnDeg.load(), occlMoveUnits.load(), occlMarginPct.load(), occlMarginUnits.load(), occlStreak.load(), occlMaxTiles.load(), occlSkipSkinned.load() ? "never" : "allowed");
 		toggleKey.store(static_cast<std::uint32_t>(ini.GetLongValue("General", "iToggleKey", toggleKey.load())), std::memory_order_relaxed);
 
 		const auto readRule = [&](const char* a_section, CullRule& a_rule) {
