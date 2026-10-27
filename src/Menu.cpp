@@ -377,9 +377,6 @@ namespace Menu
 			}
 			Tip(T("Switches the far shadow cache off and on every 15 s and writes frame time and FPS of both to SPS.log ([Beta-AB]). Stand still outdoors in daylight. Your setting is restored afterwards.",
 				"Schaltet den fernen Schatten-Cache alle 15 s aus und an und schreibt Frame-Zeit und FPS beider Varianten in SPS.log ([Beta-AB]). Draußen bei Tageslicht stehen bleiben. Deine Einstellung wird danach wiederhergestellt."));
-			Slider(T("Far shadow cache test mode##far", "Testmodus fernen Schatten-Cache##far"), Config::farShadowCache.debugMode, 0.0f, 2.0f, "%.0f",
-				T("0 = normal. 1 = calm far cascade, the cache is never used. 2 = far cascade untouched (like the feature off). Not saved.",
-					"0 = normal. 1 = ruhige ferne Kaskade, der Cache wird nie benutzt. 2 = ferne Kaskade unverändert (wie Funktion aus). Wird nicht gespeichert."));
 
 			MenuApi::SeparatorText(T("Skylighting culling (measurement)", "Himmelslicht-Culling (Messung)"));
 			if (!EngineTimers::PrecipTimerInstalled()) {
