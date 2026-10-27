@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
 	SPS
-	VERSION 1.0.68
+	VERSION 1.0.69
 	LANGUAGES CXX
 )
 
@@ -87,3 +87,8 @@ target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive- /utf-8)
 
 # DLL verweist nur auf den PDB-Dateinamen (liegt neben der DLL) -> laufendes Skyrim sperrt nicht die Build-PDB
 target_link_options(${PROJECT_NAME} PRIVATE "/PDBALTPATH:%_PDB%")
+# Ungenutzten Code entfernen: RelWithDebInfo linkt sonst mit /INCREMENTAL ohne /OPT:REF, dann bleiben alle Windows-Wrapper
+# aus CommonLib (REX/W32.cpp) samt Importen in der DLL - CreateRemoteThread, WriteProcessMemory, VirtualAllocEx, CreateProcess
+# liessen Malwarebytes ("Malware.AI") anschlagen, obwohl SPS sie nie aufruft. Ohne /OPT:ICF (zusammengelegte gleiche Funktionen
+# wuerden gleiche Hook-Rumpfe auf eine Adresse legen).
+target_link_options(${PROJECT_NAME} PRIVATE /OPT:REF /INCREMENTAL:NO)
