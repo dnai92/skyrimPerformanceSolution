@@ -85,7 +85,8 @@ namespace Config
 	// fernen Kaskade einmal je Ausrichtung zeichnen und zwischenspeichern, sonst nur Figuren/Bewegliches
 	struct FarShadowCache
 	{
-		bool enabled = false;  // Standard AUS (BETA)
+		bool  enabled = false;  // Standard AUS (BETA)
+		float debugMode = 0;    // Pruef-Modus (nur Menue, nicht gespeichert): 1 = nur ruhige Kaskade, 2 = Kaskade unveraendert
 	};
 	inline FarShadowCache farShadowCache;  // [FarShadowCache]
 

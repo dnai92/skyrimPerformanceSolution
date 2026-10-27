@@ -1198,6 +1198,11 @@ namespace ShadowCulling
 			if (const auto prop = data.shaderProperty.get(); prop && netimmerse_cast<RE::BSEffectShaderProperty*>(prop)) {
 				return true;
 			}
+			// Wind (Baeume) bewegt das Mesh im Shader, ohne seine Lage zu aendern: im Cache fror der Schatten ein und sprang
+			// beim Wechsel zwischen Cache- und normalem Frame hin und her (Flackern bei tiefer Sonne je nach Blick, 27.10.)
+			if (const auto prop = data.shaderProperty.get(); prop && prop->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kTreeAnim)) {
+				return true;
+			}
 			struct Entry
 			{
 				std::uint32_t frame;
@@ -1345,6 +1350,10 @@ namespace ShadowCulling
 		};
 		StableState   g_stable{};
 		std::uint32_t g_stableChanged = 0, g_stableReanchor = 0, g_stableRoll = 0;  // fuers [FarShadowCache]-Log
+		std::uint32_t g_whySize = 0, g_whyCenter = 0, g_whySlide = 0, g_whyDepth = 0;  // Ausloeser der Neuausrichtung (ohne Sonne/Drehung)
+		std::chrono::steady_clock::time_point g_shrinkSinceX{}, g_shrinkSinceY{}, g_shrinkSinceDepth{};  // seit wann zu gross
+		double        g_sizeRatioSum = 0.0, g_depthRatioSum = 0.0;  // gehaltene / Engine-Flaeche bzw. -Tiefe (Analyse)
+		std::uint32_t g_ratioN = 0;
 		float         g_stableRollMaxDeg = 0.0f;  // groesste Drehung des Engine-Ausschnitts um die Sonnenachse gegen den gehaltenen
 		// Dreht die Engine den Ausschnitt um die Sonnenachse (Blickrichtung), wird neu ausgerichtet statt die umschliessende
 		// Flaeche ueber diesen Faktor hinaus zu vergroessern (groesserer Ausschnitt = groebere Texel, blassere kurze Schatten)
@@ -1381,11 +1390,14 @@ namespace ShadowCulling
 
 			auto& s = g_stable;
 			bool  changed = false;
-			auto  anchor = [&]() {
+			auto anchor = [&]() {
+                const float keepX = s.valid ? s.hx : 0.0f, keepY = s.valid ? s.hy : 0.0f;
                 s = {};
                 s.valid = true;
                 s.rot = rotE;
                 s.pos = posE;
+                s.hx = keepX;  // Groesse behalten: sonst wuchs die Kaskade nach jedem Sonnenschritt in Stufen neu (Spruenge)
+                s.hy = keepY;
                 changed = true;
 			};
 			if (!s.valid || Dot3(dirE, Col(s.rot, 0)) < std::cos(cfg.maxAngleDeg * 0.017453292f)) {
@@ -1422,17 +1434,42 @@ namespace ShadowCulling
 			const float x = 0.5f * (x0 + x1), y = 0.5f * (y0 + y1);
 			const float bhx = 0.5f * (x1 - x0), bhy = 0.5f * (y1 - y0);
 
-			// Groesse: erst bei zu klein oder deutlich zu gross neu (Stufen von extentStep)
-			const float needX = bhx + cfg.margin, needY = bhy + cfg.margin;
-			if (s.hx < needX || s.hx > needX + 2.0f * cfg.margin + cfg.extentStep) {
-				s.hx = QuantUp(needX * cfg.extentFactor, cfg.extentStep);
-				changed = true;
-			}
-			if (s.hy < needY || s.hy > needY + 2.0f * cfg.margin + cfg.extentStep) {
-				s.hy = QuantUp(needY * cfg.extentFactor, cfg.extentStep);
-				changed = true;
+			// Groesse: zu klein -> sofort wachsen (sonst fehlen Schatten). Zu gross -> erst schrumpfen, wenn das 10 s am Stueck so
+			// war. Bis 1.0.66 schrumpfte sie sofort: bei tiefer Sonne schwankt der Engine-Ausschnitt beim Drehen stark, die
+			// Kaskade sprang staendig zwischen Groessen, jede Aenderung der Texelgroesse liess die fernen Schatten flackern
+			// (27.10.: 299 von 370 Neuausrichtungen durch die Groesse; nur-wachsen-Test ohne Flackern).
+			constexpr auto kShrinkDelay = std::chrono::seconds(10);
+			const auto     now = std::chrono::steady_clock::now();
+			const bool     wasChanged = changed;
+			const float    needX = bhx + cfg.margin, needY = bhy + cfg.margin;
+			auto           fit = [&](float& a_h, float a_need, std::chrono::steady_clock::time_point& a_since) {
+                const bool tooBig = a_h > a_need + 2.0f * cfg.margin + cfg.extentStep;
+                if (!tooBig) {
+                    a_since = {};
+                }
+                if (a_h < a_need) {
+                    a_h = QuantUp(a_need * cfg.extentFactor, cfg.extentStep);
+                    a_since = {};
+                    changed = true;
+                } else if (tooBig) {
+                    if (a_since == std::chrono::steady_clock::time_point{}) {
+                        a_since = now;
+                    } else if (now - a_since >= kShrinkDelay) {
+                        a_h = QuantUp(a_need * cfg.extentFactor, cfg.extentStep);
+                        a_since = {};
+                        changed = true;
+                    }
+                }
+			};
+			fit(s.hx, needX, g_shrinkSinceX);
+			fit(s.hy, needY, g_shrinkSinceY);
+			if (changed && !wasChanged) {
+				++g_whySize;
 			}
 			// Mitte: nur verschieben, wenn der Engine-Ausschnitt nicht mehr hineinpasst - dann auf Texel gerundet
+			if (!changed && (std::abs(x - s.cx) + bhx > s.hx || std::abs(y - s.cy) + bhy > s.hy)) {
+				++g_whyCenter;
+			}
 			if (changed || std::abs(x - s.cx) + bhx > s.hx || std::abs(y - s.cy) + bhy > s.hy) {
 				const float texX = 2.0f * s.hx / static_cast<float>(std::max(1, std::abs(desc.port.GetWidth())));
 				const float texY = 2.0f * s.hy / static_cast<float>(std::max(1, std::abs(desc.port.GetHeight())));
@@ -1443,21 +1480,56 @@ namespace ShadowCulling
 			// Anker liegt nur noch knapp vor dem Engine-Bereich (Kamera hat sich zur Sonne hin bewegt): entlang der Sonnenrichtung
 			// zuruecksetzen. Sonst klemmte near bei 1 und schnitt Schattenwerfer ab, bis die Sonne neu ausgerichtet wurde.
 			// Seitlich (x/y, Ausschnitt) aendert sich dadurch nichts.
+			bool moved = s.f <= s.n;  // Tiefe bezieht sich auf s.pos: nach Neuausrichtung neu bestimmen
 			if (en - cfg.depthStep < 1.0f) {
 				const float slide = 1.0f - (en - cfg.depthStep) + 16.0f * cfg.depthStep;
 				s.pos = s.pos - Col(s.rot, 0) * slide;
 				en += slide;
 				ef += slide;
 				changed = true;
+				moved = true;
+				++g_whySlide;
 			}
-			// Tiefe: eng an der Engine, nur depthStep Spielraum je Seite (Zittern im Stand), sonst sofort nachfuehren
-			if (changed || en < s.n || ef > s.f || (s.f - s.n) > (ef - en) + 4.0f * cfg.depthStep) {
+			// Tiefe wie die Groesse: zu eng -> sofort erweitern, zu weit -> erst nach 10 s am Stueck eng nachfuehren
+			// (Community Shaders bemisst weiche Schatten am Tiefenbereich: jeder Sprung aendert ihre Helligkeit)
+			const bool depthTooBig = (s.f - s.n) > (ef - en) + 4.0f * cfg.depthStep;
+			if (!depthTooBig) {
+				g_shrinkSinceDepth = {};
+			}
+			bool retrack = moved;
+			if (!retrack && depthTooBig) {
+				if (g_shrinkSinceDepth == std::chrono::steady_clock::time_point{}) {
+					g_shrinkSinceDepth = now;
+				} else if (now - g_shrinkSinceDepth >= kShrinkDelay) {
+					retrack = true;
+				}
+			}
+			if (retrack) {
+				if (!changed) {
+					++g_whyDepth;
+				}
 				s.n = std::max(1.0f, en - cfg.depthStep);
 				s.f = ef + cfg.depthStep;
+				g_shrinkSinceDepth = {};
 				changed = true;
+			} else if (en < s.n || ef > s.f) {
+				if (!changed) {
+					++g_whyDepth;
+				}
+				s.n = std::max(1.0f, std::min(s.n, en - cfg.depthStep));
+				s.f = std::max(s.f, ef + cfg.depthStep);
+				changed = true;
+			}
+			if (Config::analysis.load(std::memory_order_relaxed) && bhx > 0.0f && bhy > 0.0f && ef > en) {
+				g_sizeRatioSum += static_cast<double>(s.hx * s.hy) / static_cast<double>(bhx * bhy);
+				g_depthRatioSum += static_cast<double>(s.f - s.n) / static_cast<double>(ef - en);
+				++g_ratioN;
 			}
 			if (changed) {
 				++g_stableChanged;
+			}
+			if (Config::farShadowCache.debugMode > 1.5f && Config::farShadowCache.debugMode < 2.5f) {
+				return;  // Pruef-Modus 2: Engine-Kaskade unveraendert (Gegenprobe wie Funktion aus)
 			}
 			// Anwenden: Lage + Frustum setzen, Kamera neu berechnen lassen (worldToCam) - wie die Engine selbst
 			cam->local.rotate = s.rot;
@@ -1503,7 +1575,14 @@ namespace ShadowCulling
 			// ferne Kaskade einsammelt, haengt auch von der Blickrichtung ab (Test 1.0.61: eine Summen-Pruefung schlug beim
 			// Drehen staendig an) - im Cache-Frame wird deshalb nur weggelassen, was nachweislich im Cache steckt; Neues wird
 			// normal gezeichnet (wie beim Cache fester Lichter). Bewegt sich ein gespeichertes Mesh, wird neu aufgebaut.
-			std::unordered_map<const RE::BSGeometry*, std::uint64_t> statics;
+			struct Stored
+			{
+				std::uint64_t pose = 0;
+				std::uint32_t seen = 0;  // drawSerial, in dem die Engine das Mesh zuletzt eingesammelt hat
+			};
+			std::unordered_map<const RE::BSGeometry*, Stored> statics;
+			std::uint32_t                         drawSerial = 0;
+			std::uint64_t                         staleSum = 0;  // Cache-Frames: gespeicherte Meshes, die die Engine diesmal nicht einsammelte
 			std::uint32_t                         extras = 0;  // Cache-Frame: zusaetzlich gezeichnete Draws (nicht im Cache)
 			bool                                  broken = false;  // Cache-Frame: ein gespeichertes Mesh hat sich bewegt
 			std::uint64_t                         changed = 0, extrasSum = 0;
@@ -1528,7 +1607,8 @@ namespace ShadowCulling
 			f.decided = true;
 			FarMode     mode = FarMode::kNormal;
 			const auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
-			const bool  on = Config::farShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && g_stable.valid && kFarCascade < descs.size();
+			const bool  on = Config::farShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && g_stable.valid && kFarCascade < descs.size() &&
+                            Config::farShadowCache.debugMode < 0.5f;  // Pruef-Modi 1/2: Cache aus
 			const auto cam = on ? descs[kFarCascade].camera.get() : nullptr;
 			if (on && cam) {
 				const auto& d = descs[kFarCascade];
@@ -1592,6 +1672,9 @@ namespace ShadowCulling
 				f.hookMissed = f.notBound = f.changed = 0;
 				f.extrasSum = 0;
 				g_stableChanged = g_stableReanchor = g_stableRoll = 0;
+			g_whySize = g_whyCenter = g_whySlide = g_whyDepth = 0;
+			g_sizeRatioSum = g_depthRatioSum = 0.0;
+			g_ratioN = 0;
 			g_stableRollMaxDeg = 0.0f;
 				f.frames = f.cached = f.builds = f.waits = f.normal = 0;
 				return;  // Zeile nur im Analyse-Protokoll
@@ -1599,13 +1682,17 @@ namespace ShadowCulling
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
 			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: draws skipped {:.0f} | draw hook missed {} (other target {}) | "
-						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}, turned with view on {}, max turn {:.1f} deg) | rebuilt for moved/new objects {} (new drawn per cached frame {:.0f})",
+						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}, turned with view on {}, max turn {:.1f} deg) | rebuilt for moved/new objects {} (new drawn per cached frame {:.0f}, cached but not collected now {:.0f}) | realigned by size {}, center {}, depth {}, slide {} | held vs game: area x{:.2f}, depth x{:.2f} | test mode {:.0f}",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
-				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, g_stableRoll, g_stableRollMaxDeg, f.changed, static_cast<double>(f.extrasSum) / c);
+				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, g_stableRoll, g_stableRollMaxDeg, f.changed, static_cast<double>(f.extrasSum) / c,
+				static_cast<double>(f.staleSum) / c, g_whySize, g_whyCenter, g_whyDepth, g_whySlide, g_ratioN ? g_sizeRatioSum / g_ratioN : 0.0, g_ratioN ? g_depthRatioSum / g_ratioN : 0.0, Config::farShadowCache.debugMode);
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 			f.hookMissed = f.notBound = f.changed = 0;
-			f.extrasSum = 0;
+			f.extrasSum = f.staleSum = 0;
 			g_stableChanged = g_stableReanchor = g_stableRoll = 0;
+			g_whySize = g_whyCenter = g_whySlide = g_whyDepth = 0;
+			g_sizeRatioSum = g_depthRatioSum = 0.0;
+			g_ratioN = 0;
 			g_stableRollMaxDeg = 0.0f;
 			f.frames = f.cached = f.builds = f.waits = f.normal = 0;
 		}
@@ -1711,6 +1798,7 @@ namespace ShadowCulling
 		f.drawTex = tex;
 		f.extras = 0;
 		f.broken = false;
+		++f.drawSerial;
 		if (mode == FarMode::kBuild) {
 			f.statics.clear();
 		}
@@ -1736,6 +1824,12 @@ namespace ShadowCulling
 			break;
 		case FarMode::kCached:
 			f.extrasSum += f.extras;
+			if (Config::analysis.load(std::memory_order_relaxed)) {
+				// Diagnose: Schatten aus dem Cache, die die Engine in diesem Frame gar nicht zeichnen wuerde (Blickrichtung)
+				for (const auto& [geom, s] : f.statics) {
+					f.staleSum += s.seen != f.drawSerial;
+				}
+			}
 			// bewegt, oder so viel Neues, dass die Ersparnis verloren geht: naechster Frame baut neu auf
 			if (f.broken || f.extras > kFarMaxExtras) {
 				f.valid = false;
@@ -1805,7 +1899,7 @@ namespace ShadowCulling
                                 Mix64(Quant(w.rotate.entry[0][0], 1000.0f) ^ (Quant(w.rotate.entry[1][1], 1000.0f) << 21) ^ (Quant(w.rotate.entry[0][1], 1000.0f) << 42)));
 		try {
 			if (mode == FarMode::kBuild) {
-				f.statics.insert_or_assign(&geom, pose);
+				f.statics.insert_or_assign(&geom, FarState::Stored{ pose, f.drawSerial });
 				return false;
 			}
 			const auto it = f.statics.find(&geom);
@@ -1813,7 +1907,8 @@ namespace ShadowCulling
 				++f.extras;  // nicht im Cache (neu in Sicht, eingeblendet): normal zeichnen
 				return false;
 			}
-			if (it->second != pose) {
+			it->second.seen = f.drawSerial;
+			if (it->second.pose != pose) {
 				f.broken = true;  // bewegt (Tuer, Havok): zeichnen, der Cache enthaelt noch die alte Lage
 				return false;
 			}
