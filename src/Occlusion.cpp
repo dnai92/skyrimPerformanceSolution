@@ -630,12 +630,40 @@ namespace Occlusion
 					p->clip[i][j] = static_cast<float>(rel[i][j]);
 				}
 			}
-			const auto&        farBuf = c.reversed ? a_s.rb.minDepth : a_s.rb.maxDepth;  // fernster Wert je Kachel
+			// Je Tiefenbild einmal (nur der Hilfsthread baut): Sichttiefe der fernsten Stelle je Kachel und ihr alter Clip-Punkt.
+			// Kostete bei jedem Aufbau neu ~37000 Divisionen (1.0.68-Test: 0,5-0,6 ms je Aufbau).
+			struct Source
+			{
+				std::uint32_t      snapId = 0;
+				std::vector<float> z;                   // Sichttiefe, <= 0 = Himmel/ungueltig
+				std::vector<float> pts;                 // je Kachel x*z, y*z, d*z, z
+			};
+			static Source src;
+			if (src.snapId != a_s.id || src.z.empty()) {
+				const auto& farBuf = c.reversed ? a_s.rb.minDepth : a_s.rb.maxDepth;  // fernster Wert je Kachel
+				src.z.resize(static_cast<std::size_t>(kGW) * kGH);
+				src.pts.resize(src.z.size() * 4);
+				for (std::uint32_t v = 0; v < kGH; ++v) {
+					const float y = 1.0f - (static_cast<float>(v) + 0.5f) / kGH * 2.0f;
+					for (std::uint32_t u = 0; u < kGW; ++u) {
+						const auto  i = static_cast<std::size_t>(v) * kGW + u;
+						const float buf = farBuf[i];
+						const float z = BufToZ(c, buf);
+						src.z[i] = z;
+						const float x = (static_cast<float>(u) + 0.5f) / kGW * 2.0f - 1.0f;
+						const float d = (buf - c.depthMin) / (c.depthMax - c.depthMin);
+						src.pts[i * 4 + 0] = x * z;
+						src.pts[i * 4 + 1] = y * z;
+						src.pts[i * 4 + 2] = d * z;
+						src.pts[i * 4 + 3] = z;
+					}
+				}
+				src.snapId = a_s.id;
+			}
 			std::vector<float> l0(static_cast<std::size_t>(kGW) * kGH);
 			if (SameCamera(a_pos, a_rot, c.pos, c.rot)) {
 				for (std::size_t i = 0; i < l0.size(); ++i) {
-					const float z = BufToZ(c, farBuf[i]);
-					l0[i] = z > 0.0f ? z : kFree;
+					l0[i] = src.z[i] > 0.0f ? src.z[i] : kFree;
 				}
 			} else {
 				// Kachelmitte mit fernster Tiefe vom alten in den neuen Clip-Raum; Treffer behalten den fernsten Wert
@@ -647,30 +675,24 @@ namespace Occlusion
 					}
 				}
 				std::fill(l0.begin(), l0.end(), -1.0f);
-				for (std::uint32_t v = 0; v < kGH; ++v) {
-					const float y = 1.0f - (static_cast<float>(v) + 0.5f) / kGH * 2.0f;
-					for (std::uint32_t u = 0; u < kGW; ++u) {
-						const float buf = farBuf[static_cast<std::size_t>(v) * kGW + u];
-						const float z = BufToZ(c, buf);
-						if (!(z > 0.0f)) {
-							continue;
-						}
-						const float x = (static_cast<float>(u) + 0.5f) / kGW * 2.0f - 1.0f;
-						const float d = (buf - c.depthMin) / (c.depthMax - c.depthMin);
-						const float in[4]{ x * z, y * z, d * z, z };
-						const float cw = kf[3][0] * in[0] + kf[3][1] * in[1] + kf[3][2] * in[2] + kf[3][3] * in[3];
-						if (!(cw > 16.0f)) {
-							continue;
-						}
-						const float cx = (kf[0][0] * in[0] + kf[0][1] * in[1] + kf[0][2] * in[2] + kf[0][3] * in[3]) / cw;
-						const float cy = (kf[1][0] * in[0] + kf[1][1] * in[1] + kf[1][2] * in[2] + kf[1][3] * in[3]) / cw;
-						const float fu = (cx * 0.5f + 0.5f) * kGW, fv = (0.5f - cy * 0.5f) * kGH;
-						if (!(fu >= 0.0f && fu < static_cast<float>(kGW) && fv >= 0.0f && fv < static_cast<float>(kGH))) {
-							continue;
-						}
-						auto& t = l0[static_cast<std::size_t>(fv) * kGW + static_cast<std::size_t>(fu)];
-						t = std::max(t, cw);
+				for (std::size_t i = 0; i < l0.size(); ++i) {
+					if (!(src.z[i] > 0.0f)) {
+						continue;
 					}
+					const float* in = &src.pts[i * 4];
+					const float  cw = kf[3][0] * in[0] + kf[3][1] * in[1] + kf[3][2] * in[2] + kf[3][3] * in[3];
+					if (!(cw > 16.0f)) {
+						continue;
+					}
+					const float iw = 1.0f / cw;
+					const float cx = (kf[0][0] * in[0] + kf[0][1] * in[1] + kf[0][2] * in[2] + kf[0][3] * in[3]) * iw;
+					const float cy = (kf[1][0] * in[0] + kf[1][1] * in[1] + kf[1][2] * in[2] + kf[1][3] * in[3]) * iw;
+					const float fu = (cx * 0.5f + 0.5f) * kGW, fv = (0.5f - cy * 0.5f) * kGH;
+					if (!(fu >= 0.0f && fu < static_cast<float>(kGW) && fv >= 0.0f && fv < static_cast<float>(kGH))) {
+						continue;
+					}
+					auto& t = l0[static_cast<std::size_t>(fv) * kGW + static_cast<std::size_t>(fu)];
+					t = std::max(t, cw);
 				}
 				// nicht getroffen = unbekannt (frei); danach je Texel der fernste Wert der 3x3-Nachbarschaft (Luecken beim
 				// Naeherkommen, Versatz innerhalb einer Kachel)
@@ -810,7 +832,7 @@ namespace Occlusion
 		std::optional<BuildRequest> g_buildReq;
 		bool                        g_builderStarted = false;
 		std::atomic<std::uint64_t>  g_buildKey{ 0 };  // zuletzt angefordert (Kamera + Tiefenbild)
-		std::atomic<std::uint64_t>  g_buildNs{ 0 }, g_builds{ 0 }, g_notReady{ 0 };
+		std::atomic<std::uint64_t>  g_buildNs{ 0 }, g_builds{ 0 }, g_notReady{ 0 }, g_kickBegin{ 0 }, g_kickLate{ 0 };
 
 		std::uint64_t CameraKey(const RE::NiPoint3& a_pos, const RE::NiMatrix3& a_rot, std::uint32_t a_snapId) noexcept
 		{
@@ -1095,8 +1117,8 @@ namespace Occlusion
 			g_cullBlockedFrames = 0;
 			{
 				const auto builds = g_builds.exchange(0), ns = g_buildNs.exchange(0);
-				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | Bottled Shaders HiZ {}",
-					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_gatedFrames, g_visSkipped.exchange(0) / frames,
+				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | Bottled Shaders HiZ {}",
+					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_kickLate.exchange(0), g_kickBegin.exchange(0), g_gatedFrames, g_visSkipped.exchange(0) / frames,
 					g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
 				g_gatedFrames = 0;
 			}
@@ -1248,8 +1270,8 @@ namespace Occlusion
 				const float move = Config::occlMoveUnits.load(std::memory_order_relaxed);
 				allowed = Dot(own.dir, oc.dir) > std::cos(Config::occlTurnDeg.load(std::memory_order_relaxed) * 0.0174533f) && dx * dx + dy * dy + dz * dz < move * move;
 			}
-			if (!allowed) {
-				++g_cullBlockedFrames;
+			if (!allowed && !Config::occlReproject.load(std::memory_order_relaxed)) {
+				++g_cullBlockedFrames;  // mit Umrechnung pausiert nichts
 			}
 			g_cullAllowed.store(allowed, std::memory_order_relaxed);
 		}
@@ -1546,6 +1568,9 @@ namespace Occlusion
 			// Tiefenbild in der Kamera dieses Frames; passt die Pyramide noch nicht, diesmal nichts weglassen
 			pyr = worldCam ? PyramidForThread(worldCam->world.translate, worldCam->world.rotate) : nullptr;
 			if (!pyr) {
+				if (diag) {
+					g_kickLate.fetch_add(1, std::memory_order_relaxed);
+				}
 				RequestPyramid(snap->id);
 				if (diag) {
 					g_notReady.fetch_add(1, std::memory_order_relaxed);
@@ -1653,6 +1678,16 @@ namespace Occlusion
 	void OnViewCamera() noexcept
 	{
 		if (Active() && Config::occlReproject.load(std::memory_order_relaxed) && Config::occlusionCull.load(std::memory_order_relaxed)) {
+			RequestPyramid();
+		}
+	}
+
+	void OnFrameBegin() noexcept
+	{
+		if (Active() && Config::occlReproject.load(std::memory_order_relaxed) && Config::occlusionCull.load(std::memory_order_relaxed)) {
+			if (Diag()) {
+				g_kickBegin.fetch_add(1, std::memory_order_relaxed);
+			}
 			RequestPyramid();
 		}
 	}

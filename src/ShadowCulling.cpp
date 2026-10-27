@@ -750,6 +750,19 @@ namespace ShadowCulling
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
+		// Main::Begin (AE 36561 / SE 35562), aufgerufen aus AE 36559 / SE 35560 +0xD3: vor dem Einreihen der Sammel-Jobs des
+		// Hauptbilds, die Kamera des Frames steht fest (Stelle von Faster Objects uebernommen). Rueckgabe unveraendert
+		// durchreichen - der Aufrufer nutzt RAX spaeter weiter.
+		struct MainBegin
+		{
+			static std::uint64_t thunk(std::uint64_t a_1, std::uint64_t a_2, std::uint64_t a_3, std::uint64_t a_4)
+			{
+				Occlusion::OnFrameBegin();
+				return func(a_1, a_2, a_3, a_4);
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
 		struct RenderDepth
 		{
 			static void thunk(bool a_arg1, bool a_arg2)
@@ -1289,6 +1302,13 @@ namespace ShadowCulling
 				logger::info("Hook installed: Main::RenderWorld call site - hide occluded objects at draw time");
 			} else {
 				logger::warn("Hide occluded objects: Main::RenderWorld call site differs - hiding at collection (old way)");
+			}
+			const REL::Relocation<std::uintptr_t> begin{ RELOCATION_ID(35560, 36559), 0xD3 };
+			if (Features::IsCall(begin.address())) {
+				MainBegin::func = SKSE::GetTrampoline().write_call<5>(begin.address(), MainBegin::thunk);
+				logger::info("Hook installed: Main::Begin call site - occlusion pyramid starts before the main view is collected");
+			} else {
+				logger::warn("Hide occluded objects: Main::Begin call site differs - pyramid starts later");
 			}
 		}
 #endif

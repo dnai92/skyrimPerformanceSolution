@@ -32,6 +32,9 @@ namespace Occlusion
 	// Kamera des Frames steht fest (nach UpdateCamera der Sonne, Main-Thread): Pyramide im Hilfsthread anstossen
 	void OnViewCamera() noexcept;
 
+	// Main::Begin im Hauptbild (vor den Sammel-Jobs, Kamera steht fest): Pyramide so frueh wie moeglich anstossen
+	void OnFrameBegin() noexcept;
+
 	// Bottled Shaders mit eigener HiZ-Verdeckung erkennen (Daten geladen, Ladebildschirm)
 	void DetectOtherCullers() noexcept;
 	bool BottledHiZActive() noexcept;
