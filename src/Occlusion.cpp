@@ -507,6 +507,7 @@ namespace Occlusion
 		// auch beim Drehen und Laufen statt Pause), Aufbau auf einem Hilfsthread, Matrizen in double (Weltkoordinaten bis
 		// ~10^5 - in float lagen Verdeckungen dort um Prozente zu nah), Ertragsbremse und seltenere Pruefung Sichtbarer.
 		using Mat4d = std::array<std::array<double, 4>, 4>;
+		std::atomic<float>         g_playerFreedPct{ 0.0f };  // davon die Spielerfigur bzw. das Reittier
 		std::atomic<float>         g_moverFreedPct{ 0.0f };  // Anteil des Tiefenbilds, der wegen Figuren frei bleibt (letzter Aufbau)
 		std::atomic<std::uint32_t> g_moverCount{ 0 };
 		constexpr std::uint32_t kGW = OcclusionGpu::kWidth, kGH = OcclusionGpu::kHeight;
@@ -701,10 +702,11 @@ namespace Occlusion
 						z = 0.0f;
 					}
 				}
-				std::size_t freedByMovers = 0;
-				for (const auto& mover : c.movers) {
+				std::size_t freedByMovers = 0, freedByPlayer = 0;
+				for (std::size_t m = 0; m < c.movers.size(); ++m) {
+					const auto& mover = c.movers[m];
 					const float r = mover.radius;
-					float       minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f, wFar = 0.0f, wNear = 1e30f;
+					float       minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f;
 					bool        inFront = true;
 					for (int i = 0; i < 8 && inFront; ++i) {
 						const RE::NiPoint3 q{ mover.center.x + ((i & 1) ? r : -r), mover.center.y + ((i & 2) ? r : -r), mover.center.z + ((i & 4) ? r : -r) };
@@ -718,27 +720,37 @@ namespace Occlusion
 						maxX = std::max(maxX, clip[0] / clip[3]);
 						minY = std::min(minY, clip[1] / clip[3]);
 						maxY = std::max(maxY, clip[1] / clip[3]);
-						wFar = std::max(wFar, clip[3]);
-						wNear = std::min(wNear, clip[3]);
 					}
-					if (inFront) {
-						const int u0 = std::max(0, static_cast<int>(std::floor((minX * 0.5f + 0.5f) * kGW)) - 2);
-						const int u1 = std::min(static_cast<int>(kGW) - 1, static_cast<int>(std::floor((maxX * 0.5f + 0.5f) * kGW)) + 2);
-						const int v0 = std::max(0, static_cast<int>(std::floor((0.5f - maxY * 0.5f) * kGH)) - 2);
-						const int v1 = std::min(static_cast<int>(kGH) - 1, static_cast<int>(std::floor((0.5f - minY * 0.5f) * kGH)) + 2);
+					float cc[4];
+					Mul(c.gm, mover.center, cc);
+					if (inFront && cc[3] > 1.0f) {
+						// Kugel um die Figur statt Quader aus Bildrechteck und Tiefenband: der Quader nahm bei der Spielerfigur (nah
+						// an der Kamera) den ganzen Boden im Rechteck mit - im dritten Test 1.0.69 waren 20-28 % des Bilds frei, die
+						// Verdeckung blieb bei 15 % statt 26-33 %. Ellipsoid im Rechteck der Ecken, Tiefe +-Radius um die Mitte.
+						const float cx = cc[0] / cc[3], cy = cc[1] / cc[3], cw = cc[3];
+						const float hx = std::max(maxX - cx, cx - minX) + 1.0f / kGW, hy = std::max(maxY - cy, cy - minY) + 1.0f / kGH;
+						const int   u0 = std::max(0, static_cast<int>(std::floor(((cx - hx) * 0.5f + 0.5f) * kGW)));
+						const int   u1 = std::min(static_cast<int>(kGW) - 1, static_cast<int>(std::floor(((cx + hx) * 0.5f + 0.5f) * kGW)));
+						const int   v0 = std::max(0, static_cast<int>(std::floor((0.5f - (cy + hy) * 0.5f) * kGH)));
+						const int   v1 = std::min(static_cast<int>(kGH) - 1, static_cast<int>(std::floor((0.5f - (cy - hy) * 0.5f) * kGH)));
 						for (int v = v0; v <= v1; ++v) {
+							const float dy = (1.0f - (static_cast<float>(v) + 0.5f) / kGH * 2.0f - cy) / hy;
 							for (int u = u0; u <= u1; ++u) {
-								auto& z = src.z[static_cast<std::size_t>(v) * kGW + u];
-								// nur was in der Tiefe der Figur liegt (sie selbst, Boden direkt an ihr) - nicht alles davor: bis zum
-								// zweiten Test 1.0.69 wurden so am Markt 32 % des Bilds frei, die Verdeckung fiel von 26 auf 5 %
-								if (z >= wNear && z <= wFar) {
+								auto&       z = src.z[static_cast<std::size_t>(v) * kGW + u];
+								const float dx = ((static_cast<float>(u) + 0.5f) / kGW * 2.0f - 1.0f - cx) / hx;
+								const float dz = (z - cw) / r;
+								if (z > 0.0f && dx * dx + dy * dy + dz * dz <= 1.0f) {
 									z = 0.0f;
 									++freedByMovers;
+									if (m == 0) {
+										++freedByPlayer;
+									}
 								}
 							}
 						}
 					}
 				}
+				g_playerFreedPct.store(100.0f * static_cast<float>(freedByPlayer) / static_cast<float>(src.z.size()), std::memory_order_relaxed);
 				g_moverFreedPct.store(100.0f * static_cast<float>(freedByMovers) / static_cast<float>(src.z.size()), std::memory_order_relaxed);
 				g_moverCount.store(static_cast<std::uint32_t>(c.movers.size()), std::memory_order_relaxed);
 				src.snapId = a_s.id;
@@ -1230,9 +1242,9 @@ namespace Occlusion
 			g_cullBlockedFrames = 0;
 			{
 				const auto builds = g_builds.exchange(0), ns = g_buildNs.exchange(0);
-				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | figures {} free {:.1f} % of the depth image | Bottled Shaders HiZ {}",
+				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | figures {} free {:.1f} % of the depth image (player {:.1f} %) | Bottled Shaders HiZ {}",
 					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_kickLate.exchange(0), g_kickBegin.exchange(0), g_gatedFrames, g_visSkipped.exchange(0) / frames,
-					g_moverCount.load(), g_moverFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
+					g_moverCount.load(), g_moverFreedPct.load(), g_playerFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
 				g_gatedFrames = 0;
 				if (log && g_poseMismatch) {
 					logger::info("[Occlusion]   depth images not used because camera pose and GPU matrix differed: {}", g_poseMismatch);
