@@ -236,6 +236,12 @@ namespace Occlusion
 		std::atomic<std::uint64_t>                g_hiddenMarked{ 0 }, g_hiddenFull{ 0 }, g_filterSkipped{ 0 };
 		std::atomic<std::uint32_t>                g_markedStamp{ 0 };  // Bild, in dem zuletzt etwas markiert wurde
 
+		// Vorfilter vor der Tabelle: 8192 Bit je Bild (1 KB, liegt im L1-Cache). Die Tabelle selbst ist 256 KB gross - jeder
+		// Draw kostete dort einen Cache-Fehlgriff (Tracy 1.0.69: 0,6 % des Hauptthreads am Markt). Nur wo das Bit gesetzt ist,
+		// wird nachgesehen. Zwei Saetze im Wechsel; der des naechsten Bilds wird beim Bildwechsel geleert.
+		constexpr std::size_t                                kHiddenBits = 8192;
+		std::array<std::array<std::atomic<std::uint64_t>, kHiddenBits / 64>, 2> g_hiddenBits{};
+
 		std::size_t HiddenHash(const void* a_p) noexcept
 		{
 			auto h = reinterpret_cast<std::uintptr_t>(a_p) >> 4;
@@ -1146,6 +1152,10 @@ namespace Occlusion
 		// markierte Objekte dauerhaft unsichtbar (Review 1.0.69).
 		void AdvanceFrame() noexcept
 		{
+			// Bits des kommenden Bilds leeren (stammen von vor zwei Bildern); ein verlorenes Bit heisst nur: wird gezeichnet
+			for (auto& w : g_hiddenBits[(g_hiddenStamp.load(std::memory_order_relaxed) + 1) & 1]) {
+				w.store(0, std::memory_order_relaxed);
+			}
 			g_hiddenStamp.fetch_add(1, std::memory_order_relaxed);
 			g_frameNo.fetch_add(1, std::memory_order_relaxed);
 			const bool test = g_gate.Step(g_yieldTested.exchange(0, std::memory_order_relaxed), g_yieldCulled.exchange(0, std::memory_order_relaxed));
@@ -1635,6 +1645,7 @@ namespace Occlusion
 	{
 		const auto stamp = g_hiddenStamp.load(std::memory_order_relaxed);
 		const auto h = HiddenHash(a_geom);
+		g_hiddenBits[stamp & 1][(h & (kHiddenBits - 1)) >> 6].fetch_or(std::uint64_t{ 1 } << (h & 63), std::memory_order_relaxed);
 		for (std::size_t i = 0; i < kHiddenProbe; ++i) {
 			auto&      s = g_hidden[(h + i) & (kHiddenSlots - 1)];
 			const auto key = s.key.load(std::memory_order_relaxed);
@@ -1670,6 +1681,9 @@ namespace Occlusion
 			return false;  // in diesem Bild nichts markiert
 		}
 		const auto h = HiddenHash(a_geom);
+		if ((g_hiddenBits[stamp & 1][(h & (kHiddenBits - 1)) >> 6].load(std::memory_order_relaxed) & (std::uint64_t{ 1 } << (h & 63))) == 0) {
+			return false;  // sicher nicht markiert
+		}
 		for (std::size_t i = 0; i < kHiddenProbe; ++i) {
 			const auto& s = g_hidden[(h + i) & (kHiddenSlots - 1)];
 			if (s.key.load(std::memory_order_relaxed) == a_geom) {

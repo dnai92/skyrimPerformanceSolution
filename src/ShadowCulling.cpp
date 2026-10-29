@@ -2087,7 +2087,39 @@ namespace ShadowCulling
 		}
 		const auto& geom = *a_pass.geometry;
 		auto&       f = g_far;
-		bool        dyn = false;
+		// Cache-Frame: zuerst im Cache nachsehen - was dort steht, wurde beim Aufbau als unbeweglich eingestuft, die Suche
+		// nach der Figur (FarDynamic, eigene Tabelle) entfaellt dann. Tracy 1.0.69: die Doppel-Suche je Draw kostete am
+		// Markt ~1,6 % des Hauptthreads (wie beim Licht-Cache seit 1.0.57)
+		if (mode == FarMode::kCached) {
+			try {
+				const auto it = f.statics.find(&geom);
+				if (it != f.statics.end()) {
+					if (it->second.seen != f.drawStamp) {
+						it->second.seen = f.drawStamp;
+						++f.matched;
+					}
+					if (FarMeshMoved(it->second.pose, geom.world)) {
+						// bewegt (Tuer, Havok, Schild im Wind): zeichnen, ab jetzt als beweglich lernen; der Cache enthaelt noch
+						// die alte Lage -> neu aufbauen
+						if (f.promoted.size() < 4096) {
+							f.promoted.insert(&geom);
+						}
+						f.broken = true;
+						++f.passes;
+						return false;
+					}
+					if (Config::analysis.load(std::memory_order_relaxed)) {
+						g_farSkippedStatic.fetch_add(1, std::memory_order_relaxed);
+					}
+					return true;  // steckt im Cache
+				}
+			} catch (...) {
+				f.broken = true;
+				++f.passes;
+				return false;
+			}
+		}
+		bool dyn = false;
 		try {
 			dyn = FarDynamic(geom) || f.promoted.contains(&geom);
 		} catch (...) {
@@ -2100,42 +2132,17 @@ namespace ShadowCulling
 			++f.passes;
 			return false;  // Cache-Frame: Bewegliches zeichnen
 		}
-		const auto& w = geom.world;
-		try {
-			if (mode == FarMode::kBuild) {
-				f.statics.insert_or_assign(&geom, FarState::FarEntry{ w, 0, RE::NiPointer<RE::BSGeometry>(const_cast<RE::BSGeometry*>(&geom)) });
-				++f.passes;
-				return false;
+		++f.passes;
+		if (mode == FarMode::kBuild) {
+			try {
+				f.statics.insert_or_assign(&geom, FarState::FarEntry{ geom.world, 0, RE::NiPointer<RE::BSGeometry>(const_cast<RE::BSGeometry*>(&geom)) });
+			} catch (...) {
+				f.uncovered = true;  // nicht vollstaendig erfasst: Aufbau verwerfen
 			}
-			const auto it = f.statics.find(&geom);
-			if (it == f.statics.end()) {
-				++f.extras;  // nicht im Cache (neu in Sicht, eingeblendet): normal zeichnen
-				++f.passes;
-				return false;
-			}
-			if (it->second.seen != f.drawStamp) {
-				it->second.seen = f.drawStamp;
-				++f.matched;
-			}
-			if (FarMeshMoved(it->second.pose, w)) {
-				// bewegt (Tuer, Havok, Schild im Wind): zeichnen, ab jetzt als beweglich lernen; der Cache enthaelt noch die
-				// alte Lage -> neu aufbauen
-				if (f.promoted.size() < 4096) {
-					f.promoted.insert(&geom);
-				}
-				f.broken = true;
-				++f.passes;
-				return false;
-			}
-		} catch (...) {
-			f.broken = true;
-			++f.passes;
 			return false;
 		}
-		if (Config::analysis.load(std::memory_order_relaxed)) {
-			g_farSkippedStatic.fetch_add(1, std::memory_order_relaxed);
-		}
-		return true;  // steckt im Cache
+		++f.extras;  // Cache-Frame, nicht im Cache (neu in Sicht, eingeblendet): normal zeichnen
+		return false;
 	}
 
 	void AfterSunUpdateCamera(RE::BSShadowDirectionalLight* a_light) noexcept
