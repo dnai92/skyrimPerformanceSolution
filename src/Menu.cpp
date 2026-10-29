@@ -321,8 +321,7 @@ namespace Menu
 			const auto mask = TextureStream::GetDebugInclude();
 			bool       v = (mask & a_bit) != 0;
 			if (MenuApi::Checkbox(a_label, &v)) {
-				TextureStream::SetDebugInclude(v ? (mask | a_bit) : (mask & ~a_bit));
-				Config::MarkDirty();
+				TextureStream::SetDebugInclude(v ? (mask | a_bit) : (mask & ~a_bit));  // nur Test, nicht gespeichert
 			}
 			Tip(a_tip);
 		}
@@ -349,6 +348,27 @@ namespace Menu
 			}
 			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
 				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
+
+			MenuApi::SeparatorText(T("Texture streaming: also include excluded types", "Textur-Streaming: ausgenommene Arten mit einbeziehen"));
+			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size. Not saved.",
+											"Diese Texturarten werden normalerweise nie verkleinert. Häkchen setzen, um live zu sehen, wie sie sich verhalten, am besten zusammen mit einer kleinen max. Texturgröße (1K). Häkchen weg, dann kommen sie wieder in voller Größe. Wird nicht gespeichert."));
+			DebugInclude(T("Distant terrain and LOD##dbg", "Ferne Landschaft und LOD##dbg"), TextureStream::kIncludeLod,
+				T("Paths with \\lod\\ or terrain\\. Distant ground, mountains and simplified objects far away.",
+					"Pfade mit \\lod\\ oder terrain\\. Ferner Boden, Berge und vereinfachte Objekte in der Ferne."));
+			DebugInclude(T("Effects##dbg", "Effekte##dbg"), TextureStream::kIncludeEffects,
+				T("textures\\effects\\. Fire, magic, glow, smoke. Effects drawn with the effect shader are not covered at all.",
+					"textures\\effects\\. Feuer, Magie, Leuchten, Rauch. Effekte mit eigenem Effekt-Shader werden gar nicht erfasst."));
+			DebugInclude(T("Books##dbg", "Bücher##dbg"), TextureStream::kIncludeBooks,
+				T("Every path containing 'book', also bookshelves. Excluded so text stays readable.",
+					"Alle Pfade mit 'book', auch Bücherregale. Ausgenommen, damit Schrift lesbar bleibt."));
+			DebugInclude(T("Sky##dbg", "Himmel##dbg"), TextureStream::kIncludeSky,
+				T("Paths with \\sky\\. Clouds, moons, stars - most use their own shader and are not covered.",
+					"Pfade mit \\sky\\. Wolken, Monde, Sterne - die meisten haben einen eigenen Shader und werden nicht erfasst."));
+			DebugInclude(T("Reflections (cubemaps)##dbg", "Reflexionen (Cubemaps)##dbg"), TextureStream::kIncludeCubemaps,
+				T("cubemaps\\. Real cube maps can never be downscaled, only flat textures in this folder.",
+					"cubemaps\\. Echte Würfelkarten lassen sich nie verkleinern, nur flache Texturen in diesem Ordner."));
+			MenuApi::TextWrapped("%s", T("Not possible at all: grass, water and effect shader textures (other shaders), textures without mipmaps.",
+											"Gar nicht möglich: Gras, Wasser und Effekt-Shader-Texturen (andere Shader), Texturen ohne Mipmaps."));
 
 			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));
 			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
@@ -571,9 +591,24 @@ namespace Menu
 					MenuApi::Text(T("VRAM: %.1f of %.1f GB (%.0f %%)", "VRAM: %.1f von %.1f GB (%.0f %%)"), usage / 1073741824.0, budget / 1073741824.0, 100.0 * usage / budget);
 				}
 			}
-			Toggle(T("Only when VRAM gets full##ts", "Nur wenn der VRAM knapp wird##ts"), Config::textureStream.budgetMode,
-				T("Textures are only shrunk when less than the reserve below of the video memory Windows grants the game is free. With enough VRAM nothing happens and nothing is spent.",
-					"Texturen werden nur verkleinert, wenn vom Grafikspeicher, den Windows dem Spiel zuteilt, weniger als der Puffer unten frei ist. Mit genug VRAM passiert nichts und es kostet nichts."));
+			{
+				// Modus als Auswahl statt Schalter: welche Regler gelten, haengt davon ab (Review 1.0.69)
+				const char* modes[] = { T("Always, by distance", "Immer, nach Entfernung"), T("Only when VRAM gets full", "Nur wenn der VRAM knapp wird") };
+				int         mode = Config::textureStream.budgetMode ? 1 : 0;
+				if (MenuApi::HasCombo()) {
+					if (MenuApi::Combo(T("Mode##ts", "Modus##ts"), &mode, modes, 2)) {
+						Config::textureStream.budgetMode = mode == 1;
+						Config::MarkDirty();
+					}
+				} else {
+					Toggle(T("Only when VRAM gets full##ts", "Nur wenn der VRAM knapp wird##ts"), Config::textureStream.budgetMode, "");
+				}
+				Tip(T("Always: textures of far objects are shrunk as soon as they are far enough away. Only when VRAM gets full: nothing happens until less than 'Keep free' of the video memory Windows grants the game is free. With enough VRAM nothing is spent.",
+					"Immer: Texturen ferner Objekte werden verkleinert, sobald sie weit genug weg sind. Nur wenn der VRAM knapp wird: nichts passiert, bis vom Grafikspeicher, den Windows dem Spiel zuteilt, weniger als 'Frei halten' frei ist. Mit genug VRAM kostet es nichts."));
+			}
+
+			MenuApi::SeparatorText(T("VRAM reserve (only when VRAM gets full)", "VRAM-Puffer (nur wenn der VRAM knapp wird)"));
+			MenuApi::BeginDisabled(!Config::textureStream.budgetMode);
 			{
 				// feste 256-MB-Stufen (Regler ueber den Index - frei gezogen landeten Zwischenwerte im Regler)
 				int  step = std::clamp(static_cast<int>(std::lround(Config::textureStream.reserveMB / 256.0f)), 1, 24);
@@ -600,6 +635,7 @@ namespace Menu
 			Toggle(T("Refill VRAM when there is room##ts", "VRAM wieder auffüllen, wenn Platz ist##ts"), Config::textureStream.refill,
 				T("When clearly more than the reserve is free, downscaled textures are reloaded at full size again (most needed first).",
 					"Ist deutlich mehr als der Puffer frei, werden verkleinerte Texturen wieder voll geladen (die meistgebrauchten zuerst)."));
+			MenuApi::BeginDisabled(!Config::textureStream.refill);
 			{
 				int  step = std::clamp(static_cast<int>(std::lround(Config::textureStream.refillGapMB / 256.0f)), 1, 16);
 				const auto text = std::format("{} MB", step * 256);
@@ -617,6 +653,10 @@ namespace Menu
 				                                       std::format("Downscale when less than {} MB is free. Reload at full size when more than {} MB is free.", keep, refillAt)).c_str());
 				MenuApi::TextWrapped("%s", T("Most users only need 'Keep free'. Leave the gap at its default.", "Die meisten brauchen nur 'Frei halten'. Den Abstand am besten auf Standard lassen."));
 			}
+			MenuApi::EndDisabled();
+			MenuApi::EndDisabled();
+
+			MenuApi::SeparatorText(T("Quality and loading", "Qualität und Laden"));
 			Slider(T("RAM buffer (MB)##ts", "RAM-Puffer (MB)##ts"), Config::textureStream.ramCacheMB, 0.0f, 8192.0f, "%.0f",
 				T("Texture data that was reloaded stays in RAM up to this size, so the next reload needs no disk access. Least recently used is dropped first. 0 = off.",
 					"Neu geladene Texturdaten bleiben bis zu dieser Größe im RAM, das nächste Neuladen braucht dann keinen Plattenzugriff. Am längsten nicht gebrauchte fliegen zuerst raus. 0 = aus."));
@@ -644,6 +684,16 @@ namespace Menu
 				Tip(T("Textures are never shrunk below this edge length. Higher = safer, less saving.",
 					"Texturen werden nie unter diese Kantenlänge verkleinert. Höher = sicherer, weniger Ersparnis."));
 			}
+			MenuApi::SeparatorText(T("Characters", "Figuren"));
+			Toggle(T("Also clothing and armor of characters (optional)##ts", "Auch Kleidung und Rüstung von Figuren (optional)##ts"), Config::textureStream.streamClothing,
+				T("Clothing and armor worn by NPCs far away are shrunk as well. Distance is taken from the character itself, so sitting or animated NPCs are measured correctly. Off by default. With some armor and clothing mods textures can turn black, purple or blurry until you come close. Whether it works depends on your installed mods, so if it looks wrong, turn this off.",
+					"Kleidung und Rüstung weit entfernter NPCs werden ebenfalls verkleinert. Der Abstand wird an der Figur selbst gemessen, damit auch sitzende oder animierte NPCs richtig erfasst werden. Standard AUS. Bei manchen Rüstungs- und Kleidungsmods können Texturen schwarz, lila oder unscharf werden, bis man näher kommt. Ob es funktioniert, hängt von den installierten Mods ab. Sieht es falsch aus, bitte ausschalten."));
+			Toggle(T("Also bodies, faces and hair (optional)##ts", "Auch Körper, Gesichter und Haare (optional)##ts"), Config::textureStream.streamCharacters,
+				T("Body, face and hair textures (textures/actors/character) of far characters are shrunk as well. Whether it works depends on your installed body, face and hair mods. If faces or hair look wrong (black, purple, blurry), turn this off.",
+					"Körper-, Gesichts- und Haartexturen (textures/actors/character) ferner Figuren werden ebenfalls verkleinert. Ob es funktioniert, hängt von den installierten Körper-, Gesichts- und Haarmods ab. Sehen Gesichter oder Haare falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
+
+			// eigener Block: gilt unabhaengig vom Modus und von der Entfernung (Review 1.0.69)
+			MenuApi::SeparatorText(T("Upper limit (always applies)", "Obergrenze (gilt immer)"));
 			{
 				// Obergrenze: 1K / 2K / 4K / 8K / keine (Regler ueber den Index, Anzeige als Text)
 				static constexpr float kCaps[] = { 1024.0f, 2048.0f, 4096.0f, 8192.0f, 0.0f };
@@ -659,36 +709,10 @@ namespace Menu
 					Config::textureStream.maxEdge = kCaps[std::clamp(static_cast<int>(std::lround(v)), 0, 4)];
 					Config::MarkDirty();
 				}
-				Tip(T("Upper limit for all streamed textures, near ones too, independent of VRAM usage. Applied right away and when textures load. Excluded paths and the character switches below still apply.",
-					"Obergrenze für alle gestreamten Texturen, auch nahe, unabhängig von der VRAM-Belegung. Wirkt sofort und beim Laden. Ausgenommene Pfade und die Figuren-Schalter unten gelten weiter."));
+				Tip(T("Upper limit for all streamed textures, near ones too, independent of VRAM usage. Applied right away and when textures load. Excluded paths and the character switches above still apply.",
+					"Obergrenze für alle gestreamten Texturen, auch nahe, unabhängig von der VRAM-Belegung. Wirkt sofort und beim Laden. Ausgenommene Pfade und die Figuren-Schalter oben gelten weiter."));
 			}
-			Toggle(T("Also clothing and armor of characters (optional)##ts", "Auch Kleidung und Rüstung von Figuren (optional)##ts"), Config::textureStream.streamClothing,
-				T("Clothing and armor worn by NPCs far away are shrunk as well. Distance is taken from the character itself, so sitting or animated NPCs are measured correctly. Off by default. With some armor and clothing mods textures can turn black, purple or blurry until you come close. Whether it works depends on your installed mods, so if it looks wrong, turn this off.",
-					"Kleidung und Rüstung weit entfernter NPCs werden ebenfalls verkleinert. Der Abstand wird an der Figur selbst gemessen, damit auch sitzende oder animierte NPCs richtig erfasst werden. Standard AUS. Bei manchen Rüstungs- und Kleidungsmods können Texturen schwarz, lila oder unscharf werden, bis man näher kommt. Ob es funktioniert, hängt von den installierten Mods ab. Sieht es falsch aus, bitte ausschalten."));
-			Toggle(T("Also bodies, faces and hair (optional)##ts", "Auch Körper, Gesichter und Haare (optional)##ts"), Config::textureStream.streamCharacters,
-				T("Body, face and hair textures (textures/actors/character) of far characters are shrunk as well. Whether it works depends on your installed body, face and hair mods. If faces or hair look wrong (black, purple, blurry), turn this off.",
-					"Körper-, Gesichts- und Haartexturen (textures/actors/character) ferner Figuren werden ebenfalls verkleinert. Ob es funktioniert, hängt von den installierten Körper-, Gesichts- und Haarmods ab. Sehen Gesichter oder Haare falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
 
-			MenuApi::SeparatorText(T("Also include excluded types", "Ausgenommene Arten mit einbeziehen"));
-			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size.",
-											"Diese Texturarten werden normalerweise nie verkleinert. Häkchen setzen, um live zu sehen, wie sie sich verhalten, am besten zusammen mit einer kleinen max. Texturgröße (1K). Häkchen weg, dann kommen sie wieder in voller Größe."));
-			DebugInclude(T("Distant terrain and LOD##dbg", "Ferne Landschaft und LOD##dbg"), TextureStream::kIncludeLod,
-				T("Paths with \\lod\\ or terrain\\. Distant ground, mountains and simplified objects far away.",
-					"Pfade mit \\lod\\ oder terrain\\. Ferner Boden, Berge und vereinfachte Objekte in der Ferne."));
-			DebugInclude(T("Effects##dbg", "Effekte##dbg"), TextureStream::kIncludeEffects,
-				T("textures\\effects\\. Fire, magic, glow, smoke. Effects drawn with the effect shader are not covered at all.",
-					"textures\\effects\\. Feuer, Magie, Leuchten, Rauch. Effekte mit eigenem Effekt-Shader werden gar nicht erfasst."));
-			DebugInclude(T("Books##dbg", "Bücher##dbg"), TextureStream::kIncludeBooks,
-				T("Every path containing 'book', also bookshelves. Excluded so text stays readable.",
-					"Alle Pfade mit 'book', auch Bücherregale. Ausgenommen, damit Schrift lesbar bleibt."));
-			DebugInclude(T("Sky##dbg", "Himmel##dbg"), TextureStream::kIncludeSky,
-				T("Paths with \\sky\\. Clouds, moons, stars - most use their own shader and are not covered.",
-					"Pfade mit \\sky\\. Wolken, Monde, Sterne - die meisten haben einen eigenen Shader und werden nicht erfasst."));
-			DebugInclude(T("Reflections (cubemaps)##dbg", "Reflexionen (Cubemaps)##dbg"), TextureStream::kIncludeCubemaps,
-				T("cubemaps\\. Real cube maps can never be downscaled, only flat textures in this folder.",
-					"cubemaps\\. Echte Würfelkarten lassen sich nie verkleinern, nur flache Texturen in diesem Ordner."));
-			MenuApi::TextWrapped("%s", T("Not possible at all: grass, water and effect shader textures (other shaders), textures without mipmaps.",
-											"Gar nicht möglich: Gras, Wasser und Effekt-Shader-Texturen (andere Shader), Texturen ohne Mipmaps."));
 		}
 
 		void __stdcall RenderScene()

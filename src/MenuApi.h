@@ -139,6 +139,44 @@ namespace MenuApi
 		}
 	}
 
+	// Auswahlliste; fehlt sie im Framework, false (nichts geaendert)
+	inline bool Combo(const char* a_label, int* a_current, const char* const a_items[], int a_count)
+	{
+		static const auto f = detail::Get<bool (*)(const char*, int*, const char* const[], int, int)>("igCombo_Str_arr");
+		return f && f(a_label, a_current, a_items, a_count, -1);
+	}
+
+	inline bool HasCombo()
+	{
+		return detail::Get<void*>("igCombo_Str_arr") != nullptr;
+	}
+
+	// Ausgegraut (nicht bedienbar); nur paarweise, fehlt eine der beiden Funktionen, passiert nichts
+	namespace detail
+	{
+		inline void (*BeginDisabledFn())(bool)
+		{
+			static const auto f = Get<void (*)(bool)>("igBeginDisabled");
+			static const auto g = Get<void (*)()>("igEndDisabled");
+			return f && g ? f : nullptr;
+		}
+	}
+
+	inline void BeginDisabled(bool a_disabled)
+	{
+		if (const auto f = detail::BeginDisabledFn()) {
+			f(a_disabled);
+		}
+	}
+
+	inline void EndDisabled()
+	{
+		static const auto g = detail::Get<void (*)()>("igEndDisabled");
+		if (detail::BeginDisabledFn() && g) {
+			g();
+		}
+	}
+
 	inline void SeparatorText(const char* a_label)
 	{
 		static const auto f = detail::Get<void (*)(const char*)>("igSeparatorText");
