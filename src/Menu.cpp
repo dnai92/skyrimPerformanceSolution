@@ -321,7 +321,8 @@ namespace Menu
 			const auto mask = TextureStream::GetDebugInclude();
 			bool       v = (mask & a_bit) != 0;
 			if (MenuApi::Checkbox(a_label, &v)) {
-				TextureStream::SetDebugInclude(v ? (mask | a_bit) : (mask & ~a_bit));  // nur Test, nicht gespeichert
+				TextureStream::SetDebugInclude(v ? (mask | a_bit) : (mask & ~a_bit));
+				Config::MarkDirty();
 			}
 			Tip(a_tip);
 		}
@@ -348,27 +349,6 @@ namespace Menu
 			}
 			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
 				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
-
-			MenuApi::SeparatorText(T("Texture streaming: also include excluded types", "Textur-Streaming: ausgenommene Arten mit einbeziehen"));
-			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled. Tick one to see live how it behaves, best together with a low max. texture size (1K). Untick and they go back to full size. Not saved.",
-											"Diese Texturarten werden normalerweise nie verkleinert. Häkchen setzen, um live zu sehen, wie sie sich verhalten, am besten zusammen mit einer kleinen max. Texturgröße (1K). Häkchen weg, dann kommen sie wieder in voller Größe. Wird nicht gespeichert."));
-			DebugInclude(T("Distant terrain and LOD##dbg", "Ferne Landschaft und LOD##dbg"), TextureStream::kIncludeLod,
-				T("Paths with \\lod\\ or terrain\\. Distant ground, mountains and simplified objects far away.",
-					"Pfade mit \\lod\\ oder terrain\\. Ferner Boden, Berge und vereinfachte Objekte in der Ferne."));
-			DebugInclude(T("Effects##dbg", "Effekte##dbg"), TextureStream::kIncludeEffects,
-				T("textures\\effects\\. Fire, magic, glow, smoke. Effects drawn with the effect shader are not covered at all.",
-					"textures\\effects\\. Feuer, Magie, Leuchten, Rauch. Effekte mit eigenem Effekt-Shader werden gar nicht erfasst."));
-			DebugInclude(T("Books##dbg", "Bücher##dbg"), TextureStream::kIncludeBooks,
-				T("Every path containing 'book', also bookshelves. Excluded so text stays readable.",
-					"Alle Pfade mit 'book', auch Bücherregale. Ausgenommen, damit Schrift lesbar bleibt."));
-			DebugInclude(T("Sky##dbg", "Himmel##dbg"), TextureStream::kIncludeSky,
-				T("Paths with \\sky\\. Clouds, moons, stars - most use their own shader and are not covered.",
-					"Pfade mit \\sky\\. Wolken, Monde, Sterne - die meisten haben einen eigenen Shader und werden nicht erfasst."));
-			DebugInclude(T("Reflections (cubemaps)##dbg", "Reflexionen (Cubemaps)##dbg"), TextureStream::kIncludeCubemaps,
-				T("cubemaps\\. Real cube maps can never be downscaled, only flat textures in this folder.",
-					"cubemaps\\. Echte Würfelkarten lassen sich nie verkleinern, nur flache Texturen in diesem Ordner."));
-			MenuApi::TextWrapped("%s", T("Not possible at all: grass, water and effect shader textures (other shaders), textures without mipmaps.",
-											"Gar nicht möglich: Gras, Wasser und Effekt-Shader-Texturen (andere Shader), Texturen ohne Mipmaps."));
 
 			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));
 			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
@@ -713,6 +693,27 @@ namespace Menu
 					"Obergrenze für alle gestreamten Texturen, auch nahe, unabhängig von der VRAM-Belegung. Wirkt sofort und beim Laden. Ausgenommene Pfade und die Figuren-Schalter oben gelten weiter."));
 			}
 
+
+			MenuApi::SeparatorText(T("Advanced: also include excluded types", "Erweitert: ausgenommene Arten mit einbeziehen"));
+			MenuApi::TextWrapped("%s", T("These texture types are normally never downscaled, for good reasons: book text can become hard to read, distant mountains and terrain coarser. Tick a type if it looks fine for you. Untick and they go back to full size. Saved.",
+											"Diese Texturarten werden normalerweise nie verkleinert, aus gutem Grund: Schrift in Büchern kann schwer lesbar werden, ferne Berge und Landschaft gröber. Häkchen setzen, wenn es bei dir gut aussieht. Häkchen weg, dann kommen sie wieder in voller Größe. Wird gespeichert."));
+			DebugInclude(T("Distant terrain and LOD##ts", "Ferne Landschaft und LOD##ts"), TextureStream::kIncludeLod,
+				T("Paths with \\lod\\ or terrain\\. Distant ground, mountains and simplified objects far away.",
+					"Pfade mit \\lod\\ oder terrain\\. Ferner Boden, Berge und vereinfachte Objekte in der Ferne."));
+			DebugInclude(T("Effects##ts", "Effekte##ts"), TextureStream::kIncludeEffects,
+				T("textures\\effects\\. Fire, magic, glow, smoke. Effects drawn with the effect shader are not covered at all.",
+					"textures\\effects\\. Feuer, Magie, Leuchten, Rauch. Effekte mit eigenem Effekt-Shader werden gar nicht erfasst."));
+			DebugInclude(T("Books##ts", "Bücher##ts"), TextureStream::kIncludeBooks,
+				T("Every path containing 'book', also bookshelves. Excluded so text stays readable.",
+					"Alle Pfade mit 'book', auch Bücherregale. Ausgenommen, damit Schrift lesbar bleibt."));
+			DebugInclude(T("Sky##ts", "Himmel##ts"), TextureStream::kIncludeSky,
+				T("Paths with \\sky\\. Clouds, moons, stars - most use their own shader and are not covered.",
+					"Pfade mit \\sky\\. Wolken, Monde, Sterne - die meisten haben einen eigenen Shader und werden nicht erfasst."));
+			DebugInclude(T("Reflections (cubemaps)##ts", "Reflexionen (Cubemaps)##ts"), TextureStream::kIncludeCubemaps,
+				T("cubemaps\\. Real cube maps can never be downscaled, only flat textures in this folder.",
+					"cubemaps\\. Echte Würfelkarten lassen sich nie verkleinern, nur flache Texturen in diesem Ordner."));
+			MenuApi::TextWrapped("%s", T("Not possible at all: grass, water and effect shader textures (other shaders), textures without mipmaps.",
+											"Gar nicht möglich: Gras, Wasser und Effekt-Shader-Texturen (andere Shader), Texturen ohne Mipmaps."));
 		}
 
 		void __stdcall RenderScene()
