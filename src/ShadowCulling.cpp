@@ -2110,12 +2110,15 @@ namespace ShadowCulling
 	{
 		thread_local bool                t_inShadowMapDraw = false;
 		thread_local const RE::NiCamera* t_mapCamera = nullptr;  // Kamera der Schattenkarte, die gerade gezeichnet wird
+		thread_local std::uint32_t       t_mapSlot = UINT32_MAX;  // ihr Punktlicht-Platz, einmal je Karte gesucht
 		thread_local bool                t_mapCached = false;    // der Licht-Cache verwaltet diese Karte (Aufbau/Cache)
 	}
 
 	void SetShadowMapContext(const RE::NiCamera* a_camera, bool a_cached) noexcept
 	{
 		t_mapCamera = a_camera;
+		// je Karte einmal statt je Draw (Tracy 1.0.70: 0,4 % des Hauptthreads am Markt fuer die Suche je Draw)
+		t_mapSlot = a_camera ? PointSlot(a_camera) : UINT32_MAX;
 		t_mapCached = a_cached;
 	}
 
@@ -2129,7 +2132,7 @@ namespace ShadowCulling
 		if (!t_inShadowMapDraw || !t_mapCamera || !a_pass.geometry || !Config::masterEnabled.load(std::memory_order_relaxed)) {
 			return false;
 		}
-		const auto slot = PointSlot(t_mapCamera);
+		const auto slot = t_mapSlot;
 		if (slot == UINT32_MAX) {
 			return false;  // Sonne oder unbekannte Kamera
 		}
