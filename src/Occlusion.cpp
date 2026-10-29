@@ -1023,6 +1023,9 @@ namespace Occlusion
 
 		void Builder()
 		{
+#ifdef TRACY_ENABLE
+			tracy::SetThreadName("SPS Verdeckung");
+#endif
 			for (;;) {
 				BuildRequest r;
 				{
@@ -1037,6 +1040,7 @@ namespace Occlusion
 				}
 				const auto t0 = Clock::now();
 				try {
+					ZoneScopedN("Verdeckung: Pyramide bauen");
 					auto p = BuildPyramid(*r.snap, r.pos, r.rot, r.fr);
 					if (r.resetGen != g_resetGen.load(std::memory_order_acquire)) {
 						continue;  // Welt inzwischen gewechselt
@@ -1388,6 +1392,7 @@ namespace Occlusion
 
 	void OnDepthPrepassEnd() noexcept
 	{
+		ZoneScopedN("Verdeckung: Tiefenbild + Figuren");
 		if (!Active()) {
 			return;
 		}
@@ -1687,6 +1692,7 @@ namespace Occlusion
 
 	void OnPresent() noexcept
 	{
+		ZoneScopedN("Verdeckung: Present");
 		++g_frame;
 		if (!g_frameBeginHooked.load(std::memory_order_relaxed)) {
 			AdvanceFrame();  // ohne Main::Begin-Hook: wie bis 1.0.68 am Present

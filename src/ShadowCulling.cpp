@@ -806,6 +806,7 @@ namespace ShadowCulling
 		{
 			static void thunk(bool a_arg)
 			{
+				ZoneScopedN("Hauptbild zeichnen");  // inkl. Draw-Filter (verdeckt, winzig, Bodendetails)
 				g_drawFilterScopes.fetch_add(1, std::memory_order_relaxed);
 				g_inMainWorld.store(true, std::memory_order_relaxed);
 				func(a_arg);
@@ -822,7 +823,10 @@ namespace ShadowCulling
 		{
 			static std::uint64_t thunk(std::uint64_t a_1, std::uint64_t a_2, std::uint64_t a_3, std::uint64_t a_4)
 			{
-				Occlusion::OnFrameBegin();
+				{
+					ZoneScopedN("Verdeckung: Frame-Beginn");
+					Occlusion::OnFrameBegin();
+				}
 				return func(a_1, a_2, a_3, a_4);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -832,6 +836,7 @@ namespace ShadowCulling
 		{
 			static void thunk(bool a_arg1, bool a_arg2)
 			{
+				ZoneScopedN("Tiefenvorpass");
 				g_drawFilterScopes.fetch_add(1, std::memory_order_relaxed);
 				g_inDepthPrepass.store(true, std::memory_order_relaxed);
 				Occlusion::OnDepthPrepassBegin();
@@ -1961,6 +1966,7 @@ namespace ShadowCulling
 				f.valid = false;
 				++f.changed;
 			} else if (f.matched < f.statics.size() && ++f.removeCheck % 8 == 0) {
+				ZoneScopedN("Fernschatten: entfernte Objekte pruefen");
 				// Nicht gezeichnete Cache-Meshes: oft nur nicht eingesammelt (die Auswahl haengt vom Blick ab), aber ein
 				// weggenommenes Objekt liesse seinen Schatten im Cache stehen. Jedes 8. Cache-Bild pruefen, ob sie noch in
 				// der Welt sind (Review 1.0.69)

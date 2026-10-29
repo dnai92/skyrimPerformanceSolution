@@ -103,6 +103,7 @@ namespace EngineTimers
 		{
 			static void thunk(void* a_arg1, void* a_arg2)
 			{
+				ZoneScopedN("Hauptbild einsammeln");  // inkl. Verdeckungstest, winzige Objekte, Bodendetails
 				Stats::ScopedTimer timer(Stats::Zone::MainCull);
 				func(a_arg1, a_arg2);
 			}

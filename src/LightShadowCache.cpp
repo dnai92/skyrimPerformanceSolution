@@ -518,6 +518,7 @@ namespace LightShadowCache
 
 			static void thunk(RE::NiCamera* a_camera, void* a_accumulator, std::uint32_t a_flags)
 			{
+				ZoneScopedN("Schattenkarte zeichnen");  // Licht-Cache, Fernschatten-Cache, Fackelschatten, Figurenteile
 				// Filter beim Draw (ShadowCulling): kleine Figurenteile, Fackelschatten - dafuer die Kamera der Karte und ob
 				// dieser Cache sie verwaltet (dann entscheidet er ueber Unbewegliches)
 				const LightState* l = a_camera ? FindByCamera(a_camera) : nullptr;
