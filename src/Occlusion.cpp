@@ -509,10 +509,18 @@ namespace Occlusion
 		// ~10^5 - in float lagen Verdeckungen dort um Prozente zu nah), Ertragsbremse und seltenere Pruefung Sichtbarer.
 		using Mat4d = std::array<std::array<double, 4>, 4>;
 		std::atomic<float>         g_playerFreedPct{ 0.0f };  // davon die Spielerfigur bzw. das Reittier
-		std::atomic<float>         g_moverFreedPct{ 0.0f };  // Anteil des Tiefenbilds, der wegen Figuren frei bleibt (letzter Aufbau)
+		// Anteil des Tiefenbilds, der wegen Figuren frei bleibt
+		std::atomic<std::uint64_t> g_moverFreedTiles{ 0 }, g_moverFreedBuilds{ 0 };  // Summe je Bericht (Durchschnitt)
+		std::atomic<float>         g_moverFreedMax{ 0.0f };
 		std::atomic<std::uint32_t> g_moverCount{ 0 };
 		std::atomic<std::uint32_t> g_actorsNear{ 0 };  // Figuren in der Naehe (davon bewegt: g_moverCount ohne Spieler)
 		constexpr std::uint32_t kGW = OcclusionGpu::kWidth, kGH = OcclusionGpu::kHeight;
+
+		float FreedAvgPct() noexcept
+		{
+			const auto tiles = g_moverFreedTiles.exchange(0), builds = g_moverFreedBuilds.exchange(0);
+			return builds ? 100.0f * static_cast<float>(tiles) / (static_cast<float>(builds) * kGW * kGH) : 0.0f;
+		}
 		constexpr float         kFree = std::numeric_limits<float>::infinity();  // keine Verdeckung bekannt
 
 		Mat4d MatMul(const Mat4d& a_a, const Mat4d& a_b) noexcept
@@ -711,47 +719,64 @@ namespace Occlusion
 					const float r = mover.radius;
 					float       cc[4];
 					Mul(c.gm, mover.center, cc);
-					// Kugel um die Figur statt Quader aus Bildrechteck und Tiefenband: der Quader nahm bei der Spielerfigur (nah an
-					// der Kamera) den ganzen Boden im Rechteck mit - im dritten Test 1.0.69 waren 20-28 % des Bilds frei, die
-					// Verdeckung blieb bei 15 % statt 26-33 %. Bildbereich der Kugel abgeschaetzt: jeder Punkt liegt hoechstens r
-					// seitlich und r naeher -> |x - cx| <= r * (sx + |cx|) / (w - r). Ellipsoid darin, Tiefe +-r um die Mitte.
-					float cx = 0.0f, cy = 0.0f, hx = 1e6f, hy = 1e6f;
+					// Kugel um die Figur, je Kachel exakt geprueft: aus Bildlage und Tiefe der Kachel den Punkt in Kamerakoordinaten
+					// bilden und den Abstand zur Mitte messen. Bis zum vierten Test 1.0.69 Quader bzw. Ellipsoid und bei Figuren
+					// direkt an der Kamera das ganze Bild - das nahm Boden und Waende weit neben der Figur mit (bis 25-41 % des
+					// Bilds frei, Verdeckung 7-15 % statt 26-33 %).
 					const float cw = cc[3];
-					if (cw > r * 1.05f + 1.0f) {
-						cx = cc[0] / cw;
-						cy = cc[1] / cw;
-						hx = r * (psx + std::fabs(cx)) / (cw - r) + 1.0f / kGW;
-						hy = r * (psy + std::fabs(cy)) / (cw - r) + 1.0f / kGH;
-					} else if (m == 0 || cw < -r) {
-						// Kugel reicht bis an die Kamera: Ich-Perspektive (der Koerper liegt nicht im Tiefenbild, Arme und Waffe deckt
-						// die 128-Grenze oben ab) oder ganz hinter der Kamera
+					if (cw < -r || (m == 0 && cw <= r * 1.05f + 1.0f)) {
+						// ganz hinter der Kamera, oder Ich-Perspektive (der Koerper liegt nicht im Tiefenbild, Arme und Waffe deckt
+						// die 128-Grenze oben ab)
 						continue;
 					}
-					// sonst laeuft eine Figur direkt an der Kamera vorbei: ihr Tiefenbereich im ganzen Bild
-					{
-						const int   u0 = std::max(0, static_cast<int>(std::floor(((cx - hx) * 0.5f + 0.5f) * kGW)));
-						const int   u1 = std::min(static_cast<int>(kGW) - 1, static_cast<int>(std::floor(((cx + hx) * 0.5f + 0.5f) * kGW)));
-						const int   v0 = std::max(0, static_cast<int>(std::floor((0.5f - (cy + hy) * 0.5f) * kGH)));
-						const int   v1 = std::min(static_cast<int>(kGH) - 1, static_cast<int>(std::floor((0.5f - (cy - hy) * 0.5f) * kGH)));
-						for (int v = v0; v <= v1; ++v) {
-							const float dy = (1.0f - (static_cast<float>(v) + 0.5f) / kGH * 2.0f - cy) / hy;
-							for (int u = u0; u <= u1; ++u) {
-								auto&       z = src.z[static_cast<std::size_t>(v) * kGW + u];
-								const float dx = ((static_cast<float>(u) + 0.5f) / kGW * 2.0f - 1.0f - cx) / hx;
-								const float dz = (z - cw) / r;
-								if (z > 0.0f && dx * dx + dy * dy + dz * dz <= 1.0f) {
-									z = 0.0f;
-									++freedByMovers;
-									if (m == 0) {
-										++freedByPlayer;
-									}
+					// Bildbereich: jeder Punkt liegt hoechstens r seitlich und r naeher -> |x - cx| <= r * (sx + |cx|) / (w - r);
+					// reicht die Kugel bis an die Kamera, das ganze Bild (der Kugeltest unten grenzt ein)
+					int u0 = 0, u1 = static_cast<int>(kGW) - 1, v0 = 0, v1 = static_cast<int>(kGH) - 1;
+					if (cw > r * 1.05f + 1.0f) {
+						const float cx = cc[0] / cw, cy = cc[1] / cw;
+						const float hx = r * (psx + std::fabs(cx)) / (cw - r) + 1.0f / kGW, hy = r * (psy + std::fabs(cy)) / (cw - r) + 1.0f / kGH;
+						if (cx - hx > 1.0f || cx + hx < -1.0f || cy - hy > 1.0f || cy + hy < -1.0f) {
+							continue;  // nicht im Bild
+						}
+						u0 = std::max(u0, static_cast<int>(std::floor(((cx - hx) * 0.5f + 0.5f) * kGW)));
+						u1 = std::min(u1, static_cast<int>(std::floor(((cx + hx) * 0.5f + 0.5f) * kGW)));
+						v0 = std::max(v0, static_cast<int>(std::floor((0.5f - (cy + hy) * 0.5f) * kGH)));
+						v1 = std::min(v1, static_cast<int>(std::floor((0.5f - (cy - hy) * 0.5f) * kGH)));
+					}
+					// Mitte in Kamerakoordinaten (clip.x = sx * x, clip.y = sy * y, clip.w = Tiefe)
+					const float mx = cc[0] / psx, my = cc[1] / psy;
+					// halbe Kachel in Welteinheiten je Einheit Tiefe: eine Kachel, die die Kugel nur am Rand streift, zaehlt mit
+					const float tileX = 1.0f / (kGW * psx), tileY = 1.0f / (kGH * psy);
+					for (int v = v0; v <= v1; ++v) {
+						const float y = 1.0f - (static_cast<float>(v) + 0.5f) / kGH * 2.0f;
+						for (int u = u0; u <= u1; ++u) {
+							auto&       z = src.z[static_cast<std::size_t>(v) * kGW + u];
+							if (!(z > 0.0f) || std::fabs(z - cw) > r) {
+								continue;
+							}
+							const float x = (static_cast<float>(u) + 0.5f) / kGW * 2.0f - 1.0f;
+							const float dx = std::max(0.0f, std::fabs(x * z / psx - mx) - z * tileX);
+							const float dy = std::max(0.0f, std::fabs(y * z / psy - my) - z * tileY);
+							const float dz = z - cw;
+							if (dx * dx + dy * dy + dz * dz <= r * r) {
+								z = 0.0f;
+								++freedByMovers;
+								if (m == 0) {
+									++freedByPlayer;
 								}
 							}
 						}
 					}
 				}
 				g_playerFreedPct.store(100.0f * static_cast<float>(freedByPlayer) / static_cast<float>(src.z.size()), std::memory_order_relaxed);
-				g_moverFreedPct.store(100.0f * static_cast<float>(freedByMovers) / static_cast<float>(src.z.size()), std::memory_order_relaxed);
+				{
+					const float pct = 100.0f * static_cast<float>(freedByMovers) / static_cast<float>(src.z.size());
+					g_moverFreedTiles.fetch_add(freedByMovers, std::memory_order_relaxed);
+					g_moverFreedBuilds.fetch_add(1, std::memory_order_relaxed);
+					float prev = g_moverFreedMax.load(std::memory_order_relaxed);
+					while (pct > prev && !g_moverFreedMax.compare_exchange_weak(prev, pct, std::memory_order_relaxed)) {
+					}
+				}
 				g_moverCount.store(static_cast<std::uint32_t>(c.movers.size()), std::memory_order_relaxed);
 				src.snapId = a_s.id;
 			}
@@ -1242,9 +1267,9 @@ namespace Occlusion
 			g_cullBlockedFrames = 0;
 			{
 				const auto builds = g_builds.exchange(0), ns = g_buildNs.exchange(0);
-				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | moving figures {} of {} free {:.1f} % of the depth image (player {:.1f} %) | Bottled Shaders HiZ {}",
+				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | moving figures {} of {} free {:.1f} % of the depth image on average, max {:.1f} % (player now {:.1f} %) | Bottled Shaders HiZ {}",
 					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_kickLate.exchange(0), g_kickBegin.exchange(0), g_gatedFrames, g_visSkipped.exchange(0) / frames,
-					g_moverCount.load() ? g_moverCount.load() - 1 : 0, g_actorsNear.load(), g_moverFreedPct.load(), g_playerFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
+					g_moverCount.load() ? g_moverCount.load() - 1 : 0, g_actorsNear.load(), FreedAvgPct(), g_moverFreedMax.exchange(0.0f), g_playerFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
 				g_gatedFrames = 0;
 				if (log && g_poseMismatch) {
 					logger::info("[Occlusion]   depth images not used because camera pose and GPU matrix differed: {}", g_poseMismatch);
