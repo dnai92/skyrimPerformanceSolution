@@ -704,7 +704,7 @@ namespace Occlusion
 				std::size_t freedByMovers = 0;
 				for (const auto& mover : c.movers) {
 					const float r = mover.radius;
-					float       minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f, wFar = 0.0f;
+					float       minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f, wFar = 0.0f, wNear = 1e30f;
 					bool        inFront = true;
 					for (int i = 0; i < 8 && inFront; ++i) {
 						const RE::NiPoint3 q{ mover.center.x + ((i & 1) ? r : -r), mover.center.y + ((i & 2) ? r : -r), mover.center.z + ((i & 4) ? r : -r) };
@@ -719,6 +719,7 @@ namespace Occlusion
 						minY = std::min(minY, clip[1] / clip[3]);
 						maxY = std::max(maxY, clip[1] / clip[3]);
 						wFar = std::max(wFar, clip[3]);
+						wNear = std::min(wNear, clip[3]);
 					}
 					if (inFront) {
 						const int u0 = std::max(0, static_cast<int>(std::floor((minX * 0.5f + 0.5f) * kGW)) - 2);
@@ -728,7 +729,9 @@ namespace Occlusion
 						for (int v = v0; v <= v1; ++v) {
 							for (int u = u0; u <= u1; ++u) {
 								auto& z = src.z[static_cast<std::size_t>(v) * kGW + u];
-								if (z > 0.0f && z <= wFar) {
+								// nur was in der Tiefe der Figur liegt (sie selbst, Boden direkt an ihr) - nicht alles davor: bis zum
+								// zweiten Test 1.0.69 wurden so am Markt 32 % des Bilds frei, die Verdeckung fiel von 26 auf 5 %
+								if (z >= wNear && z <= wFar) {
 									z = 0.0f;
 									++freedByMovers;
 								}
