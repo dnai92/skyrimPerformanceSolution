@@ -155,6 +155,14 @@ namespace Occlusion
 		{
 			auto&            sh = g_shards[(reinterpret_cast<std::uintptr_t>(a_geom) >> 4) % kShards];
 			std::scoped_lock l(sh.lock);
+			// Sichtbare Objekte (die meisten Pruefungen) brauchen keinen Eintrag: ohne Verlauf beginnt die naechste Verdeckung
+			// ohnehin bei 1 - so bleibt die Tabelle klein und es wird seltener Speicher angefordert (Review 1.0.69, L4)
+			if (!a_occluded) {
+				if (const auto it = sh.map.find(a_geom); it != sh.map.end()) {
+					sh.map.erase(it);
+				}
+				return false;
+			}
 			auto&            e = sh.map[a_geom];
 			const auto       need = Config::occlStreak.load(std::memory_order_relaxed);
 			if (e.lastId == a_snapId) {
@@ -621,6 +629,25 @@ namespace Occlusion
 			return std::memcmp(&a_p1, &a_p2, sizeof(a_p1)) == 0 && std::memcmp(&a_r1, &a_r2, sizeof(a_r1)) == 0;
 		}
 
+		// Kamera praktisch gleich (unter 1 Einheit, unter ~0,1 Grad): die Pyramide gilt weiter. Geprueft wird ohnehin in ihrer
+		// eigenen Kamera, der Unterschied liegt weit unter dem Spielraum (2 % + 16). Bis 1.0.68 nur bei exakt gleicher Lage -
+		// beim langsamen Drehen blieben 4-7 % der Objekte ohne passende Pyramide ungeprueft (Review 1.0.69, L2).
+		bool NearCamera(const RE::NiPoint3& a_p1, const RE::NiMatrix3& a_r1, const RE::NiPoint3& a_p2, const RE::NiMatrix3& a_r2) noexcept
+		{
+			const float dx = a_p1.x - a_p2.x, dy = a_p1.y - a_p2.y, dz = a_p1.z - a_p2.z;
+			if (dx * dx + dy * dy + dz * dz > 1.0f) {
+				return false;
+			}
+			for (int r = 0; r < 3; ++r) {
+				for (int c = 0; c < 3; ++c) {
+					if (std::fabs(a_r1.entry[r][c] - a_r2.entry[r][c]) > 0.0017f) {
+						return false;
+					}
+				}
+			}
+			return true;
+		}
+
 		std::shared_ptr<const Pyramid> BuildPyramid(const Snapshot& a_s, const RE::NiPoint3& a_pos, const RE::NiMatrix3& a_rot, const RE::NiFrustum& a_fr)
 		{
 			// Speicher wiederverwenden (nur der Hilfsthread baut): ein frei gewordener Eintrag (nur noch hier referenziert) wird
@@ -1005,7 +1032,7 @@ namespace Occlusion
 					g_buildReq.reset();
 				}
 				const auto cur = g_pyr.load();
-				if (cur && cur->snapId == r.snap->id && SameCamera(cur->camPos, cur->camRot, r.pos, r.rot)) {
+				if (cur && cur->snapId == r.snap->id && NearCamera(cur->camPos, cur->camRot, r.pos, r.rot)) {
 					continue;
 				}
 				const auto t0 = Clock::now();
@@ -1075,7 +1102,7 @@ namespace Occlusion
 				pyr = g_pyr.load();
 				gen = now;
 			}
-			if (!pyr || !SameCamera(pyr->camPos, pyr->camRot, a_pos, a_rot)) {
+			if (!pyr || !NearCamera(pyr->camPos, pyr->camRot, a_pos, a_rot)) {
 				return nullptr;
 			}
 			return pyr.get();

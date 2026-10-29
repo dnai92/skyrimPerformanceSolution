@@ -678,6 +678,46 @@ namespace ShadowCulling
 			return i;
 		}
 
+		// Mikro-Culling: Groesse auf dem Bildschirm statt nur Winkel - Sichtfeld (Zoom beim Bogen, eigenes FOV) und
+		// Aufloesung gehen ein (Review 1.0.69: beim Zielen ploppten Objekte auf). 1 = Bezug 1080p bei 80 Grad horizontal.
+		std::atomic<float> g_mainViewScale{ 1.0f };
+		// Hysterese je Mesh: weggelassen bleibt es, bis es 15 % groesser erscheint (sonst Flackern an der Grenze)
+		std::array<std::atomic<std::uintptr_t>, 4096> g_microState{};
+
+		void UpdateMainViewScale() noexcept
+		{
+			float scale = 1.0f;
+			if (const auto cam = RE::Main::WorldRootCamera()) {
+				const auto& fr = cam->GetRuntimeData2().viewFrustum;
+				const float halfH = 0.5f * (fr.fTop - fr.fBottom);  // tan(halbes vertikales Sichtfeld)
+				if (halfH > 0.01f && halfH < 10.0f) {
+					scale = 0.472f / halfH;  // 80 Grad horizontal bei 16:9
+				}
+			}
+			if (const auto gs = RE::BSGraphics::State::GetSingleton(); gs && gs->screenHeight > 0) {
+				scale *= static_cast<float>(gs->screenHeight) / 1080.0f;
+			}
+			g_mainViewScale.store(std::clamp(scale, 0.25f, 8.0f), std::memory_order_relaxed);
+		}
+
+		bool MicroCull(const RE::BSGeometry& a_geom) noexcept
+		{
+			const auto& rule = Config::mainViewCulling;
+			if (!rule.enabled) {
+				return false;
+			}
+			const auto key = reinterpret_cast<std::uintptr_t>(&a_geom) & ~std::uintptr_t{ 1 };
+			auto&      slot = g_microState[(key >> 4) % g_microState.size()];
+			const auto prev = slot.load(std::memory_order_relaxed);
+			const bool wasCulled = (prev & ~std::uintptr_t{ 1 }) == key && (prev & 1) != 0;
+			const float scale = g_mainViewScale.load(std::memory_order_relaxed) * (wasCulled ? 1.0f / 1.15f : 1.0f);
+			const bool cull = ShouldCull(rule, a_geom, UINT32_MAX, scale);
+			if (cull != wasCulled || (prev & ~std::uintptr_t{ 1 }) != key) {
+				slot.store(key | (cull ? 1 : 0), std::memory_order_relaxed);
+			}
+			return cull;
+		}
+
 		// Hauptszene: Decal-Culling (Laub, Schmutz, Fussabdruecke, Blut) und optionales Mikro-Culling winziger Objekte.
 		// Die Hauptkamera ('WorldRoot Camera') laeuft NICHT ueber AppendVirtual -> Aufruf aus GetRenderPasses (vfunc 0x2A).
 		bool ShouldCullMain(RE::BSGeometry& a_geom) noexcept
@@ -700,7 +740,7 @@ namespace ShadowCulling
 				}
 				Stats::Count(Stats::Counter::DecalKept);
 			}
-			if (ShouldCull(Config::mainViewCulling, a_geom, UINT32_MAX)) {
+			if (MicroCull(a_geom)) {
 				Stats::Count(Stats::Counter::MainCulled);
 				return true;
 			}
@@ -2140,6 +2180,7 @@ namespace ShadowCulling
 	void OnFrame()
 	{
 		Config::ReloadIfChanged();
+		UpdateMainViewScale();
 		EngineTimers::OnFrame();
 		TextureStream::OnFrame();
 #ifndef SPS_VR
