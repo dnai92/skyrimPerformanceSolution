@@ -10,6 +10,7 @@
 #include <regex>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 
 namespace Occlusion
 {
@@ -510,6 +511,7 @@ namespace Occlusion
 		std::atomic<float>         g_playerFreedPct{ 0.0f };  // davon die Spielerfigur bzw. das Reittier
 		std::atomic<float>         g_moverFreedPct{ 0.0f };  // Anteil des Tiefenbilds, der wegen Figuren frei bleibt (letzter Aufbau)
 		std::atomic<std::uint32_t> g_moverCount{ 0 };
+		std::atomic<std::uint32_t> g_actorsNear{ 0 };  // Figuren in der Naehe (davon bewegt: g_moverCount ohne Spieler)
 		constexpr std::uint32_t kGW = OcclusionGpu::kWidth, kGH = OcclusionGpu::kHeight;
 		constexpr float         kFree = std::numeric_limits<float>::infinity();  // keine Verdeckung bekannt
 
@@ -1242,9 +1244,9 @@ namespace Occlusion
 			g_cullBlockedFrames = 0;
 			{
 				const auto builds = g_builds.exchange(0), ns = g_buildNs.exchange(0);
-				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | figures {} free {:.1f} % of the depth image (player {:.1f} %) | Bottled Shaders HiZ {}",
+				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | moving figures {} of {} free {:.1f} % of the depth image (player {:.1f} %) | Bottled Shaders HiZ {}",
 					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_kickLate.exchange(0), g_kickBegin.exchange(0), g_gatedFrames, g_visSkipped.exchange(0) / frames,
-					g_moverCount.load(), g_moverFreedPct.load(), g_playerFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
+					g_moverCount.load() ? g_moverCount.load() - 1 : 0, g_actorsNear.load(), g_moverFreedPct.load(), g_playerFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
 				g_gatedFrames = 0;
 				if (log && g_poseMismatch) {
 					logger::info("[Occlusion]   depth images not used because camera pose and GPU matrix differed: {}", g_poseMismatch);
@@ -1389,8 +1391,20 @@ namespace Occlusion
 			own.resH = std::clamp(gs->GetRuntimeData().dynamicResolutionHeightRatio, 0.1f, 1.0f);
 		}
 		// Was sich bewegt, darf nach dem Umrechnen nicht als Verdeckung an der alten Stelle liegen bleiben: die Spielerfigur
-		// (bewegt sich mit der Kamera) und alle Figuren in der Naehe (NPCs, Pferde, Drachen - Review 1.0.69: hinter einem
-		// vorbeilaufenden NPC fehlten fuer 1-3 Bilder kleine Objekte). Faster Objects nimmt Figuren ebenso aus.
+		// (bewegt sich mit der Kamera) und Figuren, die laufen oder sich drehen (NPCs, Pferde, Drachen - Review 1.0.69: hinter
+		// einem vorbeilaufenden NPC fehlten fuer 1-3 Bilder kleine Objekte). Stehende Figuren bleiben Verdeckung: sie stehen im
+		// alten Tiefenbild an der richtigen Stelle - alle Figuren freizugeben kostete am Markt 16-41 % des Bilds (Test 1.0.69).
+		struct ActorTrack
+		{
+			RE::NiPoint3  pos;
+			float         angle = 0.0f;
+			std::uint64_t moved = 0, seen = 0;
+		};
+		static std::unordered_map<RE::FormID, ActorTrack> s_tracks;
+		static std::uint64_t                               s_tick = 0;
+		constexpr std::uint64_t                            kMovedFrames = 12;  // Tiefenbild ist einige Bilder alt + Streak
+		++s_tick;
+		std::uint32_t actorsNear = 0;
 		own.movers.clear();
 		if (const auto player = RE::PlayerCharacter::GetSingleton()) {
 			const auto pp = player->GetPosition();
@@ -1406,6 +1420,26 @@ namespace Occlusion
 				if (!actor || !actor->Is3DLoaded()) {
 					continue;
 				}
+				++actorsNear;
+				{
+					const auto  p = actor->GetPosition();
+					const float a = actor->GetAngleZ();
+					auto [it, inserted] = s_tracks.try_emplace(actor->GetFormID(), ActorTrack{ p, a, s_tick, s_tick });
+					auto& t = it->second;
+					if (!inserted) {
+						float da = std::fabs(a - t.angle);
+						da = std::min(da, 6.2831853f - da);
+						if (p.GetSquaredDistance(t.pos) > 1.0f || da > 0.01f) {
+							t.moved = s_tick;
+						}
+						t.pos = p;
+						t.angle = a;
+						t.seen = s_tick;
+					}
+					if (s_tick - t.moved > kMovedFrames) {
+						continue;  // steht still: bleibt Verdeckung
+					}
+				}
 				// Groesse aus den Grundmassen der Figur (wie im Creation Kit), nicht aus der Huelle des 3D-Modells: die ist bei
 				// Figuren oft viel zu gross (Faster Objects: Skelett 4605, Irrlichter 11254 Einheiten) - im Test 1.0.69 gab sie
 				// am Markt fast das ganze Tiefenbild frei, die Verdeckung liess nichts mehr weg.
@@ -1420,6 +1454,10 @@ namespace Occlusion
 				own.movers.push_back({ { pos.x, pos.y, pos.z + midZ }, r * 1.2f + 32.0f });  // Spielraum: Animation, Waffen
 			}
 		}
+		if (s_tick % 600 == 0) {
+			std::erase_if(s_tracks, [](const auto& e) { return s_tick - e.second.seen > 600; });
+		}
+		g_actorsNear.store(actorsNear, std::memory_order_relaxed);
 
 		// Weglassen nur, wenn sich die Kamera seit dem geltenden Tiefenbild kaum bewegt hat (< 2 Grad, < 64 Einheiten)
 		{
