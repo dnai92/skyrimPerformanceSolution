@@ -421,6 +421,17 @@ namespace ShadowCulling
 		// (Wegweiser direkt neben dem Feuer im Pavillon vor Weisslauf). Die Schattenkamera steht im Licht.
 		constexpr float kNearLightAngular = 0.1f;
 		// Punktlicht-Culling an? Vor NearPointLight/PointShadowScale pruefen (beide rechnen je Mesh)
+		// Punktlicht-Schatten koennen einzeln beim Draw der Karte weggelassen werden (nur AE: Hook ID 107604+0x167 und
+		// RenderPassImmediately). Sonst bleibt es beim Weglassen beim Einsammeln wie bis 1.0.68.
+		bool PointDrawFilterReady() noexcept
+		{
+#ifdef SPS_VR
+			return false;
+#else
+			return LightShadowCache::DrawFilterReady();
+#endif
+		}
+
 		bool PointCullOn() noexcept
 		{
 			return Config::pointLightCulling.enabled && Config::masterEnabled.load(std::memory_order_relaxed);
@@ -708,14 +719,18 @@ namespace ShadowCulling
 					Stats::Count(cascade == 0 ? Stats::Counter::SunCascade0 : cascade == 1 ? Stats::Counter::SunCascade1 : Stats::Counter::SunCascade2Plus);
 					break;
 				case Kind::kPoint:
-					if (CullActorShadow(a_visible, true)) {
-						return;
-					}
-					// minCascade gilt nur fuer die Sonne -> hier Kaskade als "hinreichend gross" uebergeben
-					if (g_pointCullAllowed.load(std::memory_order_relaxed) && PointCullOn() && !NearPointLight(a_this->camera, a_visible) &&
-						ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX, PointShadowScale(cascade, a_visible))) {
-						Stats::Count(Stats::Counter::PointCulled);
-						return;
+					// Fackelschatten-Regeln (kleine Objekte, ferne Figuren) seit 1.0.69 erst beim Draw der Schattenkarte
+					// (SkipPointShadowDraw): beim Einsammeln nahm das Weglassen dem Objekt auch das Licht der Fackel. Ohne
+					// Draw-Hook (SE, VR, andere Aufrufstelle) wie bisher hier.
+					if (!PointDrawFilterReady()) {
+						if (CullActorShadow(a_visible, true)) {
+							return;
+						}
+						if (g_pointCullAllowed.load(std::memory_order_relaxed) && PointCullOn() && !NearPointLight(a_this->camera, a_visible) &&
+							ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX, PointShadowScale(cascade, a_visible))) {
+							Stats::Count(Stats::Counter::PointCulled);
+							return;
+						}
 					}
 					Stats::Count(Stats::Counter::PointKept);
 					RecordPointMesh(cascade, a_visible);
@@ -787,15 +802,18 @@ namespace ShadowCulling
 			static void thunk(RE::BSCullingProcess* a_this, RE::BSGeometry& a_visible, std::int32_t a_alphaGroupIndex)
 			{
 				DiagRecord(a_this->camera);
-				// Figurenschatten ferner Figuren auch bei Rundum-Lichtern (Fackeln, Feuer) - bis 1.0.57 nur bei Spot-Lichtern
-				if (CullActorShadow(a_visible, true)) {
-					return;
-				}
+				// Fackelschatten-Regeln seit 1.0.69 erst beim Draw (SkipPointShadowDraw) - der Rundum-Durchlauf sammelt hier auch
+				// die Beleuchtung ein (Teilbaum-Pruning 0.16: von Laternen beleuchtete Flaechen wurden dunkel). Ohne Draw-Hook wie bisher.
 				const auto slot = PointSlot(a_this->camera);
-				if (g_pointCullAllowed.load(std::memory_order_relaxed) && PointCullOn() && !NearPointLight(a_this->camera, a_visible) &&
-					ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX, PointShadowScale(slot, a_visible))) {
-					Stats::Count(Stats::Counter::PointCulled);
-					return;
+				if (!PointDrawFilterReady()) {
+					if (CullActorShadow(a_visible, true)) {
+						return;
+					}
+					if (g_pointCullAllowed.load(std::memory_order_relaxed) && PointCullOn() && !NearPointLight(a_this->camera, a_visible) &&
+						ShouldCull(Config::pointLightCulling, a_visible, UINT32_MAX, PointShadowScale(slot, a_visible))) {
+						Stats::Count(Stats::Counter::PointCulled);
+						return;
+					}
 				}
 				Stats::Count(Stats::Counter::PointKept);
 				RecordPointMesh(slot, a_visible);
@@ -989,6 +1007,12 @@ namespace ShadowCulling
 					if (g_microListFrames.load(std::memory_order_relaxed) > 0) {
 						RecordMicroCulled(*a_geometry, a_accumulator);
 					}
+					// Winzige Objekte / ferne Bodendetails wie die Verdeckung erst beim Draw weglassen: der alte Weg (leere
+					// Pass-Liste) steht unter Verdacht fuer Licht-Abstuerze (1.0.65). Ohne Draw-Filter wie bisher.
+					if (MainDrawFilterReady()) {
+						Occlusion::MarkHidden(a_geometry);
+						return passes;
+					}
 					empty.head = nullptr;
 					return &empty;
 				} else if (passes && passes->head && a_geometry) {
@@ -1002,7 +1026,7 @@ namespace ShadowCulling
 					}
 					// Teile an Figuren (Waffen, Schilde, Trommel auf dem Ruecken) bewegen sich mit der Animation -> nie weglassen
 					if (Occlusion::CountMain(*a_geometry, a_accumulator, draws) && !BelongsToActorNode(a_geometry)) {
-						if (Config::occlDrawFilter.load(std::memory_order_relaxed) && g_mainWorldHooked) {
+						if (Config::occlDrawFilter.load(std::memory_order_relaxed) && MainDrawFilterReady()) {
 							Occlusion::MarkHidden(a_geometry);  // normal anmelden, erst beim Draw im Hauptbild weglassen
 							return passes;
 						}
@@ -1310,7 +1334,11 @@ namespace ShadowCulling
 			const auto                            target = Features::IsCall(begin.address()) ? begin.address() + 5 + *reinterpret_cast<const std::int32_t*>(begin.address() + 1) : 0;
 			const bool                            inGame = target >= text.address() && target < text.address() + text.size();
 			if (target && (target == REL::Relocation<std::uintptr_t>{ RELOCATION_ID(35562, 36561) }.address() || !inGame)) {
-				MainBegin::func = SKSE::GetTrampoline().write_call<5>(begin.address(), MainBegin::thunk);
+				// Original zuerst merken, dann umschreiben (1.0.64: sonst Absturz, falls der Aufruf dazwischen laeuft)
+				MainBegin::func = target;
+				std::atomic_thread_fence(std::memory_order_seq_cst);
+				SKSE::GetTrampoline().write_call<5>(begin.address(), MainBegin::thunk);
+				Occlusion::SetFrameBeginHooked();
 				logger::info("Hook installed: Main::Begin call site - occlusion pyramid starts before the main view is collected");
 			} else {
 				logger::warn("Hide occluded objects: Main::Begin call site differs - pyramid starts later");
@@ -1343,6 +1371,8 @@ namespace ShadowCulling
 	}
 
 	bool IsMainViewAccumulator(const void* a_accumulator) noexcept { return IsMainWorldAccumulator(a_accumulator); }
+
+	bool MainDrawFilterReady() noexcept { return g_mainWorldHooked && LightShadowCache::DrawFilterInstalled(); }
 
 	bool ShouldSkipDepthPrepassDraw(const RE::BSRenderPass& a_pass) noexcept
 	{
@@ -1824,7 +1854,44 @@ namespace ShadowCulling
 
 	namespace
 	{
-		thread_local bool t_inShadowMapDraw = false;
+		thread_local bool                t_inShadowMapDraw = false;
+		thread_local const RE::NiCamera* t_mapCamera = nullptr;  // Kamera der Schattenkarte, die gerade gezeichnet wird
+		thread_local bool                t_mapCached = false;    // der Licht-Cache verwaltet diese Karte (Aufbau/Cache)
+	}
+
+	void SetShadowMapContext(const RE::NiCamera* a_camera, bool a_cached) noexcept
+	{
+		t_mapCamera = a_camera;
+		t_mapCached = a_cached;
+	}
+
+	// Fackel-/Punktlichtschatten kleiner Objekte und ferner Figuren erst beim Draw der Schattenkarte weglassen. Bis 1.0.68
+	// beim Einsammeln - dort sammelt der Punktlicht-Durchlauf auch die Beleuchtung ein: kleine ferne Objekte neben Laternen
+	// verloren das Licht (Review 1.0.69, dieselbe Erfahrung wie 1.0.33 und Teilbaum-Pruning 0.16). Verwaltet der Licht-Cache
+	// die Karte, entscheidet er allein ueber Unbewegliches - sonst baute ein Objekt, das die Entfernungsgrenze kreuzt, das
+	// Licht jedes Mal neu auf (seine Ersparnis deckt sich ohnehin mit diesem Culling).
+	bool SkipPointShadowDraw(const RE::BSRenderPass& a_pass) noexcept
+	{
+		if (!t_inShadowMapDraw || !t_mapCamera || !a_pass.geometry || !Config::masterEnabled.load(std::memory_order_relaxed)) {
+			return false;
+		}
+		const auto slot = PointSlot(t_mapCamera);
+		if (slot == UINT32_MAX) {
+			return false;  // Sonne oder unbekannte Kamera
+		}
+		const auto& geom = *a_pass.geometry;
+		if (CullActorShadow(geom, true)) {
+			return true;
+		}
+		if (t_mapCached) {
+			return false;
+		}
+		if (g_pointCullAllowed.load(std::memory_order_relaxed) && PointCullOn() && !NearPointLight(t_mapCamera, geom) &&
+			ShouldCull(Config::pointLightCulling, geom, UINT32_MAX, PointShadowScale(slot, geom))) {
+			Stats::Count(Stats::Counter::PointCulled);
+			return true;
+		}
+		return false;
 	}
 
 	void SetInShadowMapDraw(bool a_in) noexcept

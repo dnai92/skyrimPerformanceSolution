@@ -518,9 +518,15 @@ namespace LightShadowCache
 
 			static void thunk(RE::NiCamera* a_camera, void* a_accumulator, std::uint32_t a_flags)
 			{
-				ShadowCulling::SetInShadowMapDraw(true);  // Filter kleiner Figurenteile (ShadowCulling)
+				// Filter beim Draw (ShadowCulling): kleine Figurenteile, Fackelschatten - dafuer die Kamera der Karte und ob
+				// dieser Cache sie verwaltet (dann entscheidet er ueber Unbewegliches)
+				const LightState* l = a_camera ? FindByCamera(a_camera) : nullptr;
+				const auto        mode = l ? static_cast<Mode>(l->mode.load(std::memory_order_relaxed)) : Mode::kNormal;
+				ShadowCulling::SetShadowMapContext(a_camera, mode == Mode::kBuild || mode == Mode::kCached || mode == Mode::kWait);
+				ShadowCulling::SetInShadowMapDraw(true);
 				Draw(a_camera, a_accumulator, a_flags);
 				ShadowCulling::SetInShadowMapDraw(false);
+				ShadowCulling::SetShadowMapContext(nullptr, false);
 			}
 
 			static void Draw(RE::NiCamera* a_camera, void* a_accumulator, std::uint32_t a_flags)
@@ -650,6 +656,8 @@ namespace LightShadowCache
 		Features::Report("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern", true);
 		logger::info("Hook installed: shadow map draw (ID 107604+0x167) - shadow cache for static lights");
 	}
+
+	bool DrawFilterInstalled() noexcept { return g_drawFilter; }
 
 	bool DrawFilterReady() noexcept
 	{

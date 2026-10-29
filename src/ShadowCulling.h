@@ -17,6 +17,8 @@ namespace ShadowCulling
 	// Draw-Filter der Verdeckung: Draw eines im Hauptbild verdeckten Objekts (Hauptbild oder Tiefenvorpass) -> true = weglassen
 	bool SkipHiddenMainDraw(const RE::BSRenderPass& a_pass) noexcept;
 	// Accumulator der Hauptansicht (Weltkamera) - nicht Spiegelungen, Vorschauen, Menue-3D
+	// Hauptbild-Draws koennen einzeln weggelassen werden (Main::RenderWorld- und RenderPassImmediately-Hooks installiert)
+	bool MainDrawFilterReady() noexcept;
 	bool IsMainViewAccumulator(const void* a_accumulator) noexcept;
 
 	// Cache der fernen Kaskade: vor bzw. nach BSShadowDirectionalLight::Accumulate (Main-Thread)
@@ -39,6 +41,11 @@ namespace ShadowCulling
 	inline bool             DrawFilterMayApply() noexcept { return g_drawFilterScopes.load(std::memory_order_relaxed) > 0; }
 	// Einzelner Schatten-Draw: kleines Figurenteil in der Ferne -> true = weglassen (ActorPartShadowCulling)
 	bool SkipActorPartShadowDraw(const RE::BSRenderPass& a_pass) noexcept;
+
+	// Schattenkarte, die gerade gezeichnet wird (Draw-Hook ID 107604+0x167): Kamera und ob der Licht-Cache sie verwaltet
+	void SetShadowMapContext(const RE::NiCamera* a_camera, bool a_cached) noexcept;
+	// Fackelschatten kleiner Objekte / ferner Figuren beim Draw weglassen
+	bool SkipPointShadowDraw(const RE::BSRenderPass& a_pass) noexcept;
 	// Ladebildschirm / Hauptmenue: Zustand der Welt (Cache der fernen Kaskade, Hysterese der Figurenschatten) verwerfen
 	void ResetWorld() noexcept;
 	// Nach BSShadowDirectionalLight::UpdateCamera: ferne Kaskade ruhig halten, Modus des Caches festlegen

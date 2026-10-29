@@ -135,7 +135,9 @@ namespace EngineTimers
 		}
 		const auto mainSite = REL::Relocation<std::uintptr_t>{ REL::ID(36560), 0xE9 }.address();
 		if (CheckCall(mainSite, 32174)) {
-			MainCull::func = trampoline.write_call<5>(mainSite, MainCull::thunk);
+			MainCull::func = mainSite + 5 + *reinterpret_cast<const std::int32_t*>(mainSite + 1);  // Original zuerst merken (1.0.64)
+			std::atomic_thread_fence(std::memory_order_seq_cst);
+			trampoline.write_call<5>(mainSite, MainCull::thunk);
 			logger::info("Timing installed: main camera culling (ID 32174)");
 			Features::Report("Timing: main camera culling", "Zeitmessung: Hauptkamera", true);
 		} else {

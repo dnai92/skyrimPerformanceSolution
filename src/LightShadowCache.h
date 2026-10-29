@@ -32,6 +32,7 @@ namespace LightShadowCache
 	// Zeichen-Hook der Schattenkarten (107604+0x167) und Draw-Filter installiert (nur AE) - Voraussetzung auch fuer den
 	// Cache der fernen Sonnenkaskade
 	bool DrawFilterReady() noexcept;
+	bool DrawFilterInstalled() noexcept;  // RenderPassImmediately-Aufrufstellen umgeleitet (Draw-Filter aller Funktionen)
 
 	// Bildausgabe (IDXGISwapChain::Present, jedes gezeichnete Bild - auch in Pause/Menues)
 	void OnPresent() noexcept;

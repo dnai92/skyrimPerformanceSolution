@@ -34,6 +34,7 @@ namespace Occlusion
 
 	// Main::Begin im Hauptbild (vor den Sammel-Jobs, Kamera steht fest): Pyramide so frueh wie moeglich anstossen
 	void OnFrameBegin() noexcept;
+	void SetFrameBeginHooked() noexcept;  // Main::Begin-Hook installiert: Bilder dort zaehlen statt am Present
 
 	// Bottled Shaders mit eigener HiZ-Verdeckung erkennen (Daten geladen, Ladebildschirm)
 	void DetectOtherCullers() noexcept;
