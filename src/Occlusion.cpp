@@ -2001,7 +2001,9 @@ namespace Occlusion
 
 	void NoteDoorMoving(RE::TESObjectREFR* a_door, float a_seconds) noexcept
 	{
-		if (!a_door) {
+		// Nur Tueren mit geladenem 3D: die meisten Ereignisse kommen von NPCs, die weit weg in nicht geladenen Gebieten Tueren
+		// benutzen (Analyse 1.0.70: bis ~110.000 Einheiten entfernt) - die liegen in keinem Tiefenbild
+		if (!a_door || !a_door->Is3DLoaded()) {
 			return;
 		}
 		g_doorEvents.fetch_add(1, std::memory_order_relaxed);
