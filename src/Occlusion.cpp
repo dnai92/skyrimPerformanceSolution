@@ -507,6 +507,8 @@ namespace Occlusion
 		// auch beim Drehen und Laufen statt Pause), Aufbau auf einem Hilfsthread, Matrizen in double (Weltkoordinaten bis
 		// ~10^5 - in float lagen Verdeckungen dort um Prozente zu nah), Ertragsbremse und seltenere Pruefung Sichtbarer.
 		using Mat4d = std::array<std::array<double, 4>, 4>;
+		std::atomic<float>         g_moverFreedPct{ 0.0f };  // Anteil des Tiefenbilds, der wegen Figuren frei bleibt (letzter Aufbau)
+		std::atomic<std::uint32_t> g_moverCount{ 0 };
 		constexpr std::uint32_t kGW = OcclusionGpu::kWidth, kGH = OcclusionGpu::kHeight;
 		constexpr float         kFree = std::numeric_limits<float>::infinity();  // keine Verdeckung bekannt
 
@@ -699,6 +701,7 @@ namespace Occlusion
 						z = 0.0f;
 					}
 				}
+				std::size_t freedByMovers = 0;
 				for (const auto& mover : c.movers) {
 					const float r = mover.radius;
 					float       minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f, wFar = 0.0f;
@@ -727,11 +730,14 @@ namespace Occlusion
 								auto& z = src.z[static_cast<std::size_t>(v) * kGW + u];
 								if (z > 0.0f && z <= wFar) {
 									z = 0.0f;
+									++freedByMovers;
 								}
 							}
 						}
 					}
 				}
+				g_moverFreedPct.store(100.0f * static_cast<float>(freedByMovers) / static_cast<float>(src.z.size()), std::memory_order_relaxed);
+				g_moverCount.store(static_cast<std::uint32_t>(c.movers.size()), std::memory_order_relaxed);
 				src.snapId = a_s.id;
 			}
 			// Stufen vorab anlegen (Referenzen bleiben gueltig)
@@ -1221,9 +1227,9 @@ namespace Occlusion
 			g_cullBlockedFrames = 0;
 			{
 				const auto builds = g_builds.exchange(0), ns = g_buildNs.exchange(0);
-				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | Bottled Shaders HiZ {}",
+				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | figures {} free {:.1f} % of the depth image | Bottled Shaders HiZ {}",
 					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_kickLate.exchange(0), g_kickBegin.exchange(0), g_gatedFrames, g_visSkipped.exchange(0) / frames,
-					g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
+					g_moverCount.load(), g_moverFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
 				g_gatedFrames = 0;
 				if (log && g_poseMismatch) {
 					logger::info("[Occlusion]   depth images not used because camera pose and GPU matrix differed: {}", g_poseMismatch);
@@ -1385,15 +1391,18 @@ namespace Occlusion
 				if (!actor || !actor->Is3DLoaded()) {
 					continue;
 				}
-				const auto   pos = actor->GetPosition();
-				const auto   root = actor->Get3D();
-				RE::NiBound  b{ { pos.x, pos.y, pos.z + 64.0f }, 160.0f };
-				// Huelle der Figur: kann der Animation hinterherhinken oder unsinnig gross sein -> grosszuegig, sonst Ersatz
-				if (root && root->worldBound.radius > 16.0f && root->worldBound.radius < 2048.0f) {
-					b.center = root->worldBound.center;
-					b.radius = std::max(root->worldBound.radius * 1.25f + 32.0f, 160.0f);
+				// Groesse aus den Grundmassen der Figur (wie im Creation Kit), nicht aus der Huelle des 3D-Modells: die ist bei
+				// Figuren oft viel zu gross (Faster Objects: Skelett 4605, Irrlichter 11254 Einheiten) - im Test 1.0.69 gab sie
+				// am Markt fast das ganze Tiefenbild frei, die Verdeckung liess nichts mehr weg.
+				const auto pos = actor->GetPosition();
+				const auto bmin = actor->GetBoundMin(), bmax = actor->GetBoundMax();
+				const float ex = bmax.x - bmin.x, ey = bmax.y - bmin.y, ez = bmax.z - bmin.z;
+				float      r = 0.5f * std::sqrt(ex * ex + ey * ey + ez * ez);
+				if (!(r > 16.0f && r < 1024.0f)) {
+					r = 96.0f;  // keine brauchbaren Masse: Mensch
 				}
-				own.movers.push_back(b);
+				const float midZ = (bmin.z + bmax.z) > 0.0f && (bmin.z + bmax.z) < 4096.0f ? 0.5f * (bmin.z + bmax.z) : 64.0f;
+				own.movers.push_back({ { pos.x, pos.y, pos.z + midZ }, r * 1.2f + 32.0f });  // Spielraum: Animation, Waffen
 			}
 		}
 
