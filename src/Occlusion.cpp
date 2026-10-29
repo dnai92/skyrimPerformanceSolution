@@ -516,6 +516,7 @@ namespace Occlusion
 		std::atomic<std::uint32_t> g_moverCount{ 0 };
 		std::atomic<std::uint32_t> g_actorsNear{ 0 };  // Figuren in der Naehe (davon bewegt: g_moverCount ohne Spieler und Tueren)
 		std::atomic<std::uint32_t> g_doorMovers{ 0 };  // davon schwingende Tueren
+		std::atomic<std::uint32_t> g_doorEvents{ 0 };  // Tuer-Ereignisse seit dem letzten Bericht
 
 		// Tueren, die gerade aufgehen oder zugehen: die alte Tuerlage im Tiefenbild wuerde sonst noch ein paar Bilder lang
 		// verdecken, was dahinter schon sichtbar ist (Review 1.0.69)
@@ -1279,9 +1280,9 @@ namespace Occlusion
 			g_cullBlockedFrames = 0;
 			{
 				const auto builds = g_builds.exchange(0), ns = g_buildNs.exchange(0);
-				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | moving figures {} of {}, doors {} free {:.1f} % of the depth image on average, max {:.1f} % (player now {:.1f} %) | Bottled Shaders HiZ {}",
+				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | moving figures {} of {}, doors {} ({} door events) free {:.1f} % of the depth image on average, max {:.1f} % (player now {:.1f} %) | Bottled Shaders HiZ {}",
 					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_kickLate.exchange(0), g_kickBegin.exchange(0), g_gatedFrames, g_visSkipped.exchange(0) / frames,
-					g_moverCount.load() > g_doorMovers.load() ? g_moverCount.load() - g_doorMovers.load() - 1 : 0, g_actorsNear.load(), g_doorMovers.load(), FreedAvgPct(), g_moverFreedMax.exchange(0.0f), g_playerFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
+					g_moverCount.load() > g_doorMovers.load() ? g_moverCount.load() - g_doorMovers.load() - 1 : 0, g_actorsNear.load(), g_doorMovers.load(), g_doorEvents.exchange(0), FreedAvgPct(), g_moverFreedMax.exchange(0.0f), g_playerFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
 				g_gatedFrames = 0;
 				if (log && g_poseMismatch) {
 					logger::info("[Occlusion]   depth images not used because camera pose and GPU matrix differed: {}", g_poseMismatch);
@@ -1935,6 +1936,7 @@ namespace Occlusion
 		if (!a_door) {
 			return;
 		}
+		g_doorEvents.fetch_add(1, std::memory_order_relaxed);
 		try {
 			const auto      until = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int>(a_seconds * 1000.0f));
 			const auto      handle = a_door->GetHandle();
