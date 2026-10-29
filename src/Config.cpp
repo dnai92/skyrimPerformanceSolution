@@ -25,41 +25,64 @@ namespace Config
 			return ec ? std::filesystem::file_time_type{} : t;
 		}
 
-		// Nur die im Menue einstellbaren Werte; alles andere kommt weiter aus SPS.ini
-		bool SaveUser()
+		// Eingebaute Standardwerte, vor dem ersten Laden festgehalten: Vergleichsgrundlage fuer Schluessel, die in SPS.ini
+		// fehlen (SPS.ini geloescht, beschaedigt oder aelter als die DLL). Ohne sie schrieb das Speichern dann alle Werte fest
+		// in SPS_User.ini und alte Standards blieben wieder haengen (Review 1.0.69).
+		CSimpleIniA g_compiled;
+		bool        g_haveCompiled = false;
+
+		// Nur die im Menue einstellbaren Werte; alles andere kommt weiter aus SPS.ini. a_capture: alle Werte dort hinein
+		// schreiben (eingebaute Standards festhalten), keine Datei.
+		bool SaveUser(CSimpleIniA* a_capture = nullptr)
 		{
-			CSimpleIniA ini;
-			ini.SetUnicode();
+			CSimpleIniA file;
+			file.SetUnicode();
+			CSimpleIniA& ini = a_capture ? *a_capture : file;
 			// Vorhandene Datei als Grundlage: von Hand eingetragene Schluessel, die das Menue nicht kennt, bleiben erhalten
 			// (bis 1.0.57 wurde die Datei aus der festen Liste neu gebaut und alles andere ging verloren)
-			ini.LoadFile(kUserPath);
+			if (!a_capture) {
+				ini.LoadFile(kUserPath);
+			}
 			// Nur Abweichungen von SPS.ini speichern - sonst ueberdecken alte Vorgaben spaeter geaenderte Standards
-			// (so blieben bPointLights=true und fMinDistance=2500 aus alten Versionen haengen).
+			// (so blieben bPointLights=true und fMinDistance=2500 aus alten Versionen haengen). Fehlt ein Schluessel in
+			// SPS.ini, gilt der eingebaute Standard.
 			CSimpleIniA base;
 			base.SetUnicode();
-			const bool haveBase = base.LoadFile(kPath) >= 0;
+			const bool haveBase = !a_capture && base.LoadFile(kPath) >= 0;
+			const auto ref = [&](const char* s, const char* k) -> const CSimpleIniA* {
+				if (a_capture) {
+					return nullptr;
+				}
+				if (haveBase && base.GetValue(s, k)) {
+					return &base;
+				}
+				return g_haveCompiled && g_compiled.GetValue(s, k) ? &g_compiled : nullptr;
+			};
 			const auto b = [&](const char* s, const char* k, bool v) {
-				if (!haveBase || !base.GetValue(s, k) || base.GetBoolValue(s, k, v) != v) {
+				const auto r = ref(s, k);
+				if (!r || r->GetBoolValue(s, k, v) != v) {
 					ini.SetBoolValue(s, k, v);
 				} else {
 					ini.Delete(s, k, true);  // wieder Standard
 				}
 			};
 			const auto f = [&](const char* s, const char* k, float v) {
-				if (!haveBase || !base.GetValue(s, k) || std::abs(base.GetDoubleValue(s, k, v) - v) > 1e-4 * std::max(1.0, std::abs(double(v)))) {
+				const auto r = ref(s, k);
+				if (!r || std::abs(r->GetDoubleValue(s, k, v) - v) > 1e-4 * std::max(1.0, std::abs(double(v)))) {
 					ini.SetDoubleValue(s, k, v, nullptr, true);
 				} else {
 					ini.Delete(s, k, true);
 				}
 			};
-			{
-				const long key = static_cast<long>(toggleKey.load());
-				if (!haveBase || !base.GetValue("General", "iToggleKey") || base.GetLongValue("General", "iToggleKey", key) != key) {
-					ini.SetLongValue("General", "iToggleKey", key);
+			const auto l = [&](const char* s, const char* k, long v) {
+				const auto r = ref(s, k);
+				if (!r || r->GetLongValue(s, k, v) != v) {
+					ini.SetLongValue(s, k, v);
 				} else {
-					ini.Delete("General", "iToggleKey", true);
+					ini.Delete(s, k, true);
 				}
-			}
+			};
+			l("General", "iToggleKey", static_cast<long>(toggleKey.load()));
 			const auto rule = [&](const char* s, const CullRule& r) {
 				b(s, "bEnabled", r.enabled);
 				f(s, "fMinDistance", r.minDistance);
@@ -111,19 +134,15 @@ namespace Config
 			b("Occlusion", "bReproject", occlReproject.load());
 			b("Occlusion", "bAllowWithBottledHiZ", occlAllowWithBottled.load());
 			b("TextureStream", "bStreamCharacters", textureStream.streamCharacters);
-			{
-				const long mask = static_cast<long>(::TextureStream::GetDebugInclude());
-				if (!haveBase || !base.GetValue("TextureStream", "iIncludeExcluded") || base.GetLongValue("TextureStream", "iIncludeExcluded", mask) != mask) {
-					ini.SetLongValue("TextureStream", "iIncludeExcluded", mask);
-				} else {
-					ini.Delete("TextureStream", "iIncludeExcluded", true);
-				}
-			}
+			l("TextureStream", "iIncludeExcluded", static_cast<long>(::TextureStream::GetDebugInclude()));
 			b("SubtreePruning", "bSun", subtreePruning.sun);
 			b("SubtreePruning", "bPrecipitation", subtreePruning.precip);
 			f("LightGatherThrottle", "fMinMove", lightGather.minMove);
 			f("LightGatherThrottle", "fMinRadiusChange", lightGather.minRadiusChange);
 			f("LightGatherThrottle", "fMaxAgeMs", lightGather.maxAgeMs);
+			if (a_capture) {
+				return true;
+			}
 			// Entfernte Funktionen nicht mitschleppen (Kaskaden-Cache 1.0.59, Animations-Drossel/Vorpass-Messung 1.0.60)
 			ini.Delete("ShadowCascadeCache", nullptr, true);
 			ini.Delete("AnimThrottle", nullptr, true);
@@ -223,6 +242,11 @@ namespace Config
 
 	void Load()
 	{
+		if (!g_haveCompiled) {
+			g_compiled.SetUnicode();
+			SaveUser(&g_compiled);  // eingebaute Standards, bevor SPS.ini sie ueberschreibt
+			g_haveCompiled = true;
+		}
 		// Umbenennung SkyrimPerf -> SPS (1.0.1): Menue-Einstellungen einmalig uebernehmen
 		{
 			static bool migrated = false;

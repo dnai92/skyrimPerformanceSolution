@@ -29,6 +29,9 @@ namespace Occlusion
 	// Ladebildschirm / Hauptmenue
 	void Reset() noexcept;
 
+	// Tuer wird aktiviert / oeffnet oder schliesst sich: fuer a_seconds als bewegtes Objekt aus dem alten Tiefenbild nehmen
+	void NoteDoorMoving(RE::TESObjectREFR* a_door, float a_seconds) noexcept;
+
 	// Kamera des Frames steht fest (nach UpdateCamera der Sonne, Main-Thread): Pyramide im Hilfsthread anstossen
 	void OnViewCamera() noexcept;
 

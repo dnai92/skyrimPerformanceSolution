@@ -329,8 +329,8 @@ namespace Menu
 
 		void __stdcall RenderDebug()
 		{
-			MenuApi::TextWrapped("%s", T("For troubleshooting and tests. Nothing on this page is saved, everything is off again after a restart.",
-											"Für Fehlersuche und Tests. Nichts auf dieser Seite wird gespeichert, nach einem Neustart ist alles wieder aus."));
+			MenuApi::TextWrapped("%s", T("For troubleshooting and tests. Nothing on this page is saved unless it says so, everything else is off again after a restart.",
+											"Für Fehlersuche und Tests. Nichts auf dieser Seite wird gespeichert, außer wo es dabeisteht. Alles andere ist nach einem Neustart wieder aus."));
 			MenuApi::SeparatorText(T("Logging", "Protokoll"));
 			if (AtomicToggle(T("Analysis logging (costs performance)", "Analyse-Protokoll (kostet Leistung)"), Config::analysis,
 					T("Extra diagnostics in SPS.log (incl. detailed texture streaming report every 10 s). Costs 2-4 ms per frame - only for troubleshooting. Not saved - always starts OFF.",

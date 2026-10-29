@@ -9,6 +9,7 @@
 #include <memory>
 #include <regex>
 #include <sstream>
+#include <mutex>
 #include <thread>
 #include <unordered_map>
 
@@ -513,7 +514,18 @@ namespace Occlusion
 		std::atomic<std::uint64_t> g_moverFreedTiles{ 0 }, g_moverFreedBuilds{ 0 };  // Summe je Bericht (Durchschnitt)
 		std::atomic<float>         g_moverFreedMax{ 0.0f };
 		std::atomic<std::uint32_t> g_moverCount{ 0 };
-		std::atomic<std::uint32_t> g_actorsNear{ 0 };  // Figuren in der Naehe (davon bewegt: g_moverCount ohne Spieler)
+		std::atomic<std::uint32_t> g_actorsNear{ 0 };  // Figuren in der Naehe (davon bewegt: g_moverCount ohne Spieler und Tueren)
+		std::atomic<std::uint32_t> g_doorMovers{ 0 };  // davon schwingende Tueren
+
+		// Tueren, die gerade aufgehen oder zugehen: die alte Tuerlage im Tiefenbild wuerde sonst noch ein paar Bilder lang
+		// verdecken, was dahinter schon sichtbar ist (Review 1.0.69)
+		struct DoorMove
+		{
+			RE::ObjectRefHandle                   handle;
+			std::chrono::steady_clock::time_point until;
+		};
+		std::mutex            g_doorLock;
+		std::vector<DoorMove> g_doors;
 		constexpr std::uint32_t kGW = OcclusionGpu::kWidth, kGH = OcclusionGpu::kHeight;
 
 		float FreedAvgPct() noexcept
@@ -1267,9 +1279,9 @@ namespace Occlusion
 			g_cullBlockedFrames = 0;
 			{
 				const auto builds = g_builds.exchange(0), ns = g_buildNs.exchange(0);
-				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | moving figures {} of {} free {:.1f} % of the depth image on average, max {:.1f} % (player now {:.1f} %) | Bottled Shaders HiZ {}",
+				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | moving figures {} of {}, doors {} free {:.1f} % of the depth image on average, max {:.1f} % (player now {:.1f} %) | Bottled Shaders HiZ {}",
 					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_kickLate.exchange(0), g_kickBegin.exchange(0), g_gatedFrames, g_visSkipped.exchange(0) / frames,
-					g_moverCount.load() ? g_moverCount.load() - 1 : 0, g_actorsNear.load(), FreedAvgPct(), g_moverFreedMax.exchange(0.0f), g_playerFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
+					g_moverCount.load() > g_doorMovers.load() ? g_moverCount.load() - g_doorMovers.load() - 1 : 0, g_actorsNear.load(), g_doorMovers.load(), FreedAvgPct(), g_moverFreedMax.exchange(0.0f), g_playerFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
 				g_gatedFrames = 0;
 				if (log && g_poseMismatch) {
 					logger::info("[Occlusion]   depth images not used because camera pose and GPU matrix differed: {}", g_poseMismatch);
@@ -1484,6 +1496,21 @@ namespace Occlusion
 		}
 		if (s_tick % 600 == 0) {
 			std::erase_if(s_tracks, [](const auto& e) { return s_tick - e.second.seen > 600; });
+		}
+		{
+			std::uint32_t doors = 0;
+			std::lock_guard lock(g_doorLock);
+			const auto      now = std::chrono::steady_clock::now();
+			std::erase_if(g_doors, [&](const DoorMove& d) { return d.until < now; });
+			for (const auto& d : g_doors) {
+				const auto ref = d.handle.get();
+				const auto obj = ref ? ref->Get3D() : nullptr;
+				if (obj && obj->worldBound.radius > 0.0f && obj->worldBound.radius < 2048.0f && own.movers.size() < 192) {
+					own.movers.push_back({ obj->worldBound.center, obj->worldBound.radius * 1.1f + 16.0f });
+					++doors;
+				}
+			}
+			g_doorMovers.store(doors, std::memory_order_relaxed);
 		}
 		g_actorsNear.store(actorsNear, std::memory_order_relaxed);
 
@@ -1902,6 +1929,28 @@ namespace Occlusion
 	}
 
 	void RequestDepthDump() noexcept { g_dumpRequest.store(true); }
+
+	void NoteDoorMoving(RE::TESObjectREFR* a_door, float a_seconds) noexcept
+	{
+		if (!a_door) {
+			return;
+		}
+		try {
+			const auto      until = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int>(a_seconds * 1000.0f));
+			const auto      handle = a_door->GetHandle();
+			std::lock_guard lock(g_doorLock);
+			for (auto& d : g_doors) {
+				if (d.handle == handle) {
+					d.until = std::max(d.until, until);
+					return;
+				}
+			}
+			if (g_doors.size() < 32) {
+				g_doors.push_back({ handle, until });
+			}
+		} catch (...) {
+		}
+	}
 
 	void Reset() noexcept
 	{

@@ -193,7 +193,9 @@ namespace Hooks
 
 		class EventSink :
 			public RE::BSTEventSink<RE::TESCellFullyLoadedEvent>,
-			public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+			public RE::BSTEventSink<RE::MenuOpenCloseEvent>,
+			public RE::BSTEventSink<RE::TESActivateEvent>,
+			public RE::BSTEventSink<RE::TESOpenCloseEvent>
 		{
 		public:
 			static EventSink* GetSingleton()
@@ -208,6 +210,30 @@ namespace Hooks
 				if (TracyIsConnected && a_event && a_event->cell) {
 					const auto msg = std::format("Cell geladen: {}", a_event->cell->GetFormEditorID());
 					TracyMessageC(msg.data(), msg.size(), 0x40A0FF);
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			// Tueren fuer "Verdeckte Objekte weglassen": beim Aktivieren beginnt die Drehung (ca. 1-2 s), Oeffnen/Schliessen
+			// meldet ihr Ende
+			static bool IsDoor(const RE::TESObjectREFR* a_ref) noexcept
+			{
+				const auto base = a_ref ? a_ref->GetBaseObject() : nullptr;
+				return base && base->GetFormType() == RE::FormType::Door;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESActivateEvent* a_event, RE::BSTEventSource<RE::TESActivateEvent>*) override
+			{
+				if (a_event && IsDoor(a_event->objectActivated.get())) {
+					Occlusion::NoteDoorMoving(a_event->objectActivated.get(), 3.0f);
+				}
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			RE::BSEventNotifyControl ProcessEvent(const RE::TESOpenCloseEvent* a_event, RE::BSTEventSource<RE::TESOpenCloseEvent>*) override
+			{
+				if (a_event && IsDoor(a_event->ref.get())) {
+					Occlusion::NoteDoorMoving(a_event->ref.get(), 0.5f);
 				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
@@ -271,6 +297,8 @@ namespace Hooks
 	{
 		if (const auto holder = RE::ScriptEventSourceHolder::GetSingleton()) {
 			holder->AddEventSink<RE::TESCellFullyLoadedEvent>(EventSink::GetSingleton());
+			holder->AddEventSink<RE::TESActivateEvent>(EventSink::GetSingleton());
+			holder->AddEventSink<RE::TESOpenCloseEvent>(EventSink::GetSingleton());
 		}
 		if (const auto ui = RE::UI::GetSingleton()) {
 			ui->AddEventSink<RE::MenuOpenCloseEvent>(EventSink::GetSingleton());
