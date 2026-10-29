@@ -1780,7 +1780,8 @@ namespace ShadowCulling
 		// ihr Stand; sonst wurde normal (alles) gezeichnet und der Cache baut neu auf.
 		void FarAfterRender() noexcept
 		{
-			if (!Config::farShadowCache.enabled) {
+			// aus, oder alles aus ("Bild auf"): auch dann die Kopien freigeben (Review 1.0.69)
+			if (!Config::farShadowCache.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
 				if (g_far.gpuHeld) {
 					FarShadowGpu::Reset();  // ~16-64 MB VRAM nicht dauerhaft halten
 					g_far.gpuHeld = false;
