@@ -123,6 +123,7 @@ namespace Config
 			b("LightShadowCache", "bEnabled", lightShadowCache.enabled);
 			b("LightShadowCache", "bAllowWithBottledShaders", lightShadowCache.allowWithBottled);
 			b("FarShadowCache", "bEnabled", farShadowCache.enabled);
+			b("FarShadowCache", "bAllowWithBottledShaders", farShadowCache.allowWithBottled);
 			b("Occlusion", "bCull", occlusionCull.load());
 			f("Occlusion", "fPauseTurnDeg", occlTurnDeg.load());
 			f("Occlusion", "fPauseMove", occlMoveUnits.load());
@@ -434,6 +435,7 @@ namespace Config
 		lightShadowCache.allowWithBottled = ini.GetBoolValue("LightShadowCache", "bAllowWithBottledShaders", lightShadowCache.allowWithBottled);
 		logger::info("LightShadowCache: {}", lightShadowCache.enabled ? "ON" : "OFF");
 		farShadowCache.enabled = ini.GetBoolValue("FarShadowCache", "bEnabled", farShadowCache.enabled);
+		farShadowCache.allowWithBottled = ini.GetBoolValue("FarShadowCache", "bAllowWithBottledShaders", farShadowCache.allowWithBottled);
 		logger::info("FarShadowCache (optional): {}", farShadowCache.enabled ? "ON" : "OFF");
 
 		auto& sky = skylightingCulling;

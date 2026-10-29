@@ -757,7 +757,7 @@ namespace Occlusion
 						v1 = std::min(v1, static_cast<int>(std::floor((0.5f - (cy - hy) * 0.5f) * kGH)));
 					}
 					// Mitte in Kamerakoordinaten (clip.x = sx * x, clip.y = sy * y, clip.w = Tiefe)
-					const float mx = cc[0] / psx, my = cc[1] / psy;
+					const float centerX = cc[0] / psx, centerY = cc[1] / psy;
 					// halbe Kachel in Welteinheiten je Einheit Tiefe: eine Kachel, die die Kugel nur am Rand streift, zaehlt mit
 					const float tileX = 1.0f / (kGW * psx), tileY = 1.0f / (kGH * psy);
 					for (int v = v0; v <= v1; ++v) {
@@ -768,8 +768,8 @@ namespace Occlusion
 								continue;
 							}
 							const float x = (static_cast<float>(u) + 0.5f) / kGW * 2.0f - 1.0f;
-							const float dx = std::max(0.0f, std::fabs(x * z / psx - mx) - z * tileX);
-							const float dy = std::max(0.0f, std::fabs(y * z / psy - my) - z * tileY);
+							const float dx = std::max(0.0f, std::fabs(x * z / psx - centerX) - z * tileX);
+							const float dy = std::max(0.0f, std::fabs(y * z / psy - centerY) - z * tileY);
 							const float dz = z - cw;
 							if (dx * dx + dy * dy + dz * dz <= r * r) {
 								z = 0.0f;

@@ -31,6 +31,8 @@ namespace ShadowCulling
 	bool FarBeginDraw(const RE::NiCamera* a_camera) noexcept;
 	void FarEndDraw() noexcept;
 	// Einzelner Draw waehrend der fernen Kaskade: true = weglassen
+	// Jeder Utility-Draw (SetupGeometry): zaehlt waehrend der fernen Kaskade, um Draws am Filter vorbei zu erkennen
+	void FarOnUtilityDraw() noexcept;
 	bool FarSkipDraw(const RE::BSRenderPass& a_pass) noexcept;
 	// Zeichnen einer Schattenkarte (Sonnenkaskade, Fackel/Lampe) laeuft - gesetzt vom Hook ID 107604+0x167
 	void SetInShadowMapDraw(bool a_in) noexcept;

@@ -6,6 +6,7 @@
 #include <d3d11_1.h>
 #include <d3dcompiler.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -54,8 +55,13 @@ float4 main(VS_INPUT input) : SV_POSITION
 
 		// Zustand des ersten normal gezeichneten Draws (Referenzen gehalten)
 		ID3D11PixelShader*      g_ps = nullptr;
-		ID3D11Buffer*           g_cb12 = nullptr;
-		UINT                    g_cb12First = 0, g_cb12Num = 0;  // D3D11.1-Offset (Engine nutzt einen Ring-Constant-Buffer)
+		// Kamera-Konstanten (b12) des ersten Draws als eigene Kopie: die Engine schreibt sie in einen Ring-Constant-Buffer
+		// (D3D11.1-Offsets). Bis 1.0.68 wurde nur Puffer + Offset gemerkt und beim Flush neu gebunden - lief der Ring
+		// dazwischen ueber (DISCARD), stand dort schon eine andere Matrix und die gebuendelten Objekte lagen fuer ein Bild
+		// falsch (Flackern, Review 1.0.69). Die GPU-Kopie liegt im Befehlsstrom an der Stelle des ersten Draws.
+		ID3D11Buffer*           g_cb12Copy = nullptr;
+		UINT                    g_cb12CopySize = 0;
+		bool                    g_cb12Valid = false;
 		ID3D11RasterizerState*  g_rs = nullptr;
 		ID3D11DepthStencilState* g_ds = nullptr;
 		UINT                    g_stencilRef = 0;
@@ -201,7 +207,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 	void ReleaseState() noexcept
 	{
 		SafeRelease(g_ps);
-		SafeRelease(g_cb12);
+		g_cb12Valid = false;
 		SafeRelease(g_rs);
 		SafeRelease(g_ds);
 		SafeRelease(g_bs);
@@ -217,7 +223,35 @@ float4 main(VS_INPUT input) : SV_POSITION
 		}
 		ReleaseState();
 		ctx->PSGetShader(&g_ps, nullptr, nullptr);
-		GetVSCB1(ctx, 12, &g_cb12, &g_cb12First, &g_cb12Num);
+		{
+			ID3D11Buffer* cb = nullptr;
+			UINT          first = 0, num = 0;
+			GetVSCB1(ctx, 12, &cb, &first, &num);
+			if (cb) {
+				D3D11_BUFFER_DESC src{};
+				cb->GetDesc(&src);
+				// gebundener Bereich: mit Offsets first..first+num Konstanten (je 16 Byte), sonst der ganze Puffer
+				const UINT offset = num > 0 ? first * 16 : 0;
+				const UINT size = num > 0 ? std::min(num * 16, src.ByteWidth > offset ? src.ByteWidth - offset : 0u) : src.ByteWidth;
+				if (size > 0 && (size > g_cb12CopySize || !g_cb12Copy)) {
+					SafeRelease(g_cb12Copy);
+					g_cb12CopySize = 0;
+					D3D11_BUFFER_DESC desc{};
+					desc.ByteWidth = (size + 15) & ~15u;
+					desc.Usage = D3D11_USAGE_DEFAULT;
+					desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+					if (SUCCEEDED(g_device->CreateBuffer(&desc, nullptr, &g_cb12Copy))) {
+						g_cb12CopySize = desc.ByteWidth;
+					}
+				}
+				if (size > 0 && g_cb12Copy) {
+					const D3D11_BOX box{ offset, 0, 0, offset + size, 1, 1 };
+					ctx->CopySubresourceRegion(g_cb12Copy, 0, 0, 0, 0, cb, 0, &box);
+					g_cb12Valid = true;
+				}
+				cb->Release();
+			}
+		}
 		ctx->RSGetState(&g_rs);
 		ctx->OMGetDepthStencilState(&g_ds, &g_stencilRef);
 		ctx->OMGetBlendState(&g_bs, g_blendFactor, &g_sampleMask);
@@ -316,7 +350,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 	bool Flush(void* a_context, const Instance* a_instances, std::uint32_t a_instanceCount, const Group* a_groups, std::uint32_t a_groupCount, bool a_clampZ, bool a_skipDraws) noexcept
 	{
 		const auto ctx = static_cast<ID3D11DeviceContext*>(a_context);
-		if (!g_ready || !g_captured || !ctx || a_instanceCount == 0 || a_groupCount == 0 || a_instanceCount > kInstanceCapacity) {
+		if (!g_ready || !g_captured || !g_cb12Valid || !ctx || a_instanceCount == 0 || a_groupCount == 0 || a_instanceCount > kInstanceCapacity) {
 			return false;
 		}
 
@@ -378,7 +412,7 @@ float4 main(VS_INPUT input) : SV_POSITION
 		ctx->OMSetRenderTargets(0, nullptr, g_dsv);
 		ctx->RSSetViewports(1, &g_viewport);
 		ctx->VSSetShader(g_vs[a_clampZ ? 1 : 0], nullptr, 0);
-		SetVSCB1(ctx, 12, g_cb12, g_cb12First, g_cb12Num);
+		ctx->VSSetConstantBuffers(12, 1, &g_cb12Copy);  // eigene Kopie ab Offset 0
 		ctx->PSSetShader(g_ps, nullptr, 0);
 		ctx->RSSetState(g_rs);
 		ctx->OMSetDepthStencilState(g_ds, g_stencilRef);

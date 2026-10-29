@@ -302,6 +302,12 @@ namespace Menu
 			Toggle(T("Far shadow cache (optional)", "Ferne Sonnenschatten zwischenspeichern (optional)"), Config::farShadowCache.enabled,
 				T("Static objects (houses, rocks, trees) are drawn into the far sun shadows only when the sun or the view moves on; in between only characters and moving things are drawn. Outdoors this saves around 1,000 to 1,500 draw calls per frame and helps most on systems limited by draw calls. Far shadows shimmer less and follow the sun in small steps. Anniversary Edition only. Switch off if far shadows flicker or are missing.",
 					"Unbewegliche Objekte (Häuser, Felsen, Bäume) werden nur dann in die fernen Sonnenschatten gezeichnet, wenn Sonne oder Blick weiterwandern; dazwischen nur Figuren und Bewegliches. Spart draußen etwa 1.000 bis 1.500 Draw Calls pro Frame und hilft vor allem Systemen, die an Draw Calls hängen. Ferne Schatten flimmern weniger und folgen der Sonne in kleinen Schritten. Nur Anniversary Edition. Ausschalten, falls ferne Schatten flackern oder fehlen."));
+			if (Occlusion::BottledInstalled()) {
+				MenuApi::TextWrapped("%s", T("Bottled Shaders is installed. It has its own shadow optimizations, so the far shadow cache stays off unless you allow it here.",
+												"Bottled Shaders ist installiert. Es hat eigene Schatten-Optimierungen, deshalb bleibt der Cache ferner Sonnenschatten aus, solange du ihn hier nicht erlaubst."));
+				Toggle(T("Far shadow cache with Bottled Shaders anyway##far", "Ferne Sonnenschatten trotz Bottled Shaders zwischenspeichern##far"), Config::farShadowCache.allowWithBottled,
+					T("Only if far shadows look right with both. Default off.", "Nur, wenn ferne Schatten mit beiden richtig aussehen. Standard aus."));
+			}
 
 			MenuApi::SeparatorText(T("Settings", "Einstellungen"));
 			if (MenuApi::Button(T("Reset to defaults", "Auf Standard zurücksetzen"))) {

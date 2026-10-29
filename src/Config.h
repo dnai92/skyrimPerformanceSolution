@@ -91,7 +91,8 @@ namespace Config
 	// fernen Kaskade einmal je Ausrichtung zeichnen und zwischenspeichern, sonst nur Figuren/Bewegliches
 	struct FarShadowCache
 	{
-		bool enabled = false;  // Standard AUS (BETA)
+		bool enabled = false;           // Standard AUS (optional)
+		bool allowWithBottled = false;  // trotz Bottled Shaders (sonst aus, wie der Licht-Cache)
 	};
 	inline FarShadowCache farShadowCache;  // [FarShadowCache]
 

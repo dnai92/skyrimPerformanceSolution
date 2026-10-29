@@ -15,6 +15,7 @@
 
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace ShadowCulling
 {
@@ -1614,15 +1615,66 @@ namespace ShadowCulling
 			// ferne Kaskade einsammelt, haengt auch von der Blickrichtung ab (Test 1.0.61: eine Summen-Pruefung schlug beim
 			// Drehen staendig an) - im Cache-Frame wird deshalb nur weggelassen, was nachweislich im Cache steckt; Neues wird
 			// normal gezeichnet (wie beim Cache fester Lichter). Bewegt sich ein gespeichertes Mesh, wird neu aufgebaut.
-			std::unordered_map<const RE::BSGeometry*, std::uint64_t> statics;
+			// Lage beim Aufbau (tolerant verglichen wie beim Licht-Cache) und eine Referenz: so laesst sich im Cache-Frame
+			// pruefen, ob ein nicht mehr gezeichnetes Mesh aus der Welt genommen wurde (sonst bliebe sein Schatten stehen)
+			struct FarEntry
+			{
+				RE::NiTransform                pose;
+				std::uint32_t                  seen = 0;  // Zeichen-Durchgang, in dem es zuletzt geprueft wurde
+				RE::NiPointer<RE::BSGeometry>  keep;
+			};
+			std::unordered_map<const RE::BSGeometry*, FarEntry> statics;
+			// Gelernte Bewegliche: hat sich ein Mesh einmal bewegt (Schild im Wind, Muehlrad), kommt es nicht mehr in den
+			// Cache - sonst baute er staendig neu auf (wie beim Licht-Cache)
+			std::unordered_set<const RE::BSGeometry*> promoted;
+			std::uint32_t                         drawStamp = 0, matched = 0;
+			std::uint32_t                         setups = 0, passes = 0;  // Utility-Draws / davon durch den Filter gelaufen
+			bool                                  uncovered = false;       // Aufbau: Draws am Filter vorbei (Figur im Cache?)
+			std::uint32_t                         removeCheck = 0;
 			std::uint32_t                         extras = 0;  // Cache-Frame: zusaetzlich gezeichnete Draws (nicht im Cache)
 			bool                                  broken = false;  // Cache-Frame: ein gespeichertes Mesh hat sich bewegt
 			std::uint64_t                         changed = 0, extrasSum = 0;
+			std::uint64_t                         removed = 0, uncoveredBuilds = 0, uncoveredDraws = 0, learned = 0;
 			bool                                  gpuHeld = false;  // FarShadowGpu haelt Kopien (bei Abschalten freigeben)
 			std::chrono::steady_clock::time_point lastLog = std::chrono::steady_clock::now();
 		};
 		FarState g_far{};
 		constexpr std::uint32_t kFarMaxExtras = 400;  // mehr neue Draws im Cache-Frame -> neu aufbauen
+
+		// Bewegt im Sinne des Schattens? Wie beim Licht-Cache tolerant: bis 1.0.68 eine gerundete Pruefsumme, die bei winzigem
+		// Zittern (Physik in Ruhe) ueber Rundungsgrenzen sprang und Neuaufbauten ausloeste
+		bool FarMeshMoved(const RE::NiTransform& a_a, const RE::NiTransform& a_b) noexcept
+		{
+			const float dx = a_a.translate.x - a_b.translate.x, dy = a_a.translate.y - a_b.translate.y, dz = a_a.translate.z - a_b.translate.z;
+			if (dx * dx + dy * dy + dz * dz > 2.0f * 2.0f || std::abs(a_a.scale - a_b.scale) > 0.01f) {
+				return true;
+			}
+			for (int r = 0; r < 3; ++r) {
+				for (int c = 0; c < 3; ++c) {
+					if (std::abs(a_a.rotate.entry[r][c] - a_b.rotate.entry[r][c]) > 0.01f) {
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+
+		// Noch in der Welt? Weggenommen/deaktiviert haengt das 3D nicht mehr unter der Szene oder ist ausgeblendet
+		bool FarStillInWorld(const RE::BSGeometry& a_geom) noexcept
+		{
+			const auto            root = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+			const RE::NiAVObject* obj = &a_geom;
+			for (int depth = 0; obj && depth < 64; ++depth) {
+				if (obj->GetAppCulled()) {
+					return false;
+				}
+				if (obj == root) {
+					return true;
+				}
+				obj = obj->parent;
+			}
+			return false;
+		}
 
 		bool SameProjection(const Projection& a_a, const Projection& a_b) noexcept
 		{
@@ -1639,7 +1691,9 @@ namespace ShadowCulling
 			f.decided = true;
 			FarMode     mode = FarMode::kNormal;
 			const auto& descs = a_light->GetRuntimeData().shadowmapDescriptors;
-			const bool  on = Config::farShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && g_stable.valid && kFarCascade < descs.size();
+			// Bottled Shaders: eigene Schatten-Optimierungen, wie beim Licht-Cache nur auf ausdrueckliche Erlaubnis (Review 1.0.69)
+			const bool  bottledBlock = Occlusion::BottledInstalled() && !Config::farShadowCache.allowWithBottled;
+			const bool  on = Config::farShadowCache.enabled && !bottledBlock && Config::masterEnabled.load(std::memory_order_relaxed) && g_stable.valid && kFarCascade < descs.size();
 			const auto cam = on ? descs[kFarCascade].camera.get() : nullptr;
 			if (on && cam) {
 				const auto& d = descs[kFarCascade];
@@ -1710,9 +1764,10 @@ namespace ShadowCulling
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
 			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: draws skipped {:.0f} | draw hook missed {} (other target {}) | "
-						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}, turned with view on {}, max turn {:.1f} deg) | rebuilt for moved/new objects {} (new drawn per cached frame {:.0f})",
+						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}, turned with view on {}, max turn {:.1f} deg) | rebuilt for moved/new objects {} (new drawn per cached frame {:.0f}), removed objects {}, draws outside filter {} (builds dropped {}), learned movers {}",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
-				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, g_stableRoll, g_stableRollMaxDeg, f.changed, static_cast<double>(f.extrasSum) / c);
+				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, g_stableRoll, g_stableRollMaxDeg, f.changed, static_cast<double>(f.extrasSum) / c, f.removed, f.uncoveredDraws, f.uncoveredBuilds, f.promoted.size());
+			f.removed = f.uncoveredDraws = f.uncoveredBuilds = 0;
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 			f.hookMissed = f.notBound = f.changed = 0;
 			f.extrasSum = 0;
@@ -1742,7 +1797,7 @@ namespace ShadowCulling
 				++f.waits;
 				break;
 			case FarMode::kBuild:
-				f.valid = f.drawDone;
+				f.valid = f.drawDone && !f.uncovered;
 				++f.builds;
 				break;
 			case FarMode::kCached:
@@ -1822,8 +1877,12 @@ namespace ShadowCulling
 		f.drawTex = tex;
 		f.extras = 0;
 		f.broken = false;
+		f.setups = f.passes = 0;
+		f.matched = 0;
+		++f.drawStamp;
 		if (mode == FarMode::kBuild) {
 			f.statics.clear();
+			f.uncovered = false;
 		}
 		g_farDrawMode = static_cast<int>(mode);
 		return true;
@@ -1836,6 +1895,15 @@ namespace ShadowCulling
 		g_farDrawMode = 0;
 		if (!f.drawCtx || !f.drawTex) {
 			return;
+		}
+		// Draws am Filter vorbei (andere Mods, anderer Zeichenweg): im Aufbau koennte so eine Figur im Cache landen und
+		// als eingefrorener Schatten stehen bleiben -> Aufbau verwerfen (wie beim Licht-Cache)
+		if ((mode == FarMode::kBuild || mode == FarMode::kCached) && f.setups > f.passes) {
+			f.uncoveredDraws += f.setups - f.passes;
+			if (mode == FarMode::kBuild) {
+				f.uncovered = true;
+				++f.uncoveredBuilds;
+			}
 		}
 		switch (mode) {
 		case FarMode::kWait:
@@ -1851,6 +1919,17 @@ namespace ShadowCulling
 			if (f.broken || f.extras > kFarMaxExtras) {
 				f.valid = false;
 				++f.changed;
+			} else if (f.matched < f.statics.size() && ++f.removeCheck % 8 == 0) {
+				// Nicht gezeichnete Cache-Meshes: oft nur nicht eingesammelt (die Auswahl haengt vom Blick ab), aber ein
+				// weggenommenes Objekt liesse seinen Schatten im Cache stehen. Jedes 8. Cache-Bild pruefen, ob sie noch in
+				// der Welt sind (Review 1.0.69)
+				for (const auto& [geom, e] : f.statics) {
+					if (e.seen != f.drawStamp && e.keep && !FarStillInWorld(*e.keep)) {
+						f.valid = false;
+						++f.removed;
+						break;
+					}
+				}
 			}
 			break;
 		default:
@@ -1945,6 +2024,14 @@ namespace ShadowCulling
 		return false;
 	}
 
+	void FarOnUtilityDraw() noexcept
+	{
+		const auto mode = static_cast<FarMode>(g_farDrawMode);
+		if (mode == FarMode::kCached || mode == FarMode::kBuild) {
+			++g_far.setups;
+		}
+	}
+
 	bool FarSkipDraw(const RE::BSRenderPass& a_pass) noexcept
 	{
 		const auto mode = static_cast<FarMode>(g_farDrawMode);
@@ -1952,30 +2039,50 @@ namespace ShadowCulling
 			return false;
 		}
 		const auto& geom = *a_pass.geometry;
-		const bool  dyn = FarDynamic(geom);
-		if (dyn) {
-			return mode == FarMode::kBuild;  // Aufbau: Cache nur mit Unbeweglichem; Cache-Frame: Bewegliches zeichnen
-		}
 		auto&       f = g_far;
+		bool        dyn = false;
+		try {
+			dyn = FarDynamic(geom) || f.promoted.contains(&geom);
+		} catch (...) {
+			dyn = true;
+		}
+		if (dyn) {
+			if (mode == FarMode::kBuild) {
+				return true;  // Aufbau: Cache nur mit Unbeweglichem
+			}
+			++f.passes;
+			return false;  // Cache-Frame: Bewegliches zeichnen
+		}
 		const auto& w = geom.world;
-		const auto  pose = Mix64(Quant(w.translate.x, 0.25f) ^ (Quant(w.translate.y, 0.25f) << 21) ^ (Quant(w.translate.z, 0.25f) << 42) ^
-                                Mix64(Quant(w.rotate.entry[0][0], 1000.0f) ^ (Quant(w.rotate.entry[1][1], 1000.0f) << 21) ^ (Quant(w.rotate.entry[0][1], 1000.0f) << 42)));
 		try {
 			if (mode == FarMode::kBuild) {
-				f.statics.insert_or_assign(&geom, pose);
+				f.statics.insert_or_assign(&geom, FarState::FarEntry{ w, 0, RE::NiPointer<RE::BSGeometry>(const_cast<RE::BSGeometry*>(&geom)) });
+				++f.passes;
 				return false;
 			}
 			const auto it = f.statics.find(&geom);
 			if (it == f.statics.end()) {
 				++f.extras;  // nicht im Cache (neu in Sicht, eingeblendet): normal zeichnen
+				++f.passes;
 				return false;
 			}
-			if (it->second != pose) {
-				f.broken = true;  // bewegt (Tuer, Havok): zeichnen, der Cache enthaelt noch die alte Lage
+			if (it->second.seen != f.drawStamp) {
+				it->second.seen = f.drawStamp;
+				++f.matched;
+			}
+			if (FarMeshMoved(it->second.pose, w)) {
+				// bewegt (Tuer, Havok, Schild im Wind): zeichnen, ab jetzt als beweglich lernen; der Cache enthaelt noch die
+				// alte Lage -> neu aufbauen
+				if (f.promoted.size() < 4096) {
+					f.promoted.insert(&geom);
+				}
+				f.broken = true;
+				++f.passes;
 				return false;
 			}
 		} catch (...) {
 			f.broken = true;
+			++f.passes;
 			return false;
 		}
 		if (Config::analysis.load(std::memory_order_relaxed)) {

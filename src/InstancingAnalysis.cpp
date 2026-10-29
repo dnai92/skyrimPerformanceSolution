@@ -691,6 +691,7 @@ namespace InstancingAnalysis
 			{
 				Stats::Count(Stats::Counter::UtilityDraws);
 				LightShadowCache::OnUtilityDraw();
+				ShadowCulling::FarOnUtilityDraw();
 				if (ShadowCulling::InDepthPrepass()) {
 					Stats::Count(Stats::Counter::DepthDrawsAll);
 				}

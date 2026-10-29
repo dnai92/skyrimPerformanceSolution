@@ -81,6 +81,38 @@ namespace FarShadowGpu
 		return true;
 	}
 
+	namespace
+	{
+		// Die Schattenkarte ist beim Kopieren als Tiefenpuffer gebunden. Kopieren aus/in eine gebundene Ressource ist in
+		// D3D11 nicht erlaubt - NVIDIA nimmt es hin, AMD-Treiber koennen die Kopie verwerfen (Review 1.0.69). Wie beim
+		// Licht-Cache die Ziele kurz abhaengen.
+		struct Unbind
+		{
+			ID3D11DeviceContext*    ctx;
+			ID3D11RenderTargetView* rtvs[8]{};
+			ID3D11DepthStencilView* dsv = nullptr;
+
+			explicit Unbind(ID3D11DeviceContext* a_ctx) noexcept :
+				ctx(a_ctx)
+			{
+				ctx->OMGetRenderTargets(8, rtvs, &dsv);
+				ctx->OMSetRenderTargets(0, nullptr, nullptr);
+			}
+			~Unbind()
+			{
+				ctx->OMSetRenderTargets(8, rtvs, dsv);
+				for (auto& v : rtvs) {
+					if (v) {
+						v->Release();
+					}
+				}
+				if (dsv) {
+					dsv->Release();
+				}
+			}
+		};
+	}
+
 	void Save(void* a_context, std::uint32_t a_slot, void* a_texture, std::uint32_t a_slice) noexcept
 	{
 		const auto ctx = static_cast<ID3D11DeviceContext*>(a_context);
@@ -89,6 +121,7 @@ namespace FarShadowGpu
 		}
 		D3D11_TEXTURE2D_DESC desc{};
 		static_cast<ID3D11Texture2D*>(a_texture)->GetDesc(&desc);
+		Unbind unbind(ctx);
 		ctx->CopySubresourceRegion(g_target.slots[a_slot], 0, 0, 0, 0, static_cast<ID3D11Resource*>(a_texture), a_slice * desc.MipLevels, nullptr);
 	}
 
@@ -100,6 +133,7 @@ namespace FarShadowGpu
 		}
 		D3D11_TEXTURE2D_DESC desc{};
 		static_cast<ID3D11Texture2D*>(a_texture)->GetDesc(&desc);
+		Unbind unbind(ctx);
 		ctx->CopySubresourceRegion(static_cast<ID3D11Resource*>(a_texture), a_slice * desc.MipLevels, 0, 0, 0, g_target.slots[a_slot], 0, nullptr);
 	}
 
