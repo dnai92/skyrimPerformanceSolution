@@ -124,7 +124,7 @@ namespace Config
 	// Schatten mehr. Weggelassen wird erst beim einzelnen Schatten-Draw (eingesammelt wird alles) - nur AE.
 	struct ActorPartShadowCulling
 	{
-		bool  enabled = false;        // BETA, Standard AUS
+		bool  enabled = true;         // seit 1.0.69 Standard AN
 		float maxRadius = 8.0f;       // nur Teile mit kleinerem Begrenzungsradius (Einheiten)
 		float minDistance = 500.0f;   // ab dieser Entfernung zur Kamera (~7 m)
 	};

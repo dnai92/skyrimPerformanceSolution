@@ -614,6 +614,25 @@ namespace ShadowCulling
 		// Letzte Entscheidung je Figur (Hysterese). Kleine Tabelle mit atomaren Eintraegen (Zeiger | weggelassen-Bit), da
 		// die Culling-Jobs parallel laufen; Kollisionen kosten nur die Hysterese, nie die Korrektheit.
 		std::array<std::atomic<std::uintptr_t>, 512> g_actorShadowState{};
+		std::array<std::atomic<std::uintptr_t>, 512> g_actorPartState{};  // dasselbe fuer kleine Figurenteile
+
+		// Figur weiter als a_minDistance von der Kamera (Position der Figur, nicht des Meshs)? Mit Hysterese: zurueck erst
+		// unter 90 % davon.
+		bool ActorBeyond(const RE::TESObjectREFR& a_actor, float a_minDistance, std::array<std::atomic<std::uintptr_t>, 512>& a_table) noexcept
+		{
+			const auto  pos = a_actor.GetPosition();
+			const float dx = pos.x - g_camX.load(std::memory_order_relaxed);
+			const float dy = pos.y - g_camY.load(std::memory_order_relaxed);
+			const float dz = pos.z - g_camZ.load(std::memory_order_relaxed);
+			const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+			const auto  key = reinterpret_cast<std::uintptr_t>(&a_actor) & ~std::uintptr_t{ 1 };
+			auto&       slot = a_table[(key >> 4) % a_table.size()];
+			const auto  prev = slot.load(std::memory_order_relaxed);
+			const bool  wasCulled = (prev & ~std::uintptr_t{ 1 }) == key && (prev & 1) != 0;
+			const bool  cull = dist > (wasCulled ? 0.9f * a_minDistance : a_minDistance);
+			slot.store(key | (cull ? 1 : 0), std::memory_order_relaxed);
+			return cull;
+		}
 
 		// Bis 1.0.59 je Mesh mit dessen eigener Entfernung entschieden: an der Grenze fielen einzelne Koerperteile weg,
 		// durch Animation pendelten sie hin und her (fernes NPC-Schatten-Flackern). Jetzt je Figur (Position der Figur)
@@ -637,17 +656,7 @@ namespace ShadowCulling
 				Stats::Count(Stats::Counter::ActorShadowKept);
 				return false;
 			}
-			const auto  pos = actor->GetPosition();
-			const float dx = pos.x - g_camX.load(std::memory_order_relaxed);
-			const float dy = pos.y - g_camY.load(std::memory_order_relaxed);
-			const float dz = pos.z - g_camZ.load(std::memory_order_relaxed);
-			const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-			const auto  key = reinterpret_cast<std::uintptr_t>(actor) & ~std::uintptr_t{ 1 };
-			auto&       slot = g_actorShadowState[(key >> 4) % g_actorShadowState.size()];
-			const auto  prev = slot.load(std::memory_order_relaxed);
-			const bool  wasCulled = (prev & ~std::uintptr_t{ 1 }) == key && (prev & 1) != 0;
-			const bool  cull = dist > (wasCulled ? backDist : cfg.minDistance);
-			slot.store(key | (cull ? 1 : 0), std::memory_order_relaxed);
+			const bool cull = ActorBeyond(*actor, cfg.minDistance, g_actorShadowState);
 			Stats::Count(cull ? Stats::Counter::ActorShadowCulled : Stats::Counter::ActorShadowKept);
 			return cull;
 		}
@@ -1919,7 +1928,16 @@ namespace ShadowCulling
 		if (b.radius <= 0.0f || b.radius >= cfg.maxRadius) {
 			return false;
 		}
-		if (DistanceToCamera(b) > cfg.minDistance) {
+		// Schnell raus: Teil deutlich naeher als die Rueckkehr-Grenze -> sicher behalten (keine Suche nach der Figur)
+		if (DistanceToCamera(b) + 2.0f * b.radius < 0.9f * cfg.minDistance - 200.0f) {
+			Stats::Count(Stats::Counter::ActorPartShadowKept);
+			return false;
+		}
+		// Je Figur nach ihrer Position und mit Hysterese, wie bei fernen Figurenschatten (1.0.60): bis 1.0.68 je Teil nach
+		// der eigenen Huelle - an der Grenze pendelten Ringe/Ohrringe durch die Animation rein und raus. Nur Figuren: auch
+		// Baeume sind geskinnt (Wind).
+		const auto actor = OwningActor(geom);
+		if (actor && ActorBeyond(*actor, cfg.minDistance, g_actorPartState)) {
 			Stats::Count(Stats::Counter::ActorPartShadowCulled);
 			return true;
 		}
