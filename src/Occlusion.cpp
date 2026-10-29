@@ -1073,6 +1073,7 @@ namespace Occlusion
 		// Bottled), aktiv, solange nicht unter "Disable at Boot" und enableHiZCulling nicht false (SettingsUser ueber
 		// SettingsDefault). Ihr Weglassen greift nur auf AE vor 1.7.99. Erkennung wie bei Faster Objects.
 		std::atomic<bool> g_bottledHiZ{ false };
+		std::atomic<bool> g_bottledInstalled{ false };  // Bottled Shaders geladen (unabhaengig von seiner HiZ-Verdeckung)
 
 		std::optional<bool> JsonBool(const std::string& a_text, const char* a_key)
 		{
@@ -1780,9 +1781,10 @@ namespace Occlusion
 
 	void DetectOtherCullers() noexcept
 	{
-		bool on = false;
+		bool on = false, installed = false;
 		try {
 			if (REX::W32::GetModuleHandleW(L"CommunityShaders.dll") && std::filesystem::exists("Data/Shaders/Features/HiZOcclusion.ini")) {
+				installed = true;
 				bool disabled = false, culling = true;
 				for (const char* path : { "Data/SKSE/Plugins/CommunityShaders/SettingsDefault.json", "Data/SKSE/Plugins/CommunityShaders/SettingsUser.json" }) {
 					std::ifstream f(path);
@@ -1805,8 +1807,13 @@ namespace Occlusion
 			on = false;
 		}
 		static bool logged = false;
-		if (on != g_bottledHiZ.exchange(on) || !logged) {
+		const bool  installChanged = installed != g_bottledInstalled.exchange(installed);
+		if (on != g_bottledHiZ.exchange(on) || installChanged || !logged) {
 			logged = true;
+			if (installed) {
+				logger::warn("[LightShadowCache] Bottled Shaders is installed - shadow cache for static lights {}", Config::lightShadowCache.allowWithBottled ?
+					"stays on (bAllowWithBottledShaders)" : "is off (interior shadows flickered with it; allow in the menu or with bAllowWithBottledShaders)");
+			}
 			if (on) {
 				logger::warn("[Occlusion] Bottled Shaders HiZ Occlusion Culling is active - SPS {}", Config::occlAllowWithBottled.load() ?
 					"hides occluded objects anyway (bAllowWithBottledHiZ), both test every object" : "Hide occluded objects stays off (allow in the menu or with bAllowWithBottledHiZ)");
@@ -1819,4 +1826,6 @@ namespace Occlusion
 	}
 
 	bool BottledHiZActive() noexcept { return g_bottledHiZ.load(std::memory_order_relaxed); }
+	bool BottledInstalled() noexcept { return g_bottledInstalled.load(std::memory_order_relaxed); }
+	bool BottledBlocksLightCache() noexcept { return g_bottledInstalled.load(std::memory_order_relaxed) && !Config::lightShadowCache.allowWithBottled; }
 }

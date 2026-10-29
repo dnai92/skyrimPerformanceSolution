@@ -504,6 +504,12 @@ namespace Menu
 			Toggle(T("Enabled##lcache", "Aktiv##lcache"), Config::lightShadowCache.enabled,
 				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters, moving objects and trees in the wind are drawn again each frame. Lights that drift or change their radius are rebuilt. Mainly for interiors with many lights. Switch off if shadows near fires pulse.",
 					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren, Bewegliches und Bäume im Wind neu gezeichnet. Lichter, die wandern oder ihren Radius ändern, werden neu aufgebaut. Vor allem für Innenräume mit vielen Lichtern. Ausschalten, falls Schatten an Feuern pulsieren."));
+			if (Occlusion::BottledInstalled()) {
+				MenuApi::TextWrapped("%s", T("Bottled Shaders is installed. With it shadows in interiors flickered, so this cache stays off unless you allow it here.",
+												"Bottled Shaders ist installiert. Damit flackerten Schatten in Innenräumen, deshalb bleibt dieser Cache aus, solange du ihn hier nicht erlaubst."));
+				Toggle(T("Use with Bottled Shaders anyway##lcache", "Trotz Bottled Shaders verwenden##lcache"), Config::lightShadowCache.allowWithBottled,
+					T("Only if shadows near lights do not flicker in interiors. Default off.", "Nur, wenn Schatten an Lichtern in Innenräumen nicht flackern. Standard aus."));
+			}
 
 			MenuApi::SeparatorText(T("Character shadow culling", "Figurenschatten in der Ferne weglassen"));
 			Toggle(T("Enabled##actor", "Aktiv##actor"), Config::actorShadowCulling.enabled,

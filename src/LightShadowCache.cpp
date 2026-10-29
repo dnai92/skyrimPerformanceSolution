@@ -1,4 +1,5 @@
 #include "LightShadowCache.h"
+#include "Occlusion.h"
 
 #include "Config.h"
 #include "Features.h"
@@ -764,7 +765,7 @@ namespace LightShadowCache
 		g_presentsSinceFrame = 0;
 		g_stalled.store(false, std::memory_order_relaxed);  // bis 1.0.60 erst beim naechsten Present zurueckgesetzt
 		g_sliceUseCount = 0;
-		const bool enabled = g_drawFilter && Config::lightShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed);
+		const bool enabled = g_drawFilter && Config::lightShadowCache.enabled && Config::masterEnabled.load(std::memory_order_relaxed) && !Occlusion::BottledBlocksLightCache();
 
 		// 1. letzten Frame auswerten
 		for (auto& l : g_lights) {

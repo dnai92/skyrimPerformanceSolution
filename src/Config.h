@@ -186,6 +186,9 @@ namespace Config
 	{
 		bool  enabled = true;   // 1.0.51-1.0.57 Beta/aus (Pulsieren mit Lux, behoben 1.0.56); Drachenfeste A/B: mit Verdeckung ~1 ms
 		float debugMode = 0;    // Pruef-Modus: 1 nie neu aufbauen, 2 Aufbau ohne Vorframe-Karte, 3 zurueckkopieren + alles zeichnen
+		// Mit Bottled Shaders flackerten Schatten in Innenraeumen (Nexus jimb111, 1.0.68: nur dieser Schalter) - dort aus,
+		// ausser hier erlaubt
+		bool allowWithBottled = false;
 	};
 	inline LightShadowCache lightShadowCache;  // [LightShadowCache]
 

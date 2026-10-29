@@ -38,6 +38,9 @@ namespace Occlusion
 	// Bottled Shaders mit eigener HiZ-Verdeckung erkennen (Daten geladen, Ladebildschirm)
 	void DetectOtherCullers() noexcept;
 	bool BottledHiZActive() noexcept;
+	bool BottledInstalled() noexcept;
+	// Schatten-Cache fester Lichter wegen Bottled Shaders aus (Flackern in Innenraeumen, nicht erlaubt)
+	bool BottledBlocksLightCache() noexcept;
 
 	// Debug: beim naechsten Frame das aktuelle Tiefenbild als Bild in den SKSE-Log-Ordner schreiben
 	void RequestDepthDump() noexcept;
