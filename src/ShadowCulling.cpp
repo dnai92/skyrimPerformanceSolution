@@ -1163,49 +1163,62 @@ namespace ShadowCulling
 			if (!a_obj || !Config::subtreePruning.enabled || !Config::masterEnabled.load(std::memory_order_relaxed)) {
 				return false;
 			}
-			const auto node = a_obj->AsNode();
-			if (!node) {
-				return false;
+			// Reihenfolge nach Kosten (Tracy 1.0.69: 1,5-1,9 % des Hauptthreads): erst die Art des Durchlaufs (haengt nur am
+			// Culler), dann der Groessentest auf der Huelle, und erst wenn wirklich uebersprungen wuerde der virtuelle Aufruf
+			// AsNode - bis 1.0.69 lief er fuer jedes besuchte Objekt, uebersprungen wird nur ein kleiner Teil
+			const auto&              sp = Config::subtreePruning;
+			const Config::CullRule*  rule = nullptr;
+			std::uint32_t            cascade = UINT32_MAX;
+			float                    scale = 1.0f;
+			Stats::Counter           counter = Stats::Counter::PrunedPoint;
+			bool                     sun = false;
+			float                    precipMaxRadius = 0.0f;
+			if (a_parabolic) {
+				if (!sp.point) {
+					return false;
+				}
+				rule = &Config::pointLightCulling;
+			} else if (a_this->camera && a_this->camera == PrecipCamera()) {
+				const auto& sky = Config::skylightingCulling;
+				if (!sp.precip || !sky.enabled) {
+					return false;
+				}
+				precipMaxRadius = sky.minRadius;
+				counter = Stats::Counter::PrunedPrecip;
+			} else {
+				std::uint32_t c = 0;
+				switch (Classify(a_this, c)) {
+				case Kind::kSun:
+					if (!sp.sun || !g_sunCullAllowed.load(std::memory_order_relaxed)) {
+						return false;
+					}
+					rule = &Config::shadowCulling;
+					cascade = c;
+					scale = 1.0f / g_sunSin.load(std::memory_order_relaxed);
+					counter = Stats::Counter::PrunedSun;
+					sun = true;
+					break;
+				case Kind::kPoint:
+					if (!sp.point) {
+						return false;
+					}
+					rule = &Config::pointLightCulling;
+					break;
+				default:
+					return false;
+				}
 			}
-			const auto& bound = node->worldBound;
+			const auto& bound = a_obj->worldBound;
 			if (bound.radius <= 0.0f) {
 				return false;
 			}
-			const auto& sp = Config::subtreePruning;
-			if (a_parabolic) {
-				if (sp.point && ShouldCullBound(Config::pointLightCulling, bound, UINT32_MAX, 1.0f)) {
-					Stats::Count(Stats::Counter::PrunedPoint);
-					return true;
-				}
-				return false;
+			const bool cull = rule ? ShouldCullBound(*rule, bound, cascade, scale) : bound.radius < precipMaxRadius;
+			if (!cull || !a_obj->AsNode()) {
+				return false;  // einzelne Meshes entscheidet AppendVirtual
 			}
-			if (a_this->camera && a_this->camera == PrecipCamera()) {
-				const auto& sky = Config::skylightingCulling;
-				if (sp.precip && sky.enabled && bound.radius < sky.minRadius) {
-					Stats::Count(Stats::Counter::PrunedPrecip);
-					return true;
-				}
-				return false;
-			}
-			std::uint32_t cascade = 0;
-			switch (Classify(a_this, cascade)) {
-			case Kind::kSun:
-				if (sp.sun && g_sunCullAllowed.load(std::memory_order_relaxed) &&
-					ShouldCullBound(Config::shadowCulling, bound, cascade, 1.0f / g_sunSin.load(std::memory_order_relaxed))) {
-					Stats::Count(Stats::Counter::PrunedSun);
-					a_sun = true;
-					return true;
-				}
-				return false;
-			case Kind::kPoint:
-				if (sp.point && ShouldCullBound(Config::pointLightCulling, bound, UINT32_MAX, 1.0f)) {
-					Stats::Count(Stats::Counter::PrunedPoint);
-					return true;
-				}
-				return false;
-			default:
-				return false;
-			}
+			Stats::Count(counter);
+			a_sun = sun;
+			return true;
 		}
 
 		// Enthaelt der Teilbaum Figuren oder geskinnte Meshes (Stoff-Banner, Figuren in Gruppenknoten)? Die Regel fuer
@@ -1639,6 +1652,121 @@ namespace ShadowCulling
 	namespace
 	{
 		// ---------------- Cache der fernen Kaskade ----------------
+		// Inhalt des Caches als kompakte Tabelle (offene Adressierung): Schluessel und Lage eines Meshs liegen in genau einer
+		// Cache-Zeile (64 Byte). Bis 1.0.69 eine std::unordered_map - jede Suche ging ueber Bucket und Knoten (mehrere
+		// Cache-Fehlgriffe), Tracy am Markt: 1,1 % des Hauptthreads fuer ~1.300 Suchen je Bild. Die Referenzen (fuer die
+		// Pruefung auf entfernte Objekte) liegen getrennt daneben und werden im Draw-Pfad nicht beruehrt.
+		class FarTable
+		{
+		public:
+			struct alignas(64) Slot
+			{
+				const RE::BSGeometry* key = nullptr;
+				std::uint32_t         seen = 0;  // Zeichen-Durchgang, in dem es zuletzt geprueft wurde
+				float                 scale = 0.0f;
+				RE::NiPoint3          translate{};
+				RE::NiMatrix3         rotate{};
+			};
+			static_assert(sizeof(Slot) == 64);
+
+			Slot* Find(const RE::BSGeometry* a_key) noexcept
+			{
+				if (m_slots.empty()) {
+					return nullptr;
+				}
+				const std::size_t mask = m_slots.size() - 1;
+				for (std::size_t i = Hash(a_key) & mask;; i = (i + 1) & mask) {
+					auto& s = m_slots[i];
+					if (s.key == a_key) {
+						return &s;
+					}
+					if (!s.key) {
+						return nullptr;
+					}
+				}
+			}
+
+			// neu oder ersetzen; haelt eine Referenz, damit die Adresse bis zum naechsten Aufbau nicht wiederverwendet wird
+			void Insert(const RE::BSGeometry* a_key, const RE::NiTransform& a_world)
+			{
+				if ((m_count + 1) * 2 > m_slots.size()) {
+					Grow();
+				}
+				const std::size_t i = Place(a_key);
+				auto&             s = m_slots[i];
+				if (!s.key) {
+					s.key = a_key;
+					++m_count;
+					m_keep[i] = RE::NiPointer<RE::BSGeometry>(const_cast<RE::BSGeometry*>(a_key));
+				}
+				s.seen = 0;
+				s.scale = a_world.scale;
+				s.translate = a_world.translate;
+				s.rotate = a_world.rotate;
+			}
+
+			void Clear() noexcept
+			{
+				for (std::size_t i = 0; i < m_slots.size(); ++i) {
+					m_slots[i].key = nullptr;
+					m_keep[i].reset();
+				}
+				m_count = 0;
+			}
+
+			std::size_t Size() const noexcept { return m_count; }
+
+			// Mesh, das im Durchgang a_stamp nicht gezeichnet wurde und nicht mehr in der Welt ist?
+			template <class F>
+			bool AnyUnseen(std::uint32_t a_stamp, F&& a_removed) const
+			{
+				for (std::size_t i = 0; i < m_slots.size(); ++i) {
+					if (m_slots[i].key && m_slots[i].seen != a_stamp && m_keep[i] && a_removed(*m_keep[i])) {
+						return true;
+					}
+				}
+				return false;
+			}
+
+		private:
+			static std::size_t Hash(const void* a_p) noexcept
+			{
+				auto h = reinterpret_cast<std::uintptr_t>(a_p) >> 4;
+				h ^= h >> 17;
+				h *= 0x9E3779B97F4A7C15ull;
+				return static_cast<std::size_t>(h >> 32);
+			}
+
+			std::size_t Place(const RE::BSGeometry* a_key) const noexcept
+			{
+				const std::size_t mask = m_slots.size() - 1;
+				std::size_t       i = Hash(a_key) & mask;
+				while (m_slots[i].key && m_slots[i].key != a_key) {
+					i = (i + 1) & mask;
+				}
+				return i;
+			}
+
+			void Grow()
+			{
+				std::vector<Slot>                          oldSlots(std::max<std::size_t>(m_slots.size() * 2, 4096));
+				std::vector<RE::NiPointer<RE::BSGeometry>> oldKeep(oldSlots.size());
+				oldSlots.swap(m_slots);
+				oldKeep.swap(m_keep);
+				for (std::size_t i = 0; i < oldSlots.size(); ++i) {
+					if (oldSlots[i].key) {
+						const std::size_t j = Place(oldSlots[i].key);
+						m_slots[j] = oldSlots[i];
+						m_keep[j] = std::move(oldKeep[i]);
+					}
+				}
+			}
+
+			std::vector<Slot>                          m_slots;
+			std::vector<RE::NiPointer<RE::BSGeometry>> m_keep;
+			std::size_t                                m_count = 0;
+		};
+
 		struct FarState
 		{
 			bool                                  valid = false;     // Cache passt zur Projektion "build"
@@ -1662,13 +1790,7 @@ namespace ShadowCulling
 			// normal gezeichnet (wie beim Cache fester Lichter). Bewegt sich ein gespeichertes Mesh, wird neu aufgebaut.
 			// Lage beim Aufbau (tolerant verglichen wie beim Licht-Cache) und eine Referenz: so laesst sich im Cache-Frame
 			// pruefen, ob ein nicht mehr gezeichnetes Mesh aus der Welt genommen wurde (sonst bliebe sein Schatten stehen)
-			struct FarEntry
-			{
-				RE::NiTransform                pose;
-				std::uint32_t                  seen = 0;  // Zeichen-Durchgang, in dem es zuletzt geprueft wurde
-				RE::NiPointer<RE::BSGeometry>  keep;
-			};
-			std::unordered_map<const RE::BSGeometry*, FarEntry> statics;
+			FarTable statics;
 			// Gelernte Bewegliche: hat sich ein Mesh einmal bewegt (Schild im Wind, Muehlrad), kommt es nicht mehr in den
 			// Cache - sonst baute er staendig neu auf (wie beim Licht-Cache)
 			std::unordered_set<const RE::BSGeometry*> promoted;
@@ -1688,7 +1810,7 @@ namespace ShadowCulling
 
 		// Bewegt im Sinne des Schattens? Wie beim Licht-Cache tolerant: bis 1.0.68 eine gerundete Pruefsumme, die bei winzigem
 		// Zittern (Physik in Ruhe) ueber Rundungsgrenzen sprang und Neuaufbauten ausloeste
-		bool FarMeshMoved(const RE::NiTransform& a_a, const RE::NiTransform& a_b) noexcept
+		bool FarMeshMoved(const FarTable::Slot& a_a, const RE::NiTransform& a_b) noexcept
 		{
 			const float dx = a_a.translate.x - a_b.translate.x, dy = a_a.translate.y - a_b.translate.y, dz = a_a.translate.z - a_b.translate.z;
 			if (dx * dx + dy * dy + dz * dz > 2.0f * 2.0f || std::abs(a_a.scale - a_b.scale) > 0.01f) {
@@ -1927,7 +2049,7 @@ namespace ShadowCulling
 		f.matched = 0;
 		++f.drawStamp;
 		if (mode == FarMode::kBuild) {
-			f.statics.clear();
+			f.statics.Clear();
 			f.uncovered = false;
 		}
 		g_farDrawMode = static_cast<int>(mode);
@@ -1965,17 +2087,14 @@ namespace ShadowCulling
 			if (f.broken || f.extras > kFarMaxExtras) {
 				f.valid = false;
 				++f.changed;
-			} else if (f.matched < f.statics.size() && ++f.removeCheck % 8 == 0) {
+			} else if (f.matched < f.statics.Size() && ++f.removeCheck % 8 == 0) {
 				ZoneScopedN("Fernschatten: entfernte Objekte pruefen");
 				// Nicht gezeichnete Cache-Meshes: oft nur nicht eingesammelt (die Auswahl haengt vom Blick ab), aber ein
 				// weggenommenes Objekt liesse seinen Schatten im Cache stehen. Jedes 8. Cache-Bild pruefen, ob sie noch in
 				// der Welt sind (Review 1.0.69)
-				for (const auto& [geom, e] : f.statics) {
-					if (e.seen != f.drawStamp && e.keep && !FarStillInWorld(*e.keep)) {
-						f.valid = false;
-						++f.removed;
-						break;
-					}
+				if (f.statics.AnyUnseen(f.drawStamp, [](const RE::BSGeometry& a_geom) { return !FarStillInWorld(a_geom); })) {
+					f.valid = false;
+					++f.removed;
 				}
 			}
 			break;
@@ -2092,13 +2211,12 @@ namespace ShadowCulling
 		// Markt ~1,6 % des Hauptthreads (wie beim Licht-Cache seit 1.0.57)
 		if (mode == FarMode::kCached) {
 			try {
-				const auto it = f.statics.find(&geom);
-				if (it != f.statics.end()) {
-					if (it->second.seen != f.drawStamp) {
-						it->second.seen = f.drawStamp;
+				if (const auto e = f.statics.Find(&geom)) {
+					if (e->seen != f.drawStamp) {
+						e->seen = f.drawStamp;
 						++f.matched;
 					}
-					if (FarMeshMoved(it->second.pose, geom.world)) {
+					if (FarMeshMoved(*e, geom.world)) {
 						// bewegt (Tuer, Havok, Schild im Wind): zeichnen, ab jetzt als beweglich lernen; der Cache enthaelt noch
 						// die alte Lage -> neu aufbauen
 						if (f.promoted.size() < 4096) {
@@ -2135,7 +2253,7 @@ namespace ShadowCulling
 		++f.passes;
 		if (mode == FarMode::kBuild) {
 			try {
-				f.statics.insert_or_assign(&geom, FarState::FarEntry{ geom.world, 0, RE::NiPointer<RE::BSGeometry>(const_cast<RE::BSGeometry*>(&geom)) });
+				f.statics.Insert(&geom, geom.world);
 			} catch (...) {
 				f.uncovered = true;  // nicht vollstaendig erfasst: Aufbau verwerfen
 			}

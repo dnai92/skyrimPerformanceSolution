@@ -541,6 +541,14 @@ namespace Occlusion
 		};
 		std::mutex            g_doorLock;
 		std::vector<DoorMove> g_doors;
+		// Analyse: welche Tueren melden sich (Test 1.0.69: ~350 Ereignisse je Minute im Stand - Ursache unklar)
+		struct DoorStat
+		{
+			std::uint32_t activate = 0, openClose = 0;
+			std::string   name;
+			float         distance = 0.0f;
+		};
+		std::unordered_map<RE::FormID, DoorStat> g_doorStats;
 		constexpr std::uint32_t kGW = OcclusionGpu::kWidth, kGH = OcclusionGpu::kHeight;
 
 		float FreedAvgPct() noexcept
@@ -1330,6 +1338,19 @@ namespace Occlusion
 				}
 				g_poseMismatch = 0;
 			}
+			{
+				std::vector<std::pair<RE::FormID, DoorStat>> doors;
+				{
+					std::lock_guard lock(g_doorLock);
+					doors.assign(g_doorStats.begin(), g_doorStats.end());
+					g_doorStats.clear();
+				}
+				std::sort(doors.begin(), doors.end(), [](const auto& a, const auto& b) { return a.second.activate + a.second.openClose > b.second.activate + b.second.openClose; });
+				for (std::size_t i = 0; i < doors.size() && i < 5; ++i) {
+					const auto& [id, st] = doors[i];
+					if (log) logger::info("[Occlusion]     door {:08X} {} | activated {}, opened/closed {} | {:.0f} units from the player", id, st.name, st.activate, st.openClose, st.distance);
+				}
+			}
 			if (log) logger::info("[Occlusion]   hiding mode: {} | marked {:.0f}/frame, draws left out at draw time {:.0f}/frame, table full {}",
 				Config::occlDrawFilter.load() ? "draw filter" : "collection (old)", g_hiddenMarked.exchange(0) / frames, g_filterSkipped.exchange(0) / frames,
 				g_hiddenFull.exchange(0));
@@ -1984,6 +2005,24 @@ namespace Occlusion
 			return;
 		}
 		g_doorEvents.fetch_add(1, std::memory_order_relaxed);
+		if (Diag()) {
+			try {
+				std::lock_guard lock(g_doorLock);
+				if (g_doorStats.size() < 256) {
+					auto& st = g_doorStats[a_door->GetFormID()];
+					++(a_seconds > 1.0f ? st.activate : st.openClose);
+					if (st.name.empty()) {
+						const auto name = a_door->GetName();
+						const auto base = a_door->GetBaseObject();
+						st.name = std::format("{} (base {:08X})", name && *name ? name : "?", base ? base->GetFormID() : 0u);
+					}
+					if (const auto player = RE::PlayerCharacter::GetSingleton()) {
+						st.distance = a_door->GetPosition().GetDistance(player->GetPosition());
+					}
+				}
+			} catch (...) {
+			}
+		}
 		try {
 			const auto      until = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int>(a_seconds * 1000.0f));
 			const auto      handle = a_door->GetHandle();
