@@ -275,7 +275,7 @@ namespace Config
 		occlSkipSkinned.store(ini.GetBoolValue("Occlusion", "bNeverCharacters", occlSkipSkinned.load()), std::memory_order_relaxed);
 		occlReproject.store(ini.GetBoolValue("Occlusion", "bReproject", occlReproject.load()), std::memory_order_relaxed);
 		occlAllowWithBottled.store(ini.GetBoolValue("Occlusion", "bAllowWithBottledHiZ", occlAllowWithBottled.load()), std::memory_order_relaxed);
-		logger::info("Occlusion (beta): hiding {} | reproject {} | pause from {:.1f} deg / {:.0f} units | margin {:.1f} % + {:.0f} | hidden in {} images in a row | max {} tiles | characters {}", occlusionCull.load() ? "ON" : "OFF", occlReproject.load() ? "on" : "off", occlTurnDeg.load(), occlMoveUnits.load(), occlMarginPct.load(), occlMarginUnits.load(), occlStreak.load(), occlMaxTiles.load(), occlSkipSkinned.load() ? "never" : "allowed");
+		logger::info("Occlusion: hiding {} | reproject {} | pause from {:.1f} deg / {:.0f} units | margin {:.1f} % + {:.0f} | hidden in {} images in a row | max {} tiles | characters {}", occlusionCull.load() ? "ON" : "OFF", occlReproject.load() ? "on" : "off", occlTurnDeg.load(), occlMoveUnits.load(), occlMarginPct.load(), occlMarginUnits.load(), occlStreak.load(), occlMaxTiles.load(), occlSkipSkinned.load() ? "never" : "allowed");
 		toggleKey.store(static_cast<std::uint32_t>(ini.GetLongValue("General", "iToggleKey", toggleKey.load())), std::memory_order_relaxed);
 
 		const auto readRule = [&](const char* a_section, CullRule& a_rule) {
@@ -410,7 +410,7 @@ namespace Config
 		lightShadowCache.allowWithBottled = ini.GetBoolValue("LightShadowCache", "bAllowWithBottledShaders", lightShadowCache.allowWithBottled);
 		logger::info("LightShadowCache: {}", lightShadowCache.enabled ? "ON" : "OFF");
 		farShadowCache.enabled = ini.GetBoolValue("FarShadowCache", "bEnabled", farShadowCache.enabled);
-		logger::info("FarShadowCache (beta): {}", farShadowCache.enabled ? "ON" : "OFF");
+		logger::info("FarShadowCache (optional): {}", farShadowCache.enabled ? "ON" : "OFF");
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);

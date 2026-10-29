@@ -290,16 +290,16 @@ namespace Menu
 				T("Textures of far objects are shrunk in VRAM and reloaded at full size when you come closer.",
 					"Texturen ferner Objekte werden im VRAM verkleinert und bei Annäherung in voller Größe neu geladen."));
 
-			MenuApi::SeparatorText(T("Beta (off by default)", "Beta (standardmäßig aus)"));
-			MenuApi::TextWrapped("%s", T("These work, but not perfectly on every setup yet. Switch off again if something looks wrong.", "Diese funktionieren, aber noch nicht auf jedem System perfekt. Bei Bildfehlern wieder ausschalten."));
-			Toggle(T("Shadow instancing (BETA)", "Gleiche Schatten bündeln (BETA)"), Config::shadowInstancing.enabled,
+			MenuApi::SeparatorText(T("Optional (off by default)", "Optional (standardmäßig aus)"));
+			MenuApi::TextWrapped("%s", T("Off by default. Depending on your setup and mods they can help, switch them off again if something looks wrong.", "Standardmäßig aus. Je nach System und Mods können sie helfen, bei Bildfehlern wieder ausschalten."));
+			Toggle(T("Shadow instancing (optional)", "Gleiche Schatten bündeln (optional)"), Config::shadowInstancing.enabled,
 				T("Draws identical simple meshes in sun shadows with one draw call. Small gain. Takes effect after restarting the game. Switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn. Wirkt erst nach einem Neustart des Spiels. Bei flackernden Schatten oder Objekten wieder ausschalten."));
-			Toggle(T("Small character parts cast no shadow (BETA)", "Kleine Figurenteile ohne Schatten (BETA)"), Config::actorPartShadowCulling.enabled,
+			Toggle(T("Small character parts cast no shadow (optional)", "Kleine Figurenteile ohne Schatten (optional)"), Config::actorPartShadowCulling.enabled,
 				T("Rings, earrings, eyes, teeth and small armor parts of characters a few meters away cast no shadow (invisible at that distance). Saves draw calls in crowded places. Anniversary Edition only.",
 					"Ringe, Ohrringe, Augen, Zähne und kleine Rüstungsteile von Figuren werfen ab wenigen Metern keinen Schatten (dort nicht zu sehen). Spart Draw Calls an vollen Orten. Nur Anniversary Edition."));
-			Toggle(T("Main view micro culling (BETA)", "Winzige Objekte im Bild weglassen (BETA)"), Config::mainViewCulling.enabled,
+			Toggle(T("Main view micro culling (optional)", "Winzige Objekte im Bild weglassen (optional)"), Config::mainViewCulling.enabled,
 				T("Tiny far objects are not drawn at all. They can pop in.", "Winzige ferne Objekte werden gar nicht gezeichnet. Sie können aufploppen."));
-			Toggle(T("Far shadow cache (BETA)", "Ferne Sonnenschatten zwischenspeichern (BETA)"), Config::farShadowCache.enabled,
+			Toggle(T("Far shadow cache (optional)", "Ferne Sonnenschatten zwischenspeichern (optional)"), Config::farShadowCache.enabled,
 				T("Static objects (houses, rocks, trees) are drawn into the far sun shadows only when the sun or the view moves on; in between only characters and moving things are drawn. Outdoors this saves around 1,000 to 1,500 draw calls per frame and helps most on systems limited by draw calls. Far shadows shimmer less and follow the sun in small steps. Anniversary Edition only. Switch off if far shadows flicker or are missing.",
 					"Unbewegliche Objekte (Häuser, Felsen, Bäume) werden nur dann in die fernen Sonnenschatten gezeichnet, wenn Sonne oder Blick weiterwandern; dazwischen nur Figuren und Bewegliches. Spart draußen etwa 1.000 bis 1.500 Draw Calls pro Frame und hilft vor allem Systemen, die an Draw Calls hängen. Ferne Schatten flimmern weniger und folgen der Sonne in kleinen Schritten. Nur Anniversary Edition. Ausschalten, falls ferne Schatten flackern oder fehlen."));
 
@@ -362,7 +362,7 @@ namespace Menu
 			Tip(T("Writes all objects that micro culling and far decal culling leave out in the main view over the next 30 frames to SPS_MicroCulled_N.csv next to SPS.log (name, reference, parent nodes, size, distance).",
 				"Schreibt alle Objekte, die Mikro-Culling und ferne Decals in den nächsten 30 Frames im Hauptbild weglassen, nach SPS_MicroCulled_N.csv neben SPS.log (Name, Referenz, übergeordnete Knoten, Größe, Abstand)."));
 
-			MenuApi::SeparatorText(T("Beta features (measurement)", "Beta-Funktionen (Messung)"));
+			MenuApi::SeparatorText(T("Optional features (measurement)", "Optionale Funktionen (Messung)"));
 			if (EngineTimers::BetaABRunning()) {
 				MenuApi::TextWrapped("%s", T("Measurement running (3 min) - close the menu and stand still or walk the same route.",
 												"Messung läuft (3 min) - Menü schließen und stehen bleiben oder dieselbe Strecke laufen."));
@@ -520,7 +520,7 @@ namespace Menu
 			Toggle(T("Also torch shadows##actor", "Auch Fackelschatten##actor"), Config::actorShadowCulling.pointLights,
 				T("Also leave out character shadows cast by torches and fires.", "Auch Figurenschatten von Fackeln und Feuern weglassen."));
 
-			MenuApi::SeparatorText(T("Shadow instancing (BETA)", "Gleiche Schatten bündeln (BETA)"));
+			MenuApi::SeparatorText(T("Shadow instancing (optional)", "Gleiche Schatten bündeln (optional)"));
 			Toggle(T("Enabled##inst", "Aktiv##inst"), Config::shadowInstancing.enabled,
 				T("Draws identical simple meshes in sun shadows with one draw call. Small gain, off by default. Takes effect after restarting the game. Switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn, standardmäßig aus. Wirkt erst nach einem Neustart des Spiels. Bei flackernden Schatten oder Objekten wieder ausschalten."));
 		}
@@ -662,10 +662,10 @@ namespace Menu
 				Tip(T("Upper limit for all streamed textures, near ones too, independent of VRAM usage. Applied right away and when textures load. Excluded paths and the character switches below still apply.",
 					"Obergrenze für alle gestreamten Texturen, auch nahe, unabhängig von der VRAM-Belegung. Wirkt sofort und beim Laden. Ausgenommene Pfade und die Figuren-Schalter unten gelten weiter."));
 			}
-			Toggle(T("Also clothing and armor of characters (BETA)##ts", "Auch Kleidung und Rüstung von Figuren (BETA)##ts"), Config::textureStream.streamClothing,
+			Toggle(T("Also clothing and armor of characters (optional)##ts", "Auch Kleidung und Rüstung von Figuren (optional)##ts"), Config::textureStream.streamClothing,
 				T("Clothing and armor worn by NPCs far away are shrunk as well. Distance is taken from the character itself, so sitting or animated NPCs are measured correctly. Off by default. With some armor and clothing mods textures can turn black, purple or blurry until you come close. Whether it works depends on your installed mods, so if it looks wrong, turn this off.",
 					"Kleidung und Rüstung weit entfernter NPCs werden ebenfalls verkleinert. Der Abstand wird an der Figur selbst gemessen, damit auch sitzende oder animierte NPCs richtig erfasst werden. Standard AUS. Bei manchen Rüstungs- und Kleidungsmods können Texturen schwarz, lila oder unscharf werden, bis man näher kommt. Ob es funktioniert, hängt von den installierten Mods ab. Sieht es falsch aus, bitte ausschalten."));
-			Toggle(T("Also bodies, faces and hair (BETA)##ts", "Auch Körper, Gesichter und Haare (BETA)##ts"), Config::textureStream.streamCharacters,
+			Toggle(T("Also bodies, faces and hair (optional)##ts", "Auch Körper, Gesichter und Haare (optional)##ts"), Config::textureStream.streamCharacters,
 				T("Body, face and hair textures (textures/actors/character) of far characters are shrunk as well. Whether it works depends on your installed body, face and hair mods. If faces or hair look wrong (black, purple, blurry), turn this off.",
 					"Körper-, Gesichts- und Haartexturen (textures/actors/character) ferner Figuren werden ebenfalls verkleinert. Ob es funktioniert, hängt von den installierten Körper-, Gesichts- und Haarmods ab. Sehen Gesichter oder Haare falsch aus (schwarz, lila, unscharf), bitte ausschalten."));
 
@@ -763,7 +763,7 @@ namespace Menu
 			HelpEntry(T("Whole objects disappear for a moment or pop in", "Ganze Objekte fehlen kurz oder ploppen auf"),
 				T("Lights and scene > Hide occluded objects", "Licht und Szene > Verdeckte Objekte weglassen"));
 			HelpEntry(T("Tiny far objects pop in", "Winzige ferne Objekte ploppen auf"),
-				T("Overview > Beta: Main view micro culling (off by default)", "Übersicht > Beta: Winzige Objekte im Bild weglassen (standardmäßig aus)"));
+				T("Overview > Optional: Main view micro culling (off by default)", "Übersicht > Optional: Winzige Objekte im Bild weglassen (standardmäßig aus)"));
 
 			MenuApi::SeparatorText(T("Reporting a bug", "Fehler melden"));
 			MenuApi::TextWrapped("%s", T("Please attach SPS.log (Documents\\My Games\\Skyrim Special Edition\\SKSE) and say where it happened and which switch makes it go away.",
