@@ -705,32 +705,30 @@ namespace Occlusion
 					}
 				}
 				std::size_t freedByMovers = 0, freedByPlayer = 0;
+				const float psx = c.gpu ? c.sx : 2.0f / (c.r - c.l), psy = c.gpu ? c.sy : 2.0f / (c.t - c.b);
 				for (std::size_t m = 0; m < c.movers.size(); ++m) {
 					const auto& mover = c.movers[m];
 					const float r = mover.radius;
-					float       minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f;
-					bool        inFront = true;
-					for (int i = 0; i < 8 && inFront; ++i) {
-						const RE::NiPoint3 q{ mover.center.x + ((i & 1) ? r : -r), mover.center.y + ((i & 2) ? r : -r), mover.center.z + ((i & 4) ? r : -r) };
-						float              clip[4];
-						Mul(c.gm, q, clip);
-						if (!(clip[3] > 1.0f)) {
-							inFront = false;  // Figur reicht bis an die Kamera: die 128-Grenze oben deckt den nahen Teil ab, ein naher NPC verdeckt ohnehin
-							break;
-						}
-						minX = std::min(minX, clip[0] / clip[3]);
-						maxX = std::max(maxX, clip[0] / clip[3]);
-						minY = std::min(minY, clip[1] / clip[3]);
-						maxY = std::max(maxY, clip[1] / clip[3]);
-					}
-					float cc[4];
+					float       cc[4];
 					Mul(c.gm, mover.center, cc);
-					if (inFront && cc[3] > 1.0f) {
-						// Kugel um die Figur statt Quader aus Bildrechteck und Tiefenband: der Quader nahm bei der Spielerfigur (nah
-						// an der Kamera) den ganzen Boden im Rechteck mit - im dritten Test 1.0.69 waren 20-28 % des Bilds frei, die
-						// Verdeckung blieb bei 15 % statt 26-33 %. Ellipsoid im Rechteck der Ecken, Tiefe +-Radius um die Mitte.
-						const float cx = cc[0] / cc[3], cy = cc[1] / cc[3], cw = cc[3];
-						const float hx = std::max(maxX - cx, cx - minX) + 1.0f / kGW, hy = std::max(maxY - cy, cy - minY) + 1.0f / kGH;
+					// Kugel um die Figur statt Quader aus Bildrechteck und Tiefenband: der Quader nahm bei der Spielerfigur (nah an
+					// der Kamera) den ganzen Boden im Rechteck mit - im dritten Test 1.0.69 waren 20-28 % des Bilds frei, die
+					// Verdeckung blieb bei 15 % statt 26-33 %. Bildbereich der Kugel abgeschaetzt: jeder Punkt liegt hoechstens r
+					// seitlich und r naeher -> |x - cx| <= r * (sx + |cx|) / (w - r). Ellipsoid darin, Tiefe +-r um die Mitte.
+					float cx = 0.0f, cy = 0.0f, hx = 1e6f, hy = 1e6f;
+					const float cw = cc[3];
+					if (cw > r * 1.05f + 1.0f) {
+						cx = cc[0] / cw;
+						cy = cc[1] / cw;
+						hx = r * (psx + std::fabs(cx)) / (cw - r) + 1.0f / kGW;
+						hy = r * (psy + std::fabs(cy)) / (cw - r) + 1.0f / kGH;
+					} else if (m == 0 || cw < -r) {
+						// Kugel reicht bis an die Kamera: Ich-Perspektive (der Koerper liegt nicht im Tiefenbild, Arme und Waffe deckt
+						// die 128-Grenze oben ab) oder ganz hinter der Kamera
+						continue;
+					}
+					// sonst laeuft eine Figur direkt an der Kamera vorbei: ihr Tiefenbereich im ganzen Bild
+					{
 						const int   u0 = std::max(0, static_cast<int>(std::floor(((cx - hx) * 0.5f + 0.5f) * kGW)));
 						const int   u1 = std::min(static_cast<int>(kGW) - 1, static_cast<int>(std::floor(((cx + hx) * 0.5f + 0.5f) * kGW)));
 						const int   v0 = std::max(0, static_cast<int>(std::floor((0.5f - (cy + hy) * 0.5f) * kGH)));
@@ -1427,16 +1425,21 @@ namespace Occlusion
 					auto [it, inserted] = s_tracks.try_emplace(actor->GetFormID(), ActorTrack{ p, a, s_tick, s_tick });
 					auto& t = it->second;
 					if (!inserted) {
+						// gegen die Lage beim letzten erkannten Bewegen, nicht gegen das letzte Bild: sonst rutscht langsames
+						// Schleichen (< 1 Einheit pro Bild) dauerhaft unter der Schwelle durch
 						float da = std::fabs(a - t.angle);
 						da = std::min(da, 6.2831853f - da);
-						if (p.GetSquaredDistance(t.pos) > 1.0f || da > 0.01f) {
+						if (p.GetSquaredDistance(t.pos) > 4.0f || da > 0.02f) {
 							t.moved = s_tick;
+							t.pos = p;
+							t.angle = a;
 						}
-						t.pos = p;
-						t.angle = a;
 						t.seen = s_tick;
 					}
-					if (s_tick - t.moved > kMovedFrames) {
+					// Kampf (Schwertschwuenge, Ausweichen) und Umfallen/Aufstehen aendern die Gestalt, ohne dass sich die Lage
+					// der Figur nennenswert aendert
+					const bool animating = actor->IsInCombat() || actor->GetKnockState() != RE::KNOCK_STATE_ENUM::kNormal;
+					if (!animating && s_tick - t.moved > kMovedFrames) {
 						continue;  // steht still: bleibt Verdeckung
 					}
 				}
