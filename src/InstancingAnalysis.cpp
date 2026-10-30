@@ -604,6 +604,9 @@ namespace InstancingAnalysis
 		{
 			static void thunk(RE::BSRenderPass* a_pass, std::uint32_t a_technique, bool a_alphaTest, std::uint32_t a_renderFlags)
 			{
+				if (a_pass && Config::analysis.load(std::memory_order_relaxed)) {
+					ShadowCulling::CountGrassDraw(*a_pass);  // Analyse: wo Gras gezeichnet wird
+				}
 				if (a_pass && ShadowCulling::DrawFilterMayApply()) {
 					if (ShadowCulling::SkipHiddenMainDraw(*a_pass)) {
 						return;  // Verdeckung: im Hauptbild verdeckt (normal angemeldet, erst hier weggelassen)

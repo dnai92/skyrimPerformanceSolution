@@ -37,6 +37,9 @@ namespace ShadowCulling
 	// Zeichnen einer Schattenkarte (Sonnenkaskade, Fackel/Lampe) laeuft - gesetzt vom Hook ID 107604+0x167
 	void SetInShadowMapDraw(bool a_in) noexcept;
 
+	// Analyse 1.0.71: Gras-Draws je Sonnenkaskade/Schattenkarte/Hauptbild zaehlen (nur mit Analyse-Protokoll aufrufen)
+	void CountGrassDraw(const RE::BSRenderPass& a_pass) noexcept;
+
 	// Test 1.0.71: Baeume ab dieser Entfernung im Fernschatten-Cache als unbeweglich (0 = nie), nicht gespeichert
 	void  SetFarTreeStaticDistance(float a_units) noexcept;
 	float GetFarTreeStaticDistance() noexcept;

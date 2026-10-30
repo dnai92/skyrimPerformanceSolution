@@ -327,6 +327,10 @@ namespace ShadowCulling
 		// 1.0.71: ~130 Baum-Draws je Bild, fast alle weiter als 4000). Aus SPS.ini (fTreesStillFrom), Debug-Seite ueberschreibt.
 		std::atomic<float>                         g_farTreeStatic{ 2000.0f };
 		std::array<std::atomic<std::uint64_t>, 4>  g_farTreeBands{};  // Baum-Draws der fernen Kaskade nach Entfernung (Analyse)
+		// Analyse 1.0.71: wo Gras gezeichnet wird - Sonnenkaskaden 0-3, andere Schattenkarten, Rest (Hauptbild, Vorpaesse).
+		// Klaert, ob Gras ueberhaupt in der fernen Kaskade landet (Cache) und was es in den nahen kostet.
+		std::array<std::atomic<std::uint64_t>, 6>  g_grassDraws{};
+		std::array<std::atomic<std::uint64_t>, 6>  g_allDraws{};
 		RE::BSShadowDirectionalLight* g_cacheLight = nullptr;                              // Licht des laufenden Frames (Main-Thread)
 
 		struct Projection
@@ -1933,6 +1937,10 @@ namespace ShadowCulling
 			f.lastLog = std::chrono::steady_clock::now();
 			if (!Config::analysis.load(std::memory_order_relaxed)) {
 				g_farSkippedStatic.store(0, std::memory_order_relaxed);
+				for (std::size_t i = 0; i < 6; ++i) {
+					g_grassDraws[i].store(0, std::memory_order_relaxed);
+					g_allDraws[i].store(0, std::memory_order_relaxed);
+				}
 				f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 				f.hookMissed = f.notBound = f.changed = 0;
 				f.extrasSum = 0;
@@ -1949,6 +1957,13 @@ namespace ShadowCulling
 				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, g_stableRoll, g_stableRollMaxDeg, f.changed, static_cast<double>(f.extrasSum) / c, f.removed, f.uncoveredDraws, f.uncoveredBuilds, f.promoted.size(),
 				static_cast<double>(g_farTreeBands[0].exchange(0)) / n, static_cast<double>(g_farTreeBands[1].exchange(0)) / n, static_cast<double>(g_farTreeBands[2].exchange(0)) / n,
 				static_cast<double>(g_farTreeBands[3].exchange(0)) / n, g_farTreeStatic.load());
+			std::array<double, 6> grass{}, all{};
+			for (std::size_t i = 0; i < 6; ++i) {
+				grass[i] = static_cast<double>(g_grassDraws[i].exchange(0)) / n;
+				all[i] = static_cast<double>(g_allDraws[i].exchange(0)) / n;
+			}
+			logger::info("[GrassShadows] grass draws per frame (of all draws): sun cascade 0 {:.0f} ({:.0f}), 1 {:.0f} ({:.0f}), 2 {:.0f} ({:.0f}), 3 {:.0f} ({:.0f}) | other shadow maps {:.0f} ({:.0f}) | main view and other passes {:.0f} ({:.0f})",
+				grass[0], all[0], grass[1], all[1], grass[2], all[2], grass[3], all[3], grass[4], all[4], grass[5], all[5]);
 			f.removed = f.uncoveredDraws = f.uncoveredBuilds = 0;
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 			f.hookMissed = f.notBound = f.changed = 0;
@@ -2127,6 +2142,7 @@ namespace ShadowCulling
 		thread_local const RE::NiCamera* t_mapCamera = nullptr;  // Kamera der Schattenkarte, die gerade gezeichnet wird
 		thread_local std::uint32_t       t_mapSlot = UINT32_MAX;  // ihr Punktlicht-Platz, einmal je Karte gesucht
 		thread_local bool                t_mapCached = false;    // der Licht-Cache verwaltet diese Karte (Aufbau/Cache)
+		thread_local int                 t_mapCascade = -1;      // Sonnenkaskade dieser Karte (nur Analyse), sonst -1
 	}
 
 	void SetShadowMapContext(const RE::NiCamera* a_camera, bool a_cached) noexcept
@@ -2135,6 +2151,28 @@ namespace ShadowCulling
 		// je Karte einmal statt je Draw (Tracy 1.0.70: 0,4 % des Hauptthreads am Markt fuer die Suche je Draw)
 		t_mapSlot = a_camera ? PointSlot(a_camera) : UINT32_MAX;
 		t_mapCached = a_cached;
+		t_mapCascade = -1;
+		if (a_camera && g_cacheLight && Config::analysis.load(std::memory_order_relaxed)) {
+			const auto& descs = g_cacheLight->GetRuntimeData().shadowmapDescriptors;
+			for (std::uint32_t i = 0; i < descs.size() && i < 4; ++i) {
+				if (descs[i].camera.get() == a_camera) {
+					t_mapCascade = static_cast<int>(i);
+					break;
+				}
+			}
+		}
+	}
+
+	void CountGrassDraw(const RE::BSRenderPass& a_pass) noexcept
+	{
+		const std::size_t slot = !t_inShadowMapDraw ? 5 : t_mapCascade >= 0 ? static_cast<std::size_t>(t_mapCascade) : 4;
+		g_allDraws[slot].fetch_add(1, std::memory_order_relaxed);
+		// im Schattendurchlauf zeichnet oft der Utility-Shader - dann verraet die Eigenschaft der Geometrie das Gras
+		const bool grass = (a_pass.shader && a_pass.shader->shaderType.get() == RE::BSShader::Type::Grass) ||
+		                   (a_pass.shaderProperty && netimmerse_cast<RE::BSGrassShaderProperty*>(a_pass.shaderProperty));
+		if (grass) {
+			g_grassDraws[slot].fetch_add(1, std::memory_order_relaxed);
+		}
 	}
 
 	// Fackel-/Punktlichtschatten kleiner Objekte und ferner Figuren erst beim Draw der Schattenkarte weglassen. Bis 1.0.68
