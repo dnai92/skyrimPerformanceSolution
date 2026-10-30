@@ -1146,8 +1146,12 @@ namespace Occlusion
 				}
 				return low < kLowFrames || frame % kInterval < kBurst;
 			}
+			// Tiefenbild noch noetig? Bei aktiver Bremse nur in den Bildern kurz vor und waehrend der Pruef-Bilder - es ist
+			// 2-3 Bilder unterwegs und das Weglassen braucht zwei Bilder hintereinander (8 von 32 statt jedes Bild)
+			bool CaptureSoon() const noexcept { return low < kLowFrames || (frame + kBurst) % kInterval < 2 * kBurst; }
 		};
 		YieldGate                  g_gate;               // Main-Thread
+		std::uint64_t              g_captureSkipped = 0;  // Tiefenbilder, die die Bremse gespart hat (Bericht)
 		std::atomic<bool>          g_testFrame{ true };  // in diesem Frame pruefen
 		std::atomic<std::uint32_t> g_frameNo{ 1 };       // Frame-Zaehler fuer die Sammel-Threads
 		std::atomic<std::uint32_t> g_yieldTested{ 0 }, g_yieldCulled{ 0 };
@@ -1329,8 +1333,8 @@ namespace Occlusion
 			g_cullBlockedFrames = 0;
 			{
 				const auto builds = g_builds.exchange(0), ns = g_buildNs.exchange(0);
-				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} | visible objects not re-tested {:.0f}/frame | moving figures {} of {}, doors {} ({} door events) free {:.1f} % of the depth image on average, max {:.1f} % (player now {:.1f} %) | Bottled Shaders HiZ {}",
-					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_kickLate.exchange(0), g_kickBegin.exchange(0), g_gatedFrames, g_visSkipped.exchange(0) / frames,
+				if (log) logger::info("[Occlusion]   reprojection {} | pyramid builds {} ({:.2f} ms each, helper thread) | objects without a matching pyramid {:.0f}/frame (late requests {}, requests at frame start {}) | frames skipped by the yield gate {} (depth images saved {}) | visible objects not re-tested {:.0f}/frame | moving figures {} of {}, doors {} ({} door events) free {:.1f} % of the depth image on average, max {:.1f} % (player now {:.1f} %) | Bottled Shaders HiZ {}",
+					Config::occlReproject.load() ? "on" : "off", builds, builds ? ns / 1e6 / builds : 0.0, g_notReady.exchange(0) / frames, g_kickLate.exchange(0), g_kickBegin.exchange(0), g_gatedFrames, std::exchange(g_captureSkipped, 0), g_visSkipped.exchange(0) / frames,
 					g_moverCount.load() > g_doorMovers.load() ? g_moverCount.load() - g_doorMovers.load() - 1 : 0, g_actorsNear.load(), g_doorMovers.load(), g_doorEvents.exchange(0), FreedAvgPct(), g_moverFreedMax.exchange(0.0f), g_playerFreedPct.load(), g_bottledHiZ.load() ? (Config::occlAllowWithBottled.load() ? "active, SPS allowed anyway" : "active, SPS hiding off") : "not active");
 				g_gatedFrames = 0;
 				if (log && g_poseMismatch) {
@@ -1427,7 +1431,13 @@ namespace Occlusion
 		if (!Active()) {
 			return;
 		}
+		// Bremse aktiv (Verdeckung laesst hier kaum etwas weg): auch Tiefenbild, Rueckweg von der GPU und Figuren-Erfassung
+		// pausieren. Bis 1.0.70 pausierten nur Pruefen und Pyramidenbau (Nexus 1.0.68: hoehere Temperaturen mit FPS-Grenze)
 		++g_prepassCalls;
+		if (!g_gate.CaptureSoon()) {
+			++g_captureSkipped;
+			return;
+		}
 		const auto state = RE::BSGraphics::RendererShadowState::GetSingleton();
 		const auto cam = RE::Main::WorldRootCamera();
 		if (!state || !cam) {
