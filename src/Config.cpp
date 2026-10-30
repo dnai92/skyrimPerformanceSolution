@@ -1,4 +1,5 @@
 #include "Config.h"
+#include "ShadowCulling.h"
 #include "EngineTimers.h"
 
 #include "TextureStream.h"
@@ -436,7 +437,9 @@ namespace Config
 		logger::info("LightShadowCache: {}", lightShadowCache.enabled ? "ON" : "OFF");
 		farShadowCache.enabled = ini.GetBoolValue("FarShadowCache", "bEnabled", farShadowCache.enabled);
 		farShadowCache.allowWithBottled = ini.GetBoolValue("FarShadowCache", "bAllowWithBottledShaders", farShadowCache.allowWithBottled);
-		logger::info("FarShadowCache (optional): {}", farShadowCache.enabled ? "ON" : "OFF");
+		farShadowCache.treeStillFrom = std::max(0.0f, static_cast<float>(ini.GetDoubleValue("FarShadowCache", "fTreesStillFrom", farShadowCache.treeStillFrom)));
+		::ShadowCulling::SetFarTreeStaticDistance(farShadowCache.treeStillFrom);
+		logger::info("FarShadowCache (optional): {} | trees still from {:.0f}", farShadowCache.enabled ? "ON" : "OFF", farShadowCache.treeStillFrom);
 
 		auto& sky = skylightingCulling;
 		sky.enabled = ini.GetBoolValue("SkylightingCulling", "bEnabled", sky.enabled);

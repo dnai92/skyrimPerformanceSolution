@@ -362,8 +362,8 @@ namespace Menu
 				if (MenuApi::SliderFloat(T("Trees count as still from##farTrees", "Bäume gelten als unbewegt ab##farTrees"), &v, 0.0f, 12000.0f, v > 0.0f ? "%.0f" : T("never", "nie"))) {
 					ShadowCulling::SetFarTreeStaticDistance(v < 250.0f ? 0.0f : std::round(v / 250.0f) * 250.0f);
 				}
-				Tip(T("Trees only sway in the wind near you. From this distance (game units, ~70 per meter) their far sun shadows are cached like rocks and houses. Too low: tree shadows freeze or jump. 0 = never. Not saved, for testing.",
-					"Bäume bewegen sich nur in deiner Nähe im Wind. Ab dieser Entfernung (Einheiten, ~70 pro Meter) werden ihre fernen Sonnenschatten wie Felsen und Häuser zwischengespeichert. Zu klein: Baumschatten frieren ein oder springen. 0 = nie. Wird nicht gespeichert, zum Testen."));
+				Tip(T("Trees only sway in the wind near you. From this distance (game units, ~70 per meter) their far sun shadows are cached like rocks and houses. Too low: tree shadows freeze or jump. 0 = never. Default from SPS.ini (fTreesStillFrom, 2000). Not saved, for testing.",
+					"Bäume bewegen sich nur in deiner Nähe im Wind. Ab dieser Entfernung (Einheiten, ~70 pro Meter) werden ihre fernen Sonnenschatten wie Felsen und Häuser zwischengespeichert. Zu klein: Baumschatten frieren ein oder springen. 0 = nie. Standard aus SPS.ini (fTreesStillFrom, 2000). Wird nicht gespeichert, zum Testen."));
 			}
 
 			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));

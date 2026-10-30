@@ -93,6 +93,9 @@ namespace Config
 	{
 		bool enabled = false;           // Standard AUS (optional)
 		bool allowWithBottled = false;  // trotz Bottled Shaders (sonst aus, wie der Licht-Cache)
+		// Baeume im Wind ab dieser Entfernung wie Unbewegliches zwischenspeichern (0 = nie). Test 1.0.71 im Wald: fast alle
+		// Baeume der fernen Kaskade stehen weiter als 4000 Einheiten, wo Skyrim sie nicht mehr bewegt; selbst 250 ohne Fehler
+		float treeStillFrom = 2000.0f;
 	};
 	inline FarShadowCache farShadowCache;  // [FarShadowCache]
 

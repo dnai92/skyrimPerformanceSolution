@@ -323,9 +323,9 @@ namespace ShadowCulling
 		std::atomic<std::uint64_t>    g_farSkippedStatic{ 0 };
 		bool                          FarDynamic(const RE::BSGeometry& a_geom) noexcept;  // Figuren, Angehaengtes, Effekte (weiter unten)
 		// Baeume im Wind: ab dieser Entfernung im Fernschatten-Cache als unbeweglich behandeln (0 = nie). Skyrim bewegt Baeume
-		// nur in der Naehe, weiter weg stehen sie still - im Wald sind sie fast alle Schattenwerfer der fernen Kaskade. Test
-		// 1.0.71 auf der Debug-Seite (nicht gespeichert), bis die Grenze feststeht.
-		std::atomic<float>                         g_farTreeStatic{ 0.0f };
+		// nur in der Naehe, weiter weg stehen sie still - im Wald sind sie fast alle Schattenwerfer der fernen Kaskade (Test
+		// 1.0.71: ~130 Baum-Draws je Bild, fast alle weiter als 4000). Aus SPS.ini (fTreesStillFrom), Debug-Seite ueberschreibt.
+		std::atomic<float>                         g_farTreeStatic{ 2000.0f };
 		std::array<std::atomic<std::uint64_t>, 4>  g_farTreeBands{};  // Baum-Draws der fernen Kaskade nach Entfernung (Analyse)
 		RE::BSShadowDirectionalLight* g_cacheLight = nullptr;                              // Licht des laufenden Frames (Main-Thread)
 
