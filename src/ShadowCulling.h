@@ -36,6 +36,10 @@ namespace ShadowCulling
 	bool FarSkipDraw(const RE::BSRenderPass& a_pass) noexcept;
 	// Zeichnen einer Schattenkarte (Sonnenkaskade, Fackel/Lampe) laeuft - gesetzt vom Hook ID 107604+0x167
 	void SetInShadowMapDraw(bool a_in) noexcept;
+
+	// Test 1.0.71: Baeume ab dieser Entfernung im Fernschatten-Cache als unbeweglich (0 = nie), nicht gespeichert
+	void  SetFarTreeStaticDistance(float a_units) noexcept;
+	float GetFarTreeStaticDistance() noexcept;
 	// Schnellweg des Zeichen-Filters: > 0, solange ein Tiefenvorpass oder das Zeichnen einer Schattenkarte laeuft. Nur dann
 	// kann einer der Filter (Tiefenvorpass, Figurenteile, Licht-Cache, ferne Kaskade) greifen - sonst ein einziger Lesezugriff
 	// je Draw statt vier Aufrufen (bis 1.0.62)

@@ -322,6 +322,11 @@ namespace ShadowCulling
 		int                           g_farDrawMode = 0;  // FarMode waehrend die ferne Kaskade gezeichnet wird (sonst 0)
 		std::atomic<std::uint64_t>    g_farSkippedStatic{ 0 };
 		bool                          FarDynamic(const RE::BSGeometry& a_geom) noexcept;  // Figuren, Angehaengtes, Effekte (weiter unten)
+		// Baeume im Wind: ab dieser Entfernung im Fernschatten-Cache als unbeweglich behandeln (0 = nie). Skyrim bewegt Baeume
+		// nur in der Naehe, weiter weg stehen sie still - im Wald sind sie fast alle Schattenwerfer der fernen Kaskade. Test
+		// 1.0.71 auf der Debug-Seite (nicht gespeichert), bis die Grenze feststeht.
+		std::atomic<float>                         g_farTreeStatic{ 0.0f };
+		std::array<std::atomic<std::uint64_t>, 4>  g_farTreeBands{};  // Baum-Draws der fernen Kaskade nach Entfernung (Analyse)
 		RE::BSShadowDirectionalLight* g_cacheLight = nullptr;                              // Licht des laufenden Frames (Main-Thread)
 
 		struct Projection
@@ -1306,7 +1311,15 @@ namespace ShadowCulling
 			// Wind (Baeume) bewegt das Mesh im Shader, ohne seine Lage zu aendern: im Cache fror der Schatten ein und sprang
 			// beim Wechsel zwischen Cache- und normalem Frame hin und her (Flackern bei tiefer Sonne je nach Blick, 27.10.)
 			if (const auto prop = data.shaderProperty.get(); prop && prop->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kTreeAnim)) {
-				return true;
+				const float dist = DistanceToCamera(a_geom.worldBound);
+				if (Config::analysis.load(std::memory_order_relaxed)) {
+					g_farTreeBands[dist < 2000.0f ? 0 : dist < 4000.0f ? 1 : dist < 8000.0f ? 2 : 3].fetch_add(1, std::memory_order_relaxed);
+				}
+				const float staticFrom = g_farTreeStatic.load(std::memory_order_relaxed);
+				if (!(staticFrom > 0.0f) || dist < staticFrom) {
+					return true;  // bewegt sich im Wind
+				}
+				return false;  // weit genug weg: steht still (Baum ist keine Figur, die Suche entfaellt)
 			}
 			struct Entry
 			{
@@ -1931,9 +1944,11 @@ namespace ShadowCulling
 			const double n = static_cast<double>(f.frames);
 			const double c = f.cached ? static_cast<double>(f.cached) : 1.0;
 			logger::info("[FarShadowCache] {} frames | from cache {:.0f} % | rebuilds {} (prepared {}) | not cached {} | per cached frame: draws skipped {:.0f} | draw hook missed {} (other target {}) | "
-						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}, turned with view on {}, max turn {:.1f} deg) | rebuilt for moved/new objects {} (new drawn per cached frame {:.0f}), removed objects {}, draws outside filter {} (builds dropped {}), learned movers {}",
+						 "no build: projection changed {}, not saved {} | cache dropped: projection changed {} | cascade realigned {} (sun moved on {}, turned with view on {}, max turn {:.1f} deg) | rebuilt for moved/new objects {} (new drawn per cached frame {:.0f}), removed objects {}, draws outside filter {} (builds dropped {}), learned movers {} | trees in wind per frame: <2000 {:.0f}, 2000-4000 {:.0f}, 4000-8000 {:.0f}, >8000 {:.0f} (static from {:.0f})",
 				f.frames, 100.0 * static_cast<double>(f.cached) / n, f.builds, f.waits, f.normal, static_cast<double>(g_farSkippedStatic.exchange(0)) / c,
-				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, g_stableRoll, g_stableRollMaxDeg, f.changed, static_cast<double>(f.extrasSum) / c, f.removed, f.uncoveredDraws, f.uncoveredBuilds, f.promoted.size());
+				f.hookMissed, f.notBound, f.waitProjChanged, f.waitNotSaved, f.cacheProjChanged, g_stableChanged, g_stableReanchor, g_stableRoll, g_stableRollMaxDeg, f.changed, static_cast<double>(f.extrasSum) / c, f.removed, f.uncoveredDraws, f.uncoveredBuilds, f.promoted.size(),
+				static_cast<double>(g_farTreeBands[0].exchange(0)) / n, static_cast<double>(g_farTreeBands[1].exchange(0)) / n, static_cast<double>(g_farTreeBands[2].exchange(0)) / n,
+				static_cast<double>(g_farTreeBands[3].exchange(0)) / n, g_farTreeStatic.load());
 			f.removed = f.uncoveredDraws = f.uncoveredBuilds = 0;
 			f.waitProjChanged = f.waitNotSaved = f.cacheProjChanged = 0;
 			f.hookMissed = f.notBound = f.changed = 0;
@@ -2150,6 +2165,9 @@ namespace ShadowCulling
 		}
 		return false;
 	}
+
+	void SetFarTreeStaticDistance(float a_units) noexcept { g_farTreeStatic.store(a_units, std::memory_order_relaxed); }
+	float GetFarTreeStaticDistance() noexcept { return g_farTreeStatic.load(std::memory_order_relaxed); }
 
 	void SetInShadowMapDraw(bool a_in) noexcept
 	{

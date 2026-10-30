@@ -356,6 +356,16 @@ namespace Menu
 			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
 				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
 
+			MenuApi::SeparatorText(T("Far shadow cache: trees (test)", "Ferne Sonnenschatten: Bäume (Test)"));
+			{
+				float v = ShadowCulling::GetFarTreeStaticDistance();
+				if (MenuApi::SliderFloat(T("Trees count as still from##farTrees", "Bäume gelten als unbewegt ab##farTrees"), &v, 0.0f, 12000.0f, v > 0.0f ? "%.0f" : T("never", "nie"))) {
+					ShadowCulling::SetFarTreeStaticDistance(v < 250.0f ? 0.0f : std::round(v / 250.0f) * 250.0f);
+				}
+				Tip(T("Trees only sway in the wind near you. From this distance (game units, ~70 per meter) their far sun shadows are cached like rocks and houses. Too low: tree shadows freeze or jump. 0 = never. Not saved, for testing.",
+					"Bäume bewegen sich nur in deiner Nähe im Wind. Ab dieser Entfernung (Einheiten, ~70 pro Meter) werden ihre fernen Sonnenschatten wie Felsen und Häuser zwischengespeichert. Zu klein: Baumschatten frieren ein oder springen. 0 = nie. Wird nicht gespeichert, zum Testen."));
+			}
+
 			MenuApi::SeparatorText(T("Developer tests", "Entwickler-Tests"));
 			Toggle(T("Depth pre-pass culling", "Tiefenvorpass: kleine Objekte weglassen"), Config::depthPrepassCulling.enabled,
 				T("For testing only, can make whole objects disappear. Default OFF (saved).", "Nur zum Testen, kann ganze Objekte verschwinden lassen. Standard AUS (wird gespeichert)."));
