@@ -299,12 +299,17 @@ namespace Menu
 				T("Draws identical simple meshes in sun shadows with one draw call. Small gain. Takes effect after restarting the game. Switch off again if shadows or meshes flicker.", "Zeichnet gleiche einfache Objekte im Sonnenschatten in einem Durchgang. Kleiner Gewinn. Wirkt erst nach einem Neustart des Spiels. Bei flackernden Schatten oder Objekten wieder ausschalten."));
 			Toggle(T("Main view micro culling (optional)", "Winzige Objekte im Bild weglassen (optional)"), Config::mainViewCulling.enabled,
 				T("Tiny far objects are not drawn at all. They can pop in.", "Winzige ferne Objekte werden gar nicht gezeichnet. Sie können aufploppen."));
+			const bool farBlocked = Occlusion::BottledInstalled() && !Config::farShadowCache.allowWithBottled;
+			if (farBlocked) {
+				MenuApi::TextWrapped("%s", T("Far shadow cache paused: Bottled Shaders is installed and has its own shadow optimizations. Allow it below to use both.",
+												"Ferne Sonnenschatten pausiert: Bottled Shaders ist installiert und hat eigene Schatten-Optimierungen. Unten erlauben, um beide zu nutzen."));
+			}
+			MenuApi::BeginDisabled(farBlocked);
 			Toggle(T("Far shadow cache (optional)", "Ferne Sonnenschatten zwischenspeichern (optional)"), Config::farShadowCache.enabled,
 				T("Static objects (houses, rocks, trees) are drawn into the far sun shadows only when the sun or the view moves on; in between only characters and moving things are drawn. Outdoors this saves around 1,000 to 1,500 draw calls per frame and helps most on systems limited by draw calls. Far shadows shimmer less and follow the sun in small steps. Anniversary Edition only. Switch off if far shadows flicker or are missing.",
 					"Unbewegliche Objekte (Häuser, Felsen, Bäume) werden nur dann in die fernen Sonnenschatten gezeichnet, wenn Sonne oder Blick weiterwandern; dazwischen nur Figuren und Bewegliches. Spart draußen etwa 1.000 bis 1.500 Draw Calls pro Frame und hilft vor allem Systemen, die an Draw Calls hängen. Ferne Schatten flimmern weniger und folgen der Sonne in kleinen Schritten. Nur Anniversary Edition. Ausschalten, falls ferne Schatten flackern oder fehlen."));
+			MenuApi::EndDisabled();
 			if (Occlusion::BottledInstalled()) {
-				MenuApi::TextWrapped("%s", T("Bottled Shaders is installed. It has its own shadow optimizations, so the far shadow cache stays off unless you allow it here.",
-												"Bottled Shaders ist installiert. Es hat eigene Schatten-Optimierungen, deshalb bleibt der Cache ferner Sonnenschatten aus, solange du ihn hier nicht erlaubst."));
 				Toggle(T("Far shadow cache with Bottled Shaders anyway##far", "Ferne Sonnenschatten trotz Bottled Shaders zwischenspeichern##far"), Config::farShadowCache.allowWithBottled,
 					T("Only if far shadows look right with both. Default off.", "Nur, wenn ferne Schatten mit beiden richtig aussehen. Standard aus."));
 			}
@@ -430,12 +435,19 @@ namespace Menu
 		void OcclusionSettings()
 		{
 			MenuApi::SeparatorText(T("Hide occluded objects", "Verdeckte Objekte weglassen"));
+			// Bottled-HiZ aktiv: Schalter ausgegraut statt scheinbar an (Nexus jimb111, 1.0.71) - die Einstellung bleibt, damit
+			// SPS von selbst wieder weglaesst, sobald Bottleds HiZ aus ist
+			const bool occBlocked = Occlusion::BottledHiZActive() && !Config::occlAllowWithBottled.load();
+			if (occBlocked) {
+				MenuApi::TextWrapped("%s", T("Paused: Bottled Shaders HiZ Occlusion Culling is active and already hides occluded objects (both would test every object). SPS hides again by itself once it is off in Bottled Shaders.",
+												"Pausiert: Die HiZ-Verdeckung von Bottled Shaders ist aktiv und lässt verdeckte Objekte bereits weg (beide würden jedes Objekt prüfen). SPS lässt von selbst wieder weg, sobald sie in Bottled Shaders aus ist."));
+			}
+			MenuApi::BeginDisabled(occBlocked);
 			AtomicToggle(T("Enabled##occ", "Aktiv##occ"), Config::occlusionCull,
 				T("Objects in the main view that are completely hidden behind walls, houses or terrain are not drawn. A small depth image of the previous frame, moved to the current view, decides what is hidden. Shadows, reflections and water are never affected. Saves draw calls in cities, the effect on FPS depends on your setup. Switch off if objects pop in. Default ON.",
 					"Objekte im Hauptbild, die ganz hinter Mauern, Häusern oder Gelände verdeckt sind, werden nicht gezeichnet. Ein kleines Tiefenbild des vorigen Bildes, umgerechnet auf den aktuellen Blick, entscheidet, was verdeckt ist. Schatten, Spiegelungen und Wasser sind nie betroffen. Spart Draw Calls in Städten, wie viel FPS das bringt, hängt vom System ab. Ausschalten, falls Objekte aufploppen. Standard AN."));
+			MenuApi::EndDisabled();
 			if (Occlusion::BottledHiZActive()) {
-				MenuApi::TextWrapped("%s", T("Bottled Shaders HiZ Occlusion Culling is active and already hides occluded objects. SPS stays off unless you allow it here (both would test every object).",
-												"Die HiZ-Verdeckung von Bottled Shaders ist aktiv und lässt verdeckte Objekte bereits weg. SPS bleibt aus, solange du es hier nicht erlaubst (beide würden jedes Objekt prüfen)."));
 				AtomicToggle(T("Hide with Bottled Shaders HiZ anyway##occ", "Trotz Bottled-Shaders-HiZ weglassen##occ"), Config::occlAllowWithBottled,
 					T("Only for comparisons. Default off.", "Nur für Vergleiche. Standard aus."));
 			}
@@ -517,12 +529,17 @@ namespace Menu
 			RuleControls("point", Config::pointLightCulling, 5000.0f);
 
 			MenuApi::SeparatorText(T("Shadow cache for static lights", "Schatten fester Lichter zwischenspeichern"));
+			const bool lcacheBlocked = Occlusion::BottledBlocksLightCache();
+			if (lcacheBlocked) {
+				MenuApi::TextWrapped("%s", T("Paused: Bottled Shaders is installed, with it shadows in interiors flickered. Allow it below to use both.",
+												"Pausiert: Bottled Shaders ist installiert, damit flackerten Schatten in Innenräumen. Unten erlauben, um beide zu nutzen."));
+			}
+			MenuApi::BeginDisabled(lcacheBlocked);
 			Toggle(T("Enabled##lcache", "Aktiv##lcache"), Config::lightShadowCache.enabled,
 				T("Shadow maps of lights that do not move (wall lamps, fireplaces) are kept: only characters, moving objects and trees in the wind are drawn again each frame. Lights that drift or change their radius are rebuilt. Mainly for interiors with many lights. Switch off if shadows near fires pulse.",
 					"Schattenkarten von Lichtern, die sich nicht bewegen (Wandleuchter, Kamine), werden aufbewahrt: Jeden Frame werden nur Figuren, Bewegliches und Bäume im Wind neu gezeichnet. Lichter, die wandern oder ihren Radius ändern, werden neu aufgebaut. Vor allem für Innenräume mit vielen Lichtern. Ausschalten, falls Schatten an Feuern pulsieren."));
+			MenuApi::EndDisabled();
 			if (Occlusion::BottledInstalled()) {
-				MenuApi::TextWrapped("%s", T("Bottled Shaders is installed. With it shadows in interiors flickered, so this cache stays off unless you allow it here.",
-												"Bottled Shaders ist installiert. Damit flackerten Schatten in Innenräumen, deshalb bleibt dieser Cache aus, solange du ihn hier nicht erlaubst."));
 				Toggle(T("Use with Bottled Shaders anyway##lcache", "Trotz Bottled Shaders verwenden##lcache"), Config::lightShadowCache.allowWithBottled,
 					T("Only if shadows near lights do not flicker in interiors. Default off.", "Nur, wenn Schatten an Lichtern in Innenräumen nicht flackern. Standard aus."));
 			}
