@@ -210,14 +210,14 @@ void main(uint3 id : SV_DispatchThreadID)
 		std::memcpy(m.pData, &p, sizeof(p));
 		ctx->Unmap(g_params, 0);
 
-		// Compute-Zustand sichern (Community Shaders nutzt eigene Compute-Shader) und danach zuruecksetzen
+		// Compute-Zustand sichern (Community Shaders nutzt eigene Compute-Shader) und danach zuruecksetzen.
+		// Ohne Class Instances (Skyrim nutzt keine): ENBs d3d11-Wrapper stuerzte bei deren Abfrage ab, wenn nach dem
+		// Photo Mode ein ENB-Compute-Shader gebunden war (Nexus PSeabra, 1.0.71, Nullzeiger in d3d11.dll)
 		ID3D11ComputeShader*       oldCs = nullptr;
-		ID3D11ClassInstance*       oldInst[256]{};
-		UINT                       oldInstCount = 256;
 		ID3D11ShaderResourceView*  oldSrv = nullptr;
 		ID3D11UnorderedAccessView* oldUav = nullptr;
 		ID3D11Buffer*              oldCb = nullptr;
-		ctx->CSGetShader(&oldCs, oldInst, &oldInstCount);
+		ctx->CSGetShader(&oldCs, nullptr, nullptr);
 		ctx->CSGetShaderResources(0, 1, &oldSrv);
 		ctx->CSGetUnorderedAccessViews(0, 1, &oldUav);
 		ctx->CSGetConstantBuffers(0, 1, &oldCb);
@@ -233,11 +233,8 @@ void main(uint3 id : SV_DispatchThreadID)
 		ctx->CSSetShaderResources(0, 1, oldSrv ? &oldSrv : &nullSrv);
 		ctx->CSSetUnorderedAccessViews(0, 1, oldUav ? &oldUav : &nullUav, nullptr);
 		ctx->CSSetConstantBuffers(0, 1, &oldCb);
-		ctx->CSSetShader(oldCs, oldInstCount ? oldInst : nullptr, oldInstCount);
+		ctx->CSSetShader(oldCs, nullptr, 0);
 		SafeRelease(oldCs);
-		for (UINT i = 0; i < oldInstCount; ++i) {
-			SafeRelease(oldInst[i]);
-		}
 		SafeRelease(oldSrv);
 		SafeRelease(oldUav);
 		SafeRelease(oldCb);
