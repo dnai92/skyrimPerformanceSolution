@@ -211,13 +211,21 @@ void main(uint3 id : SV_DispatchThreadID)
 		ctx->Unmap(g_params, 0);
 
 		// Compute-Zustand sichern (Community Shaders nutzt eigene Compute-Shader) und danach zuruecksetzen.
-		// Ohne Class Instances (Skyrim nutzt keine): ENBs d3d11-Wrapper stuerzte bei deren Abfrage ab, wenn nach dem
-		// Photo Mode ein ENB-Compute-Shader gebunden war (Nexus PSeabra, 1.0.71, Nullzeiger in d3d11.dll)
+		// Mit ENB den Compute-Shader nicht abfragen: ENBs d3d11-Wrapper stuerzt bei CSGetShader ab, wenn nach einem
+		// Photo-Mode-Screenshot sein eigener Compute-Shader gebunden ist (Nexus PSeabra 1.0.71/1.0.72, Nullzeiger in
+		// d3d11.dll - 1.0.72 liess nur die Class Instances weg, reichte nicht). Danach wird er dort nur geloest; jeder
+		// Renderer bindet seinen Compute-Shader vor dem Dispatch selbst.
+		static const bool enb = [] {
+			const auto d3d11 = GetModuleHandleW(L"d3d11.dll");
+			return d3d11 && GetProcAddress(d3d11, "ENBGetSDKVersion") != nullptr;
+		}();
 		ID3D11ComputeShader*       oldCs = nullptr;
 		ID3D11ShaderResourceView*  oldSrv = nullptr;
 		ID3D11UnorderedAccessView* oldUav = nullptr;
 		ID3D11Buffer*              oldCb = nullptr;
-		ctx->CSGetShader(&oldCs, nullptr, nullptr);
+		if (!enb) {
+			ctx->CSGetShader(&oldCs, nullptr, nullptr);
+		}
 		ctx->CSGetShaderResources(0, 1, &oldSrv);
 		ctx->CSGetUnorderedAccessViews(0, 1, &oldUav);
 		ctx->CSGetConstantBuffers(0, 1, &oldCb);
