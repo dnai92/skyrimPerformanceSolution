@@ -4,6 +4,7 @@
 
 #include "Config.h"
 #include "GpuTimer.h"
+#include "RenderLock.h"
 
 #include "InstancingAnalysis.h"
 #include "LightShadowCache.h"
@@ -141,6 +142,7 @@ namespace Hooks
 				InstancingAnalysis::OnFrame();
 				ReportEngineWaits();
 				if (const auto renderer = RE::BSGraphics::Renderer::GetSingleton()) {
+					const RenderLock renderLock;  // Queries am Immediate Context ausserhalb der Engine-Draws
 					GpuTimer::FrameBoundary(renderer->GetRuntimeData().forwarder, renderer->GetRuntimeData().context, Config::analysis.load(std::memory_order_relaxed));
 				}
 #endif

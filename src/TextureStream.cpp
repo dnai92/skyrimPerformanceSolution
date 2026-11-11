@@ -6,6 +6,7 @@
 #include "DetourHelper.h"
 #include "GpuMemory.h"
 #include "SceneUtil.h"
+#include "RenderLock.h"
 
 #include <condition_variable>
 #include <deque>
@@ -569,6 +570,7 @@ namespace TextureStream
 		void Swap(RE::BSGraphics::Texture* a_r, W::ID3D11Texture2D* a_tex, W::ID3D11ShaderResourceView* a_srv, std::uint64_t a_oldBytes,
 			std::uint32_t a_fullW, std::uint32_t a_fullH, std::uint32_t a_fullMips, bool a_ours, std::uint32_t a_extCap)
 		{
+			const RenderLock renderLock;  // Texturzeiger der Engine tauschen: nicht, waehrend ein Worker-Thread den Kontext benutzt
 			SetTag(a_tex, kTagFile | (a_ours ? kTagOurs : 0), a_fullW, a_fullH, a_fullMips, a_extCap);
 			ForgetBoundSrv(a_r->resourceView);
 			DeferRelease(a_r->texture, a_oldBytes);
@@ -1559,6 +1561,7 @@ namespace TextureStream
 				st.eligible = false;
 				return;
 			}
+			const RenderLock renderLock;  // Immediate Context ausserhalb der Engine-Draws (Player-Update)
 			for (std::uint32_t i = 0; i < desc.mipLevels; ++i) {
 				g_context->CopySubresourceRegion(tex, i, 0, 0, 0, st.res, i + drop, nullptr);
 			}

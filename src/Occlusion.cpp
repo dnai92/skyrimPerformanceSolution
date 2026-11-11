@@ -3,6 +3,7 @@
 
 #include "Config.h"
 #include "OcclusionGpu.h"
+#include "RenderLock.h"
 
 #include <condition_variable>
 #include <fstream>
@@ -1783,6 +1784,8 @@ namespace Occlusion
 			}
 			logger::info("[Occlusion] depth image ready ({}x{} tiles)", OcclusionGpu::kWidth, OcclusionGpu::kHeight);
 		}
+		// Map/Dispatch am Immediate Context bei Present: unter der Render-Sperre der Engine (Worker-Threads anderer Mods)
+		const RenderLock renderLock;
 		// fertige Ergebnisse abholen (das neueste gilt) und fuer alle Threads veroeffentlichen
 		OcclusionGpu::Readback rb;
 		std::shared_ptr<Snapshot> newest;
