@@ -210,6 +210,10 @@ namespace Config
 	// Menue: Werte wurden direkt geaendert -> beim naechsten ReloadIfChanged in SPS_User.ini speichern
 	void MarkDirty() noexcept;
 
+	// Menue: eine SPS-Seite wurde in diesem Frame gezeichnet. Ist das Menue danach zu, wird sofort gespeichert
+	// (sonst gingen Aenderungen verloren, wenn das Spiel direkt nach dem Einstellen beendet wird - Nexus merrorlagi 1.0.73)
+	void NoteMenuFrame() noexcept;
+
 	// Menue: SPS_User.ini loeschen und die Vorgaben aus SPS.ini neu laden (beim naechsten ReloadIfChanged)
 	void RequestReset() noexcept;
 }

@@ -231,6 +231,14 @@ namespace Menu
 			MenuApi::PopID();
 		}
 
+		// jede Seite meldet ihr Zeichnen: so merkt Config, wann das Menue zu ist (sofort speichern)
+		template <MenuApi::RenderFunction F>
+		void __stdcall Tracked()
+		{
+			Config::NoteMenuFrame();
+			F();
+		}
+
 		void __stdcall RenderOverview()
 		{
 			MenuApi::SeparatorText(T("Master switch", "Hauptschalter"));
@@ -842,12 +850,12 @@ namespace Menu
 			return;
 		}
 		g_german = IsGerman();
-		MenuApi::AddSectionItem(kSection + T("Overview", "Übersicht"), RenderOverview);
-		MenuApi::AddSectionItem(kSection + T("Shadows", "Schatten"), RenderShadows);
-		MenuApi::AddSectionItem(kSection + T("Texture streaming", "Textur-Streaming"), RenderTextures);
-		MenuApi::AddSectionItem(kSection + T("Lights and scene", "Licht und Szene"), RenderScene);
-		MenuApi::AddSectionItem(kSection + T("Help with visual issues", "Hilfe bei Bildfehlern"), RenderHelp);
-		MenuApi::AddSectionItem(kSection + "Debug", RenderDebug);
+		MenuApi::AddSectionItem(kSection + T("Overview", "Übersicht"), Tracked<RenderOverview>);
+		MenuApi::AddSectionItem(kSection + T("Shadows", "Schatten"), Tracked<RenderShadows>);
+		MenuApi::AddSectionItem(kSection + T("Texture streaming", "Textur-Streaming"), Tracked<RenderTextures>);
+		MenuApi::AddSectionItem(kSection + T("Lights and scene", "Licht und Szene"), Tracked<RenderScene>);
+		MenuApi::AddSectionItem(kSection + T("Help with visual issues", "Hilfe bei Bildfehlern"), Tracked<RenderHelp>);
+		MenuApi::AddSectionItem(kSection + "Debug", Tracked<RenderDebug>);
 		logger::info("Menu registered in SKSE Menu Framework (version {:.1f})", MenuApi::Version());
 	}
 }

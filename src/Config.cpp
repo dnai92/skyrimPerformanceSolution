@@ -181,6 +181,16 @@ namespace Config
 
 	namespace
 	{
+		std::atomic<std::chrono::steady_clock::rep> g_lastMenuFrameTicks{ 0 };
+	}
+
+	void NoteMenuFrame() noexcept
+	{
+		g_lastMenuFrameTicks.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+	}
+
+	namespace
+	{
 		std::atomic<std::chrono::steady_clock::rep> g_lastCallTicks{ 0 };
 	}
 
@@ -220,13 +230,19 @@ namespace Config
 			Load();
 		}
 		const auto now = std::chrono::steady_clock::now();
-		if (now - g_lastCheck < 2s) {
+		// Menue geschlossen (keine SPS-Seite mehr seit 0,3 s gezeichnet) und noch Ungespeichertes: sofort speichern, ohne
+		// auf den 2-s-Takt zu warten - wer direkt danach das Spiel beendet, verlor sonst die letzten Aenderungen
+		const auto menuFrame = g_lastMenuFrameTicks.load(std::memory_order_relaxed);
+		const bool menuClosed = menuFrame != 0 &&
+		                        now.time_since_epoch().count() - menuFrame >= std::chrono::duration_cast<std::chrono::steady_clock::duration>(300ms).count();
+		if (!(menuClosed && g_dirty.load()) && now - g_lastCheck < 2s) {
 			return;
 		}
 		g_lastCheck = now;
-		// erst speichern, wenn seit 1 s nichts mehr geaendert wurde (Regler ziehen schrieb sonst alle 2 s die Datei)
+		// erst speichern, wenn seit 1 s nichts mehr geaendert wurde (Regler ziehen schrieb sonst alle 2 s die Datei) - oder
+		// sobald das Menue zu ist
 		const auto sinceDirty = now.time_since_epoch().count() - g_lastDirtyTicks.load(std::memory_order_relaxed);
-		if (g_dirty.load() && sinceDirty >= std::chrono::duration_cast<std::chrono::steady_clock::duration>(1s).count() && g_dirty.exchange(false)) {
+		if (g_dirty.load() && (menuClosed || sinceDirty >= std::chrono::duration_cast<std::chrono::steady_clock::duration>(1s).count()) && g_dirty.exchange(false)) {
 			if (SaveUser()) {
 				logger::info("Menu settings saved to SPS_User.ini");
 			}
