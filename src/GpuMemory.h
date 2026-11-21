@@ -9,4 +9,8 @@ namespace GpuMemory
 {
 	// false = Zaehler nicht verfuegbar
 	bool Query(unsigned long long& a_dedicated, unsigned long long& a_shared) noexcept;
+
+	// Where the values come from (for the log): the Windows counter, or under Wine/Proton the Linux kernel's DRM
+	// statistics of the process. Valid after the first Query.
+	const char* Source() noexcept;
 }
