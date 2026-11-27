@@ -215,7 +215,7 @@ namespace GpuMemory
 				if (dir == INVALID_HANDLE_VALUE) {
 					return 0;
 				}
-				static char buf[65536];
+				alignas(8) static char buf[65536];  // FILE_ID_BOTH_DIR_INFO wird 8-Byte-ausgerichtet erwartet
 				bool        first = true;
 				while (result == 0 && GetFileInformationByHandleEx(dir, first ? FileIdBothDirectoryRestartInfo : FileIdBothDirectoryInfo, buf, sizeof(buf))) {
 					first = false;

@@ -2317,7 +2317,7 @@ namespace TextureStream
 			}
 			const auto& s = g_stats;
 			const auto  capText = g_userCap ? std::format(" (by max. size {}: {}, {:.0f} MB)", g_userCap, capped, cappedMB) : std::string{};
-			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, DXGI alone {:.1f} GB, paged out {:.0f} MB) | downscaled {} textures, {:.0f} MB saved{} | last minute: "
+			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, DXGI {:.1f} GB, paged out {:.0f} MB) | downscaled {} textures, {:.0f} MB saved{} | last minute: "
 						 "downscaled {} (skipped {}), reloaded {} ({:.0f} MB), ping-pong {}, refilled {}, loaded reduced {}, from RAM {}, load errors {}, recognized after reset {}",
 				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_dxgiUsage.load() / 1073741824.0,
 				g_procShared.load() / 1048576.0, reduced,
