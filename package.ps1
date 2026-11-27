@@ -1,14 +1,15 @@
 # Packt SPS.dll als Vortex-installierbares Archiv:
 #   package.ps1      -> build\release\SPS.dll -> dist\SPS-<version>.zip     (Skyrim SE/AE)
 #   package.ps1 -Vr  -> build\vr\SPS.dll      -> dist\SPS-VR-<version>.zip  (Skyrim VR, eigene Nexus-Datei)
+#   package.ps1 -Textures -> build\textures\SPS.dll -> dist\SPS-TextureStreaming-<version>.zip (nur Textur-Streaming, ersetzt die volle Version)
 #   package.ps1 -Profile -> build\profile\SPS.dll -> dist\SPS-PROFILE-<version>-NOT-FOR-RELEASE.zip
 #                        (Mess-Build mit Tracy, nur lokal zum Einbinden in Vortex - NIE hochladen)
-param([switch]$Vr, [switch]$Profile)
+param([switch]$Vr, [switch]$Profile, [switch]$Textures)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $version = (Get-Content "$root\vcpkg.json" -Raw | ConvertFrom-Json).'version-semver'
-$build = if ($Profile) { "$root\build\profile" } elseif ($Vr) { "$root\build\vr" } else { "$root\build\release" }
-$name = if ($Profile) { "SPS-PROFILE-$version-NOT-FOR-RELEASE" } elseif ($Vr) { "SPS-VR-$version" } else { "SPS-$version" }
+$build = if ($Profile) { "$root\build\profile" } elseif ($Vr) { "$root\build\vr" } elseif ($Textures) { "$root\build\textures" } else { "$root\build\release" }
+$name = if ($Profile) { "SPS-PROFILE-$version-NOT-FOR-RELEASE" } elseif ($Vr) { "SPS-VR-$version" } elseif ($Textures) { "SPS-TextureStreaming-$version" } else { "SPS-$version" }
 # Sperre: Release-DLL darf weder Netzwerk-Bibliotheken noch den Tracy-Profiler enthalten (1.0.3 oeffnete einen
 # Netzwerk-Port -> Firewall-Abfrage bei Nutzern). Entwickler-Builds mit -DSPS_TRACY=ON werden hier abgewiesen.
 $dllText = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes("$build\SPS.dll"))

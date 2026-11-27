@@ -134,7 +134,11 @@ namespace Hooks
 			{
 				FrameMark;
 				Stats::OnFrame();
-#ifdef SPS_VR
+#if defined(SPS_TEXTURES_ONLY)
+				// Textur-Build: nur Einstellungen und Textur-Streaming je Frame
+				Config::ReloadIfChanged();
+				TextureStream::OnFrame();
+#elif defined(SPS_VR)
 				// VR-Build: Textur-Streaming + Schatten-Culling einzelner Meshes (ruft ReloadIfChanged und TextureStream::OnFrame)
 				ShadowCulling::OnFrame();
 #else
@@ -185,8 +189,10 @@ namespace Hooks
 					Config::ReloadIfIdle();
 					return func(a_swapChain, a_syncInterval, a_flags);
 				}
+#ifndef SPS_TEXTURES_ONLY
 				LightShadowCache::OnPresent();
 				Occlusion::OnPresent();
+#endif
 				Config::ReloadIfIdle();
 				Stats::ScopedTimer timer{ Stats::Zone::PresentWait };
 				return func(a_swapChain, a_syncInterval, a_flags);
@@ -281,7 +287,10 @@ namespace Hooks
 
 	void Install()
 	{
-#ifdef SPS_VR
+#if defined(SPS_TEXTURES_ONLY)
+		// Textur-Build: nur der Frame-Takt (keine Papyrus-/NPC-Zeitmessung)
+		WriteVfunc<PlayerUpdate>(RE::VTABLE_PlayerCharacter[0], 0xAD, "PlayerCharacter::Update");
+#elif defined(SPS_VR)
 		// Skyrim VR 1.4.15: Actor::Update liegt zwei vtable-Plaetze weiter (0xAF statt 0xAD) - offline gegen den
 		// Spielcode geprueft (gleicher Code wie SE 1.5.97). Nur der Frame-Takt, keine Statistik-Hooks.
 		WriteVfunc<PlayerUpdate>(RE::VTABLE_PlayerCharacter[0], 0xAF, "PlayerCharacter::Update (VR)");

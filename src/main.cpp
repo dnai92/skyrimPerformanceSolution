@@ -21,6 +21,7 @@ namespace
 			TextureStream::DetectOtherDownscaler();  // vor dem ersten DDS-Laden mit gemerkter Groesse (Stufe 3)
 			// Messwerkzeug: biegt Warte-Funktionen von FSMP/CBPC/Spiel um. Nur mit Entwickler-Schalter bEngineProbes
 			// (INI, beim Start) - im Normalbetrieb sollen fremde Mods nicht durch SPS laufen (Haenger-Analyse Rifton 1.0.6).
+#ifndef SPS_TEXTURES_ONLY  // keine Messfuehler im Textur-Build
 			if (!Config::engineProbes) {
 				logger::info("WaitProbe: off (developer option bEngineProbes)");
 				return;
@@ -29,19 +30,22 @@ namespace
 			WaitProbe::Install(fsmp, cbpc, game);
 			logger::info("WaitProbe: FSMP (hdtsmp64.dll) {} - {} import entries redirected | CBPC (cbp.dll) {} - {} redirected | SkyrimSE.exe {} redirected",
 				fsmp.found ? "found" : "NOT loaded", fsmp.patched, cbpc.found ? "found" : "NOT loaded", cbpc.patched, game.patched);
+#endif
 		} else if (a_msg->type == SKSE::MessagingInterface::kPreLoadGame) {
 			TextureStream::Reset("loading save game");
 		} else if (a_msg->type == SKSE::MessagingInterface::kNewGame) {
 			TextureStream::Reset("new game");
 		} else if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
 			Hooks::RegisterEvents();
-#ifndef SPS_VR
+#if !defined(SPS_VR) && !defined(SPS_TEXTURES_ONLY)
 			ShadowCulling::InstallLate();
 			Occlusion::DetectOtherCullers();
 #endif
+#ifndef SPS_TEXTURES_ONLY
 			if (Config::engineProbes) {
 				EngineTimers::Install();  // nur Zeitmessung; nach Community Shaders (Detours verkettet sich dahinter)
 			}
+#endif
 			Hotkey::Register();
 			Menu::Register();
 			TextureStream::InstallLate();
@@ -112,6 +116,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 #ifdef SPS_VR
 	logger::info("SPS VR build (beta): texture streaming + shadow culling of small objects - patch sites verified offline against Skyrim VR 1.4.15");
 #endif
+#ifdef SPS_TEXTURES_ONLY
+	logger::info("SPS texture streaming only build: no shadow, culling, occlusion or light features are installed");
+#endif
 	if (!Features::TestedVersion() && !REL::Module::IsVR()) {
 		if (Features::VerifiedVersion()) {
 			logger::info("Game version {}: all patch sites verified offline against this version's game code (in-game testing so far on 1.6.1170)", version.string());
@@ -123,8 +130,10 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	Stats::Init();
 	Config::Load();
 	Hooks::Install();
+#ifndef SPS_TEXTURES_ONLY
 	ShadowCulling::Install();  // VR: nur AppendVirtual (Sonnen-, Fackel-, Figuren-Schatten kleiner Objekte)
-#ifndef SPS_VR
+#endif
+#if !defined(SPS_VR) && !defined(SPS_TEXTURES_ONLY)
 	InstancingAnalysis::Install();
 	LightGather::Install();
 	LightShadowCache::Install();

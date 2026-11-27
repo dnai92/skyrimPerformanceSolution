@@ -14,6 +14,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #  - VR (Preset "vr", -DSPS_VR=ON): nur Skyrim VR 1.4.15 - eigene DLL/eigenes Nexus-Paket, damit VR-Aenderungen
 #    die funktionierende SE/AE-Version nicht beruehren
 option(SPS_VR "Build fuer Skyrim VR" OFF)
+#  - Nur Textur-Streaming (Preset "textures", -DSPS_TEXTURES_ONLY=ON): SE + AE, gleiche SPS.dll/SPS.ini, aber nur Textur-Streaming
+#    installiert (eigene Nexus-Datei fuer alle, die nur das wollen; ersetzt die volle Version, nicht zusaetzlich)
+option(SPS_TEXTURES_ONLY "Nur Textur-Streaming" OFF)
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
 if(SPS_VR)
 	set(ENABLE_SKYRIM_SE OFF CACHE BOOL "" FORCE)
@@ -69,6 +72,9 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE TRACY_ON_DEMAND TRACY_NO_CRAS
 target_compile_definitions(${PROJECT_NAME} PRIVATE SPS_VERSION="${PROJECT_VERSION}")
 if(SPS_VR)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE SPS_VR=1)
+endif()
+if(SPS_TEXTURES_ONLY)
+	target_compile_definitions(${PROJECT_NAME} PRIVATE SPS_TEXTURES_ONLY=1)
 endif()
 if(SPS_TRACY)
 	# nur lokal erreichbar, keine Broadcasts ins Netz (Profiling-Builds bleiben trotzdem privat)

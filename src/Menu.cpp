@@ -346,6 +346,24 @@ namespace Menu
 			Tip(a_tip);
 		}
 
+		// Textur-Build: nur Protokoll und Fadenkreuz-Pruefung (alle anderen Debug-Werkzeuge gehoeren zu fehlenden Funktionen)
+		[[maybe_unused]] void __stdcall RenderDebugTextures()
+		{
+			MenuApi::SeparatorText(T("Logging", "Protokoll"));
+			if (AtomicToggle(T("Analysis logging (costs performance)", "Analyse-Protokoll (kostet Leistung)"), Config::analysis,
+					T("Detailed texture streaming report in SPS.log every 10 s. Only for troubleshooting. Not saved - always starts OFF.",
+						"Ausführlicher Textur-Streaming-Bericht in SPS.log alle 10 s. Nur zur Fehlersuche. Wird nicht gespeichert - startet immer AUS."),
+					false) &&
+				Config::analysis.load()) {
+				Notify(T("SPS: analysis logging ON (off again after restart)", "SPS: Analyse-Protokoll AN (nach Neustart wieder aus)"));
+			}
+			if (MenuApi::Button(T("Log textures under crosshair##dbg", "Texturen unter dem Fadenkreuz protokollieren##dbg"))) {
+				TextureStream::RequestCenterProbe();
+			}
+			Tip(T("Writes the textures of the objects in the middle of the screen (path, original and current size) to SPS.log.",
+				"Schreibt die Texturen der Objekte in der Bildmitte (Pfad, Original- und aktuelle Größe) in SPS.log."));
+		}
+
 		void __stdcall RenderDebug()
 		{
 			MenuApi::TextWrapped("%s", T("For troubleshooting and tests. Nothing on this page is saved unless it says so, everything else is off again after a restart.",
@@ -850,6 +868,14 @@ namespace Menu
 			return;
 		}
 		g_german = IsGerman();
+#ifdef SPS_TEXTURES_ONLY
+		// Textur-Build: nur Textur-Streaming (die uebrigen Seiten gehoeren zu nicht installierten Funktionen)
+		const std::string section = "SPS Texture Streaming/";
+		MenuApi::AddSectionItem(section + T("Texture streaming", "Textur-Streaming"), Tracked<RenderTextures>);
+		MenuApi::AddSectionItem(section + "Debug", Tracked<RenderDebugTextures>);
+		logger::info("Menu registered in SKSE Menu Framework (version {:.1f}, texture streaming only)", MenuApi::Version());
+		return;
+#endif
 		MenuApi::AddSectionItem(kSection + T("Overview", "Übersicht"), Tracked<RenderOverview>);
 		MenuApi::AddSectionItem(kSection + T("Shadows", "Schatten"), Tracked<RenderShadows>);
 		MenuApi::AddSectionItem(kSection + T("Texture streaming", "Textur-Streaming"), Tracked<RenderTextures>);
