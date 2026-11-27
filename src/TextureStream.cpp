@@ -432,6 +432,7 @@ namespace TextureStream
 		struct Counters
 		{
 			std::uint32_t downs = 0, ups = 0, upFails = 0, upExpired = 0, probesBad = 0;
+			std::uint32_t renderLockBusy = 0;  // Frames, in denen die Render-Sperre belegt war (Einsetzen/Verkleinern verschoben)
 			std::uint32_t downsSkipped = 0;  // Verkleinern verworfen: veraltet oder inzwischen gebraucht
 			std::uint32_t recognized = 0;    // von uns verkleinert, nach Reset/Vergessen am Kennzeichen wiedererkannt
 			std::uint32_t pingPong = 0;
@@ -570,7 +571,8 @@ namespace TextureStream
 		void Swap(RE::BSGraphics::Texture* a_r, W::ID3D11Texture2D* a_tex, W::ID3D11ShaderResourceView* a_srv, std::uint64_t a_oldBytes,
 			std::uint32_t a_fullW, std::uint32_t a_fullH, std::uint32_t a_fullMips, bool a_ours, std::uint32_t a_extCap)
 		{
-			const RenderLock renderLock;  // Texturzeiger der Engine tauschen: nicht, waehrend ein Worker-Thread den Kontext benutzt
+			// Aufrufer (ApplyResults, Downscale-Schleife in OnFrame) halten die Render-Sperre (TryRenderLock): Texturzeiger der
+			// Engine nicht tauschen, waehrend ein Worker-Thread den Kontext benutzt
 			SetTag(a_tex, kTagFile | (a_ours ? kTagOurs : 0), a_fullW, a_fullH, a_fullMips, a_extCap);
 			ForgetBoundSrv(a_r->resourceView);
 			DeferRelease(a_r->texture, a_oldBytes);
@@ -1561,7 +1563,7 @@ namespace TextureStream
 				st.eligible = false;
 				return;
 			}
-			const RenderLock renderLock;  // Immediate Context ausserhalb der Engine-Draws (Player-Update)
+			// Immediate Context ausserhalb der Engine-Draws (Player-Update): die Downscale-Schleife in OnFrame haelt die Render-Sperre
 			for (std::uint32_t i = 0; i < desc.mipLevels; ++i) {
 				g_context->CopySubresourceRegion(tex, i, 0, 0, 0, st.res, i + drop, nullptr);
 			}
@@ -1619,6 +1621,20 @@ namespace TextureStream
 			{
 				std::scoped_lock lock(g_qLock);
 				results.swap(g_results);
+			}
+			if (results.empty()) {
+				ProcessDeferred();
+				return;
+			}
+			// Einsetzen tauscht Texturzeiger der Engine: nur mit der Render-Sperre. Belegt (anderer Thread) -> alles im
+			// naechsten Frame, nie darauf warten (1.0.74 wartete, Einfrieren beim Aendern der Texturgroesse, Nexus)
+			const TryRenderLock renderLock;
+			if (!renderLock) {
+				std::scoped_lock lock(g_qLock);
+				g_results.insert(g_results.begin(), std::make_move_iterator(results.begin()), std::make_move_iterator(results.end()));
+				++g_stats.renderLockBusy;
+				ProcessDeferred();
+				return;
 			}
 			// Neu geladene Texturen nach Datenmenge pro Frame einsetzen (1.0.13: 14 Stueck / 112 MB in einem Frame fielen
 			// mit einem 246-ms-Frame zusammen) - der Rest wartet auf die naechsten Frames
@@ -2304,6 +2320,9 @@ namespace TextureStream
 				std::scoped_lock missLock(g_missLock);
 				g_missSamples.clear();
 			}
+			if (g_stats.renderLockBusy > 0) {
+				logger::info("[TextureStream] render lock busy in {} frames - swaps waited for the next frame", g_stats.renderLockBusy);
+			}
 			g_stats = {};
 		}
 
@@ -2388,6 +2407,9 @@ namespace TextureStream
 					logger::info("[TextureStream]     unknown: {}", m);
 				}
 				g_missSamples.clear();
+			}
+			if (g_stats.renderLockBusy > 0) {
+				logger::info("[TextureStream] render lock busy in {} frames - swaps waited for the next frame", g_stats.renderLockBusy);
 			}
 			g_stats = {};
 		}
@@ -2690,7 +2712,15 @@ namespace TextureStream
 			});
 		}
 		std::uint64_t freedThisFrame = 0;
-		for (int i = 0; i < 8 && !g_down.empty() && g_deferred.size() < 64; ++i) {
+		// Verkleinern kopiert am Immediate Context und tauscht Texturzeiger: nur mit der Render-Sperre, sonst naechster Frame
+		std::optional<TryRenderLock> downLock;
+		if (!g_down.empty()) {
+			downLock.emplace();
+		}
+		if (downLock && !*downLock) {
+			++g_stats.renderLockBusy;
+		}
+		for (int i = 0; downLock && *downLock && i < 8 && !g_down.empty() && g_deferred.size() < 64; ++i) {
 			const auto job = std::move(g_down.front());
 			g_down.pop_front();
 			std::uint64_t freed = 0;

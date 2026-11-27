@@ -142,7 +142,8 @@ namespace Hooks
 				InstancingAnalysis::OnFrame();
 				ReportEngineWaits();
 				if (const auto renderer = RE::BSGraphics::Renderer::GetSingleton()) {
-					const RenderLock renderLock;  // Queries am Immediate Context ausserhalb der Engine-Draws
+					// Queries am Immediate Context ausserhalb der Engine-Draws - nur mit freier Render-Sperre (nie warten)
+					if (const TryRenderLock renderLock; renderLock)
 					GpuTimer::FrameBoundary(renderer->GetRuntimeData().forwarder, renderer->GetRuntimeData().context, Config::analysis.load(std::memory_order_relaxed));
 				}
 #endif

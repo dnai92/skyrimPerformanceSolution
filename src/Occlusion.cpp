@@ -1784,8 +1784,12 @@ namespace Occlusion
 			}
 			logger::info("[Occlusion] depth image ready ({}x{} tiles)", OcclusionGpu::kWidth, OcclusionGpu::kHeight);
 		}
-		// Map/Dispatch am Immediate Context bei Present: unter der Render-Sperre der Engine (Worker-Threads anderer Mods)
-		const RenderLock renderLock;
+		// Map/Dispatch am Immediate Context bei Present: unter der Render-Sperre der Engine (Worker-Threads anderer Mods).
+		// Nur versuchen - belegt: Abholen und Einreichen im naechsten Frame (nie warten, siehe RenderLock.h)
+		const TryRenderLock renderLock;
+		if (!renderLock) {
+			return;
+		}
 		// fertige Ergebnisse abholen (das neueste gilt) und fuer alle Threads veroeffentlichen
 		OcclusionGpu::Readback rb;
 		std::shared_ptr<Snapshot> newest;

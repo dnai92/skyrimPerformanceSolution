@@ -42,6 +42,7 @@ add_commonlibsse_plugin(
 		src/LightShadowCache.cpp
 		src/EngineTimers.cpp
 		src/TextureStream.cpp
+		src/RenderLock.cpp
 		src/Menu.cpp
 		src/Config.cpp
 		src/DetourHelper.cpp
