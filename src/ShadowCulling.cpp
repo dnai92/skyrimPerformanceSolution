@@ -57,6 +57,7 @@ namespace ShadowCulling
 			std::uint32_t           skinned = 0;
 		};
 		std::array<PointSlotDiag, kMaxPointCameras> g_pointDiag;
+		constexpr std::size_t kMaxPointDiagMeshes = 20000;  // je Schattenkamera und Frame
 		struct HistEntry
 		{
 			std::uint64_t hash;
@@ -125,6 +126,14 @@ namespace ShadowCulling
 
 		void RecordPointMesh(std::uint32_t a_slot, RE::BSGeometry& a_geom) noexcept
 		{
+#ifdef SPS_VR
+			// VR: die Auswertung (FinishLightCacheDiag) laeuft dort nicht - bis 1.0.74 wuchs die Liste mit dem
+			// Analyse-Protokoll jeden Frame weiter (nach 30-70 min mehrere GB, Hauptthread nur noch mit Umkopieren
+			// beschaeftigt, ~6 FPS; GitHub #2)
+			(void)a_slot;
+			(void)a_geom;
+			return;
+#else
 			if (!Config::analysis.load(std::memory_order_relaxed)) {
 				return;
 			}
@@ -147,12 +156,16 @@ namespace ShadowCulling
 				}
 				h = Mix64(h ^ Quant(w.scale, 1000.0f));
 				std::scoped_lock lock(d.lock);
+				if (d.meshes.size() >= kMaxPointDiagMeshes) {
+					return;  // Sicherung: wird jeden Frame geleert, mehr ist nie noetig
+				}
 				try {
 					d.meshes.push_back({ &a_geom, h, a_geom.name.c_str() ? a_geom.name.c_str() : "", dynamic });
 				} catch (...) {
 				}
 				return;
 			}
+#endif
 		}
 
 		void CountName(std::unordered_map<std::string, std::uint32_t>& a_map, const std::string& a_name)
@@ -173,7 +186,9 @@ namespace ShadowCulling
 				return;  // nichts gesammelt (RecordPointMesh nur mit Analyse-Protokoll)
 			}
 			wasOn = on;  // nach dem Ausschalten einmal leeren
-			for (std::uint32_t i = 0; i < count && i < kMaxPointCameras; ++i) {
+			// alle Plaetze leeren, nicht nur die aktuell belegten: schrumpfte die Kameraliste, blieben die Meshes der hinteren
+			// Plaetze sonst liegen und wuchsen weiter (Review 1.0.75)
+			for (std::uint32_t i = 0; i < kMaxPointCameras; ++i) {
 				auto&                   d = g_pointDiag[i];
 				std::vector<MeshSample> meshes;
 				std::uint32_t           skinned = 0;
@@ -183,7 +198,7 @@ namespace ShadowCulling
 					skinned = std::exchange(d.skinned, 0u);
 				}
 				const auto cam = g_pointCameras[i].load(std::memory_order_relaxed);
-				if (!on || !cam || (meshes.empty() && skinned == 0)) {
+				if (!on || i >= count || !cam || (meshes.empty() && skinned == 0)) {
 					continue;
 				}
 				try {
