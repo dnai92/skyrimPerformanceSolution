@@ -900,7 +900,19 @@ namespace TextureStream
 				if (Clock::now() - lastGpu >= 1s) {
 					lastGpu = Clock::now();
 					unsigned long long dedicated = 0, shared = 0;
-					if (GpuMemory::Query(dedicated, shared)) {
+					const bool         queried = GpuMemory::Query(dedicated, shared);
+					// Once, as soon as the game holds real amounts (the first queries run in the main menu)
+					static bool sourceLogged = false;
+					if (static int queries = 0; !sourceLogged && (++queries == 30 || (queried && dedicated >= (512ull << 20)))) {
+						sourceLogged = true;
+						if (queried) {
+							logger::info("TextureStream: process GPU memory from {} - {:.0f} MB in VRAM, {:.0f} MB paged out, DXGI reports {:.0f} MB", GpuMemory::Source(),
+								dedicated / 1048576.0, shared / 1048576.0, g_dxgiUsage.load(std::memory_order_relaxed) / 1048576.0);
+						} else {
+							logger::warn("TextureStream: process GPU memory not available ({}) - VRAM usage from DXGI only, no overflow detection", GpuMemory::Source());
+						}
+					}
+					if (queried) {
 						g_procDedicated.store(dedicated, std::memory_order_relaxed);
 						if (shared > g_procShared.load(std::memory_order_relaxed) + (32ull << 20)) {
 							g_sharedRiseTicks.store(Clock::now().time_since_epoch().count(), std::memory_order_relaxed);
@@ -2305,9 +2317,10 @@ namespace TextureStream
 			}
 			const auto& s = g_stats;
 			const auto  capText = g_userCap ? std::format(" (by max. size {}: {}, {:.0f} MB)", g_userCap, capped, cappedMB) : std::string{};
-			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, paged out {:.0f} MB) | downscaled {} textures, {:.0f} MB saved{} | last minute: "
+			logger::info("[TextureStream] VRAM {:.1f}/{:.1f} GB ({:.0f} %, DXGI alone {:.1f} GB, paged out {:.0f} MB) | downscaled {} textures, {:.0f} MB saved{} | last minute: "
 						 "downscaled {} (skipped {}), reloaded {} ({:.0f} MB), ping-pong {}, refilled {}, loaded reduced {}, from RAM {}, load errors {}, recognized after reset {}",
-				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_procShared.load() / 1048576.0, reduced,
+				g_vramUsage.load() / 1073741824.0, g_vramBudget.load() / 1073741824.0, std::max(0.0f, g_vramPct.load()), g_dxgiUsage.load() / 1073741824.0,
+				g_procShared.load() / 1048576.0, reduced,
 				savedMB, capText, s.downs, s.downsSkipped, s.ups, s.upMB, s.pingPong, s.refills, g_loadedReduced.exchange(0), g_cacheHits.exchange(0), s.upFails, s.recognized);
 			g_cacheMisses.exchange(0);
 			g_diagCreate.exchange(0);
